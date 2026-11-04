@@ -1,6 +1,6 @@
 # 脚本台账
 
-统一触发：`python3 script/{name}.py`（unix）；Windows 下 `python` 或 `uv run --no-project python`，`.githooks/commit-msg` 薄壳按 python3 / python / py -3 / uv run 四级自动探测。**本开发机** python/python3 为商店占位 stub、py 未装，实际统一走 `uv run --no-project python script/{name}.py`。脚本保持零依赖档（纯标准库，禁引第三方包）。
+统一触发：`python3 script/{name}.py`（unix）；Windows 下 `python` 或 `uv run --no-project python`，`.githooks/commit-msg` 薄壳按 python3 / python / py -3 / uv run 四级自动探测。主开发环境 WSL2 Ubuntu-24.04，python3 直接可用；Windows 侧 python 为商店占位 stub 时走 `uv run --no-project python script/{name}.py`。脚本保持零依赖档（纯标准库，禁引第三方包）。
 
 | 脚本 | 用途 | 门禁挂点 |
 |---|---|---|
