@@ -1,0 +1,23 @@
+#!/bin/sh
+# commit-msg 钩子：调用 script/check-commit-msg.py 校验提交信息（Conventional Commits）。
+# 安装（一次性，本地配置不入库）：git config core.hooksPath .githooks
+# unix 下还需：chmod +x .githooks/commit-msg
+# 仅本地提交前校验，绝不自动推送。
+# python 探测须实际可执行——Windows 商店占位 stub 会被 command -v 找到但一跑就败，
+# 故用 `-c` 试跑判定；四级按序探测，uv 包装一级兜底"python 只在 uv 环境可用"的
+# 机器（缺这一级时格式门会整个静默失效）；全都不行时告警放行（机器没 python
+# 不应卡死提交，但该输出 = 门失效，须修环境而非忽略）。
+root=$(git rev-parse --show-toplevel)
+cd "$root" || exit 1
+found=""
+for cand in python3 python "py -3" "uv run --no-project python"; do
+  if command -v ${cand%% *} >/dev/null 2>&1 && $cand -c "import sys" >/dev/null 2>&1; then
+    found="$cand"
+    break
+  fi
+done
+if [ -z "$found" ]; then
+  echo "commit-msg: 未找到可用的 python3/python/py/uv run，跳过格式校验" >&2
+  exit 0
+fi
+exec $found script/check-commit-msg.py "$1"

@@ -1,0 +1,2 @@
+# sh 脚本必须 LF：CRLF 会破坏 sh 解析（autocrlf 环境下强制保留）
+.githooks/commit-msg text eol=lf
