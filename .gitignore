@@ -5,3 +5,4 @@ ui/node_modules/
 # Local working files, not part of the project
 /cairn/
 /.cairn/
+/tmp/

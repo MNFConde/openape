@@ -1,6 +1,6 @@
 # 执行清单（一行一项、完成即勾；里程碑全勾后自然退役，不承担文档职责）
 [x] 治理结构初始化：git 仓库 + docs/ 体系 + 规则 + 门禁脚本 + 钩子 + 薄根 AGENTS.md
-[ ] M0-1 spike：automotive 的 adapter trait 能否挂自研 ZLG 后端；不能则 fork 抽层，结论记 docs/decisions.md
+[x] M0-1 spike：automotive 的 adapter trait 能否挂自研 ZLG 后端；不能则 fork 抽层，结论记 docs/decisions.md（裁决：可外挂无需 fork，见 D-11）
 [ ] M0-2 spike：xcp-lite 在 vcan 上跑通 XCP-on-CAN 最小环（connect + 采集 + 页切换）
 [ ] M0-3 spike：tonic grpc-web 浏览器侧流式连通；失败即触发降级预案（D-05：REST + WebSocket 二进制流）
 [ ] M0-4 spike：a2lfile 生成 A2L 子集 + a2ltool 的 DWARF 逻辑库化复用可行性

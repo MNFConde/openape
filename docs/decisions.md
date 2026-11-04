@@ -77,7 +77,7 @@ updated: 2026-11-04
 - 背景：XCP 无独立成熟 Rust crate；automotive（MIT，活跃）已实现 XCP master 与多 CAN 后端。
 - 决策：`xcp` crate 基于 automotive 二次封装；其 adapter trait 若不能挂自研 ZLG 后端则 fork 抽层（M0-1 spike 裁决）。
 - 依据：省掉最磨人的 DAQ 配置/页切换协议逻辑；协议行为另以 pyXCP 与 ASAM 标准对照。
-- 影响：上游为单人维护，接口面收在 `xcp` crate 内部，不外漏。
+- 影响：上游为单人维护，接口面收在 `xcp` crate 内部，不外漏；M0-1 裁决已出——**可外挂、无需 fork**，见 D-11。
 
 ## D-08 数据集格式
 
@@ -108,3 +108,13 @@ updated: 2026-11-04
 - 决策：`cairn/` 与 `.cairn/` 不入本项目 git（忽略块收窄到这两个目录，**不含 AGENTS.md**）；`cairn/` 内部自建独立 git 仓库跟踪知识历史；根 AGENTS.md 保持 tracked，cairn 规则正文下沉 `cairn/RULES.md`（untracked 侧），根文件只留一行条件声明；CLAUDE.md 桩不建。
 - 依据：AGENTS.md 共享面协议——它是项目资产，任何 skill 不得将其拖出 git；知识历史与代码历史关注点不同，独立仓库互不干扰。
 - 影响：毕业 provider 暂缓对接（首次毕业时配置）；各规则文件坑登记的详情指针从"就地展开"切换为"另存 cairn/ 知识专题文档"。
+
+## D-11 automotive 后端外挂裁决
+
+- 状态：已决策
+- 日期：2026-11-04
+- 规范位置：[00-overview.md](00-overview.md#复用与自研边界)
+- 背景：D-07 留待 M0-1 spike 裁决——automotive 的 adapter 机制能否挂自研 ZLG 后端，不能则 fork 抽层。
+- 决策：**无需 fork**。`CanAdapter` 为公开阻塞式 trait（send/recv 必需，其余带默认实现），外部 crate 直接实现；`AsyncCanAdapter::new<T: CanAdapter + Send + 'static>` 泛型收值起 worker 线程，`XCPOnCAN::new(Arc<AsyncCanAdapter>, XCPCanConfig)` 消费，`fd: true` 构造成功（spike 编译运行实测，SPIKE-GREEN）。
+- 依据：源码裁决（automotive @ 2026-11-04 master，默认 `features = []` 核心零后端可编译）+ 编译运行实测；ZLG 后端只需在 `bus-zlg` 填三个 FFI 面——`ZCAN_OpenDevice`（构造）、`ZCAN_Transmit`（send）、`ZCAN_Receive`（recv），BRS 由通道时序配置出 `default_brs`。
+- 影响：M5 ZLG 后端按外挂实现；CAN 标准帧 ID 上限 0x7FF，超限用 `Identifier::extended`；生产依赖取 crates.io 版本（spike 用源码路径 dep）；automotive 上游变更风险仍收在 `xcp` crate 内部。
