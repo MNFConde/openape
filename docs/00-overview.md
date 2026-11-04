@@ -2,7 +2,7 @@
 type: architecture
 status: active
 summary: "OpenAPE 总纲：定位、workspace 拓扑规划、复用与自研边界"
-updated: 2026-11-04
+updated: 2026-11-05
 ---
 
 # 总纲
@@ -24,7 +24,7 @@ OpenAPE 是一个 Rust 开发的**开放汽车标定工具**（对标 CANape/INC
 | `bus` | async Bus trait：帧类型位（经典/FD）、硬件时间戳 | — |
 | `bus-socketcan` / `bus-socketcand` / `bus-zlg` / `bus-replay` | 各后端 | socketcan-rs 4.0、自研 socketcand 客户端、ZLG 官方库 FFI、blf_asc |
 | `xcp` | XCP master 二次封装：DAQ 配置、页切换、上传下载 | automotive |
-| `sim-ecu` | XCP slave 模拟器：xcp-lite 内核 + 虚拟内存 + 怪癖注入配置 + vcan | xcp-lite |
+| `sim-ecu` | XCP slave 模拟器：自研 CAN 从站 + 虚拟内存 + 怪癖注入配置 + vcan | 自研，见 [D-12](decisions.md#d-12-xcp-on-can-从站自研) |
 | `daemon` | 会话/设备编排、DAQ 环形缓冲、录制、gRPC 服务、quirk 配置加载 | tonic（grpc-web） |
 | `ui` | Web 前端：曲线（uPlot）、标定量表格、dataset 对比 | TypeScript + uPlot |
 
@@ -43,8 +43,8 @@ OpenAPE 是一个 Rust 开发的**开放汽车标定工具**（对标 CANape/INC
 
 > 调研基准日 2026-11-04；维护状态与许可证详情见调研报告存档，此处只留结论。
 
-- **直接复用**：automotive（XCP master + SocketCAN/PCAN/Vector 后端）、a2lfile / a2ltool（A2L 读写与 DWARF→A2L）、object / gimli（ELF/DWARF）、can-dbc（DBC 解析）、socketcan-rs 4.0（含 FD/异步/vcan）、mf4-rs（MDF4 读写）、blf_asc（BLF/ASC）、xcp-lite（slave）、tonic（gRPC/grpc-web）、uPlot（Web 曲线）
-- **必须自研**：DBC 信号 pack/unpack 语义（字节序/因子/多路复用）、socketcand 协议客户端、ZLG zlgcan FFI 后端、DCM 解析器、quirk 外部配置层、Curve/Map 轴点注记语法
+- **直接复用**：automotive（XCP master + SocketCAN/PCAN/Vector 后端）、a2lfile / a2ltool（A2L 读写与 DWARF→A2L）、object / gimli（ELF/DWARF）、can-dbc（DBC 解析）、socketcan-rs 4.0（含 FD/异步/vcan）、mf4-rs（MDF4 读写）、blf_asc（BLF/ASC）、tonic（gRPC/grpc-web）、uPlot（Web 曲线）
+- **必须自研**：XCP-on-CAN 从站（sim-ecu 内核，见 [D-12](decisions.md#d-12-xcp-on-can-从站自研)）、DBC 信号 pack/unpack 语义（字节序/因子/多路复用）、socketcand 协议客户端、ZLG zlgcan FFI 后端、DCM 解析器、quirk 外部配置层、Curve/Map 轴点注记语法
 - 依赖均为单人或实验性维护的项目，统一隔离在 trait 边界内，必要时 vendored fork（见 [decisions.md](decisions.md) D-07）
 
 ## 本域索引

@@ -2,7 +2,7 @@
 type: adr
 status: accepted
 summary: "OpenAPE 决策记录（D-xx 单文件形态）"
-updated: 2026-11-04
+updated: 2026-11-05
 ---
 
 # 决策记录
@@ -68,6 +68,7 @@ updated: 2026-11-04
 - 决策：`sim-ecu` = xcp-lite 内核（Vector 官方，Apache/MIT）+ 虚拟内存 + vcan + 怪癖注入配置；本项目怪癖兼容统一走外部声明式配置（TOML/JSON）填 trait 扩展点；诊断等未来协议同样走 trait 插件位，动态插件（WASM）后置。
 - 依据：xcp-lite 是现成最专业的 slave 实现；配置式兼容满足"改配置不改代码"的开闭要求。
 - 影响：sim-ecu 是 CI 全链路测试的依赖（M1 落地）；`cal-core` 扩展点设计优先级提高。
+- 更正（2026-11-05，M0-2 spike）：内核假设不成立——xcp-lite 只有 XCP-on-Ethernet 传输层（Rust 侧传输层枚举仅 UDP/TCP，上游 C++ XCPlite 588 个文件同样无 CAN 传输层），不能充当 CAN 从站；sim-ecu 内核改为自研，见 [D-12](#d-12-xcp-on-can-从站自研)。本决策其余部分（虚拟内存、怪癖注入配置、vcan）不受影响。
 
 ## D-07 XCP master 复用
 
@@ -118,3 +119,13 @@ updated: 2026-11-04
 - 决策：**无需 fork**。`CanAdapter` 为公开阻塞式 trait（send/recv 必需，其余带默认实现），外部 crate 直接实现；`AsyncCanAdapter::new<T: CanAdapter + Send + 'static>` 泛型收值起 worker 线程，`XCPOnCAN::new(Arc<AsyncCanAdapter>, XCPCanConfig)` 消费，`fd: true` 构造成功（spike 编译运行实测，SPIKE-GREEN）。
 - 依据：源码裁决（automotive @ 2026-11-04 master，默认 `features = []` 核心零后端可编译）+ 编译运行实测；ZLG 后端只需在 `bus-zlg` 填三个 FFI 面——`ZCAN_OpenDevice`（构造）、`ZCAN_Transmit`（send）、`ZCAN_Receive`（recv），BRS 由通道时序配置出 `default_brs`。
 - 影响：M5 ZLG 后端按外挂实现；CAN 标准帧 ID 上限 0x7FF，超限用 `Identifier::extended`；生产依赖取 crates.io 版本（spike 用源码路径 dep）；automotive 上游变更风险仍收在 `xcp` crate 内部。
+
+## D-12 XCP-on-CAN 从站自研
+
+- 状态：已决策
+- 日期：2026-11-05
+- 规范位置：[00-overview.md](00-overview.md#workspace-拓扑规划)
+- 背景：M0-2 spike 要在 vcan 上跑通 XCP-on-CAN 最小环，需要一个可控的 CAN 从站；实测 [D-06](#d-06-模拟器与怪癖机制) 假定的 xcp-lite 内核没有 CAN 传输层，不可用。
+- 决策：sim-ecu 的 XCP-on-CAN 从站自研——CAN 传输层与会话层自己实现；spike 版以 Python raw socket 跑通协议（`tmp/spike-m0-2/xcp_can_slave.py`），产品化为 Rust 实现；不采用 xcp-lite，也不为 XCPlite 补 CAN 传输层再维护 fork。
+- 依据：（1）上游无 CAN 传输层，补层即自研加维护 fork，成本高于自己写；（2）怪癖注入本就需要掌握协议层细节，自研不额外增加知识负担；（3）spike 用第三方 master（pyXCP）对照，CONNECT / 内存读写 / 页切换 / 静态 DAQ 共 13 项断言连跑 3 次全过，最小环已通；（4）CAN 帧对齐填充、DAQ 绝对 ODT 编号、命令码等细节已在 spike 落地，可直接复用。
+- 影响：sim-ecu 增加自研传输层工作量（收在 M1 内）；xcp-lite 退出 sim-ecu 依赖，仅留作以太网 XCP 的对照参考（可选）；pyXCP 的两处非标准行为（GET_CAL_PAGE 响应补齐、WRITE_DAQ 指针自增）待与 ASAM 标准复核，M2 实现完整 DAQ 前完成。

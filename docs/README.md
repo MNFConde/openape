@@ -2,7 +2,7 @@
 type: architecture
 status: active
 summary: "docs/ 文档地图：OpenAPE 治理文档索引与稳定度分组"
-updated: 2026-11-04
+updated: 2026-11-05
 ---
 
 # docs/ 文档地图
@@ -22,6 +22,7 @@ OpenAPE（Rust 开放汽车标定工具）项目文档索引。所有文档为�
 | 文档 | 职责 | 何时读 |
 |---|---|---|
 | [00-overview.md](00-overview.md) | 总纲：定位、workspace 拓扑规划、复用与自研边界、本域索引 | 理解整体结构时 |
+| [90-env.md](90-env.md) | 开发环境：uv 管理 Python、vcan 虚拟总线、pyXCP 对照 master | 搭环境/复现实验时 |
 | [AGENTS.md](AGENTS.md) | docs/ 写作约束：frontmatter、编号、单一事实源、存档 | 写/改 docs/ 前 |
 
 ### 论证（为什么这么选）
@@ -30,7 +31,7 @@ OpenAPE（Rust 开放汽车标定工具）项目文档索引。所有文档为�
 |---|---|---|
 | [decisions.md](decisions.md) | 决策记录 D-xx（单文件形态） | 遇到"为什么这么选"时 |
 
-> 领域篇（10-70 号段）随设计长出、不预建：首个预告为 `10-` Curve/Map 轴点注记约定 RFC（M0-5）；80-diff / 90-env 按需占尾号。
+> 领域篇（10-70 号段）随设计长出、不预建：首个预告为 `10-` Curve/Map 轴点注记约定 RFC（M0-5）；80-diff 按需占尾号，90 号段已由 [90-env.md](90-env.md) 占用。
 
 **推荐阅读顺序**（新加入者）：根 AGENTS.md → requirements → 00 总纲 → decisions 按需。
 
