@@ -1,6 +1,6 @@
 # AGENTS.md
 
-OpenAPE —— Rust 开发的开放汽车标定工具：headless daemon + Web UI 双形态，XCP-on-CAN 采集与标定写入，ELF / A2L / DBC 解析，本地与远程同一套网页。当前状态：治理结构已初始化（docs/ 规则 门禁 钩子 就位），代码未起步；首轮工作 = todo.todo 的 M0 风险 spike，选型结论见 docs/decisions.md；cairn 沉淀层已初始化（独立 git 仓库，不入本仓库）。开发环境：WSL2 Ubuntu-24.04（OpenBitFun WSL 工作区），Windows 侧保留 ZLG 真机验证。
+OpenAPE —— Rust 开发的开放汽车标定工具：headless daemon + Web UI 双形态，XCP-on-CAN 采集与标定写入，ELF / A2L / DBC 解析，本地与远程同一套网页。当前状态：治理结构已初始化（docs/ 规则 门禁 钩子 就位），代码未起步；M0-1 / M0-2 风险 spike 已完成（结论见 docs/decisions.md 的 D-11 / D-12），余下 M0-3 ~ M0-5，进度以 todo.todo 为准；cairn 沉淀层已初始化（独立 git 仓库，不入本仓库）。开发环境：WSL2 Ubuntu-24.04（OpenBitFun WSL 工作区），Windows 侧保留 ZLG 真机验证。
 
 仓库存在 cairn/ 时先读其规则文件（cairn/RULES.md），否则跳过；知识/教训沉淀唯一走 cairn，未安装时由各规则文件的「经验与坑」节就地承担。
 
