@@ -23,7 +23,7 @@ OpenAPE（Rust 开放汽车标定工具）项目文档索引。所有文档为�
 |---|---|---|
 | [00-overview.md](00-overview.md) | 总纲：定位、workspace 拓扑规划、复用与自研边界、本域索引 | 理解整体结构时 |
 | [10-axis-binding-rfc.md](10-axis-binding-rfc.md) | Curve/Map 轴点注记约定：轴独立实体、维度顺序、绑定配置格式、校验与 golden | 设计/实现变量模型、绑定或 ELF→A2L 导出时 |
-| [90-env.md](90-env.md) | 开发环境：uv 管理 Python、vcan 虚拟总线、pyXCP 对照 master | 搭环境/复现实验时 |
+| [90-env.md](90-env.md) | 开发环境：uv 管理 Python、vcan 虚拟总线、pyXCP 对照 master、浏览器侧验证环境、本机 agent 工具链 | 搭环境/复现实验时 |
 | [AGENTS.md](AGENTS.md) | docs/ 写作约束：frontmatter、编号、单一事实源、存档 | 写/改 docs/ 前 |
 
 ### 论证（为什么这么选）
