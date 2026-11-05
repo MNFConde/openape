@@ -192,6 +192,6 @@ axes = ["y_temp", "x_speed"]
 
 ## 9. 落地
 
-- **M1**：`cal-core` 落轴与值的 IR 类型、TOML 解析、R1 至 R7 校验与单元测试；配置文件位置与解析入口在 M1 确定
+- **M2**：`cal-core` 落轴与值的 IR 类型、TOML 解析、R1 至 R7 校验与单元测试；配置文件位置与解析入口随 IR 一并确定。M1 的 `cal-core` 只有地址、长度、句柄等基础类型，不含 IR（见 [11-architecture-layers.md](11-architecture-layers.md#切分判据与后置项)）
 - **M3**：golden 三件套入库（ELF 夹具、配置、期望 JSON 与 A2L 片段），档二 golden 的字节级对比以本文第 8 节为准
 - 未决：三维及以上的暴露方式、轴排序与单调性是否进 M1 校验、本配置是否与 quirk 配置同文件——三项都留给 M1 决定，不影响当前格式（未知字段容忍已预留）
