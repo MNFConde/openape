@@ -2,7 +2,7 @@
 type: requirements
 status: active
 summary: "OpenAPE 需求基线：能力清单、MVP 边界、非功能约束、验收口径"
-updated: 2026-11-04
+updated: 2026-11-05
 ---
 
 # 需求基线
@@ -13,8 +13,8 @@ updated: 2026-11-04
 
 1. **CAN 信号本地读取**：经典 CAN 与 CAN-FD，DBC 解码出物理信号值，本地硬件接入与日志回放
 2. **观测量采集**：XCP-on-CAN DAQ，毫秒级推流到 UI 曲线
-3. **标定量读写**：读取/写入 ECU 标定量、页切换；不支持 flash 刷写
-4. **变量信息来源**：ELF（仅 ELF，DWARF）与 A2L 双前端建立观测量/标定量结构；额外提供 ELF → A2L 导出
+3. **标定量读写**：读取/写入 ECU 标定量、页切换；不支持 flash 刷写。仅 ELF 档角色由用户指定，写入须单点、写前读回、写后校验、禁批量整表（[decisions.md](decisions.md) D-13）
+4. **变量信息来源**：ELF（仅 ELF，DWARF）与 A2L 双前端建立变量结构；额外提供 ELF → A2L 导出。两档输入口径——仅 ELF 时提供变量名/类型/地址/长度/结构布局与用户自选轴值绑定，不提供单位、量程、物理换算、轴归属与标定-观测角色（角色由用户指定）；带 A2L 时提供全部语义。详见 [decisions.md](decisions.md) D-13
 5. **DBC 支持**：报文/信号解析与物理值换算
 6. **UI 双形态**：本地网页（daemon 监听 localhost）与远端网页（同 daemon 换 IP），一套代码
 7. **标定数据集**：JSON dataset、对比 diff、DCM 只读导入
