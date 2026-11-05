@@ -6,5 +6,7 @@
 #![forbid(unsafe_code)]
 
 pub mod fault;
+pub mod log;
 
 pub use fault::{Domain, Fault, FaultCode, Severity};
+pub use log::{Direction, Verbosity};
