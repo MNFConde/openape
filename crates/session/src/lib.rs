@@ -1,3 +1,12 @@
-//! 编排引擎：装配、会话状态与设备锁
+//! 编排引擎：装配、会话状态与设备锁。
+//!
+//! 这是三层之上唯一同时知道具体后端与协议实现的地方。CLI 与 daemon 都
+//! 是它的外壳，行为因此天然一致（D-18）。
 
 #![forbid(unsafe_code)]
+
+pub mod engine;
+pub mod lock;
+
+pub use engine::{ChannelProbe, Session, SessionConfig, list_channels, probe_channel};
+pub use lock::DeviceLock;
