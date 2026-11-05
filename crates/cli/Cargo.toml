@@ -12,7 +12,10 @@ name = "openape"
 path = "src/main.rs"
 
 [dependencies]
+openape-bus.workspace = true
+openape-cal-core.workspace = true
 clap.workspace = true
+serde.workspace = true
 openape-diag.workspace = true
 openape-session.workspace = true
 serde_json.workspace = true
