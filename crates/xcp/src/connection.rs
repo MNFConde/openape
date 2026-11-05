@@ -1,0 +1,66 @@
+//! XCP 连接抽象。这是三道屏蔽墙的第二道：上层只认本 trait，
+//! 传输介质（CAN 现在、以太网后补）差异收在实现里。
+
+use async_trait::async_trait;
+use openape_diag::{Domain, Fault, FaultCode, Severity};
+
+/// 建链后从站报告的会话参数。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectInfo {
+    /// 资源位。
+    pub resource: u8,
+    /// 通信模式基本字节（bit0 为字节序）。
+    pub comm_mode_basic: u8,
+    /// 从站能接收的单帧上限。
+    pub max_cto: u16,
+    /// 从站能发送的单帧上限。
+    pub max_dto: u16,
+    /// 协议版本。CAN 上传不进去时为 `None`，不臆造默认值。
+    pub protocol_version: Option<(u8, u8)>,
+    /// 传输层版本。同上。
+    pub transport_version: Option<(u8, u8)>,
+}
+
+/// 会话状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionStatus {
+    /// 是否已建立会话。
+    pub running: bool,
+    /// 保护状态字节。
+    pub protection: u8,
+}
+
+/// 一条 XCP 连接。
+#[async_trait]
+pub trait XcpConnection: Send + Sync {
+    /// 建立会话。
+    async fn connect(&mut self, mode: u8) -> Result<ConnectInfo, Fault>;
+
+    /// 结束会话。
+    async fn disconnect(&mut self) -> Result<(), Fault>;
+
+    /// 查会话状态。
+    async fn status(&mut self) -> Result<SessionStatus, Fault>;
+}
+
+/// XCP 域的故障序号。集中在此，避免各处散落魔法数字。
+pub mod seq {
+    /// 等待从站响应超时。
+    pub const TIMEOUT: u32 = 1;
+    /// 响应与请求对不上。
+    pub const PROTOCOL: u32 = 2;
+    /// 从站返回错误码。
+    pub const SLAVE_ERROR: u32 = 3;
+    /// 帧编解码失败。
+    pub const CODEC: u32 = 4;
+    /// 会话尚未建立。
+    pub const NOT_CONNECTED: u32 = 5;
+    /// 底层总线出错。
+    pub const BUS: u32 = 6;
+}
+
+/// 构造一条 XCP 域故障。序号固定在 [`seq`] 的常量里，构造不会失败。
+pub(crate) fn fault(sequence: u32, severity: Severity, message: impl Into<String>) -> Fault {
+    let code = FaultCode::new(Domain::Xcp, sequence).expect("序号常量在 1..=999 内");
+    Fault::new(code, severity, message)
+}
