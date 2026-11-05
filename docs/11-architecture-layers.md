@@ -43,7 +43,7 @@ xcp  ──依赖──> bus（trait）
 | 档 | crate | 约束 |
 |---|---|---|
 | L0 基础 | `diag` | 不依赖任何业务 crate，否则成环 |
-| L1 契约 | `cal-core`、`xcp-proto`、`proto`（M1 空档） | 跨 crate 的类型只准在这里定义，且保持轻依赖 |
+| L1 契约 | `cal-core`（M1 仅基础类型）、`xcp-proto`、`proto`（M1 空档） | 跨 crate 的类型只准在这里定义，且保持轻依赖 |
 | L2 实现 | `bus`、`bus-*`、`format-*`、`xcp` | 只准依赖 L0 与 L1 |
 | L3 编排 | `session`、`sim-ecu` | 只准依赖 L0 至 L2 |
 | L4 装配 | `assembly`（M1 空档） | 唯一允许指名具体后端 crate 的位置 |
@@ -82,18 +82,33 @@ crate 只能 `use` 自己 Cargo.toml 里声明过的依赖，反向引用在**�
 
 ### 后置项
 
-文档先记结论、实现按触发条件推进——"后置"必须写明原因与到期条件，否则会变成隐性偷懒：
+文档先记结论、实现按触发条件推进——"后置"必须写明原因与到期条件，否则会变成隐性偷懒。下表的全部行都按上面四条判据得出：没有消费者、或依赖重量差不足、或不满足裁剪需求。
 
 | 后置项 | 现在不做的原因 | 触发实施的条件 | 到期未做的后果 |
 |---|---|---|---|
+| `cal-core` 的 IR 与 `CalibrationSource` | 形状由 ELF 与 A2L 两份输入共同决定，M1 一个输入源都没有 | M2 引入 A2L 或 M3 引入 ELF，出现第一个真实消费者 | 无硬伤；反向代价是提前定形状必然整层重写 |
+| `cal-core` 的 quirk 扩展点 | 无真实怪癖样本，trait 形状只能靠猜 | 首次遇到需配置兼容的 ECU（预计 M5） | 怪癖只能改代码，违背 D-06 的开闭要求 |
 | `proto` crate | M2 前没有第二个消费者 | UI 与 CLI 同时需要同一套 schema（M2 落 gRPC） | 两处各自定义结构，开始漂移 |
 | 独立 `assembly` crate | 只有一个总线后端，一个 `match` 放 `session` 里就够 | 出现第二种重后端，且确有裁剪编译的需求 | 无硬伤，`session` 先变臃肿 |
+| `format-elf` / `format-a2l` | M1 的读写按裸地址进行，没有信息源消费者 | 分别随 M3 / M2 引入变量模型时 | 变量只能手填地址，无自动建立 |
+| `format-dbc` / `format-dcm` / `format-mf4` | 各自能力的里程碑未到 | DBC 显示 M3；DCM 导入与数据集 M4；MF4 录制与离线重开 M5 | 对应能力缺失，不影响 M1 验证 |
+| `daemon` / `ui` | 没有 UI 就没有常驻进程的消费者 | M2 的 Web 最小曲线页 | CLI 已证明引擎可用，但产品形态缺失 |
+| `bus-zlg` / `bus-socketcand` / `bus-replay` / `bus-vector` | vcan 已能覆盖 M1 的全部验证需求 | ZLG 真机 M5；socketcand 与回放按用户请求；Vector 按实际硬件到手 | 真机验证缺位——M1 建抽验清单正是为了提前暴露这一点 |
+| `sim-ecu` 的怪癖注入 | 协议层刚自研完，怪癖需真实样本才能定义 | 同 `cal-core` 的 quirk 扩展点 | 模拟器只能覆盖标准行为 |
+| `diag` 的黑匣子与指标 | M1 只有日志与最小故障码集，尚无高频 DAQ 可测 | M2 DAQ 上流后 | 偶发问题在现场无法复现 |
 
 ### M1 的 crate 集合
 
-按上述判据，M1 只建九个：`diag`、`cal-core`、`xcp-proto`、`bus`、`bus-socketcan`、`xcp`、`session`、`sim-ecu`、`cli`。
+M1 只建九个：`diag`、`cal-core`、`xcp-proto`、`bus`、`bus-socketcan`、`xcp`、`session`、`sim-ecu`、`cli`。
 
-`xcp-proto` 在 M1 即成立而非后置，因为主从两侧同时出现（`xcp` 与 `sim-ecu`），满足"第二个消费者"。其余 `format-*` 与其它 `bus-*` 随各自里程碑按需建立；L1 的 `proto` 与 L4 的 `assembly` 当前为空档。
+集合形状由两条判据直接决定：
+
+- `xcp-proto` 在 M1 即成立而非后置——主从两侧同时出现（`xcp` 与 `sim-ecu`），已满足"第二个消费者"。
+- `bus-socketcan` 是 `bus` 的第一个实现：vcan 能完整覆盖 M1 的验证需求，不需要第二个后端，故"裁剪编译"判据此时不成立。
+
+`cal-core` 在 M1 **只放基础类型**：地址、长度、句柄等 newtype，其余全部后置。IR（变量树、Curve/Map/轴）、`CalibrationSource` trait、quirk 扩展点要等真实输入源，M1 的 XCP 读写按裸地址进行。
+
+L1 的 `proto` 与 L4 的 `assembly` 当前为空档；其余 crate 与模块的到期条件见上表。
 
 ## 接口一致性
 
