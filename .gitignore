@@ -6,3 +6,5 @@ ui/node_modules/
 /cairn/
 /.cairn/
 /tmp/
+# 质量门禁工具的产物
+.metrics/

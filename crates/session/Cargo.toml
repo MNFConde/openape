@@ -1,0 +1,20 @@
+[package]
+name = "openape-session"
+description = "编排引擎：装配、会话状态与设备锁"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+openape-bus.workspace = true
+openape-bus-socketcan.workspace = true
+openape-cal-core.workspace = true
+openape-diag.workspace = true
+openape-xcp.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

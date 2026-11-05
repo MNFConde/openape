@@ -1,0 +1,15 @@
+[package]
+name = "openape-xcp-proto"
+description = "XCP 帧编解码，主从两侧共享"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,22 @@
+[package]
+name = "openape-cli"
+description = "单次探测外壳"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "openape"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+openape-diag.workspace = true
+openape-session.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

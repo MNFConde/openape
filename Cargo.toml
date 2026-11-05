@@ -1,0 +1,41 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT OR Apache-2.0"
+authors = ["OpenAPE contributors"]
+
+[workspace.dependencies]
+# 内部 crate，按分档顺序排列（L0 → L5）；依赖只准向下
+openape-diag = { path = "crates/diag" }
+openape-cal-core = { path = "crates/cal-core" }
+openape-xcp-proto = { path = "crates/xcp-proto" }
+openape-bus = { path = "crates/bus" }
+openape-bus-socketcan = { path = "crates/bus-socketcan" }
+openape-xcp = { path = "crates/xcp" }
+openape-session = { path = "crates/session" }
+openape-sim-ecu = { path = "crates/sim-ecu" }
+openape-cli = { path = "crates/cli" }
+
+# 外部依赖：版本只在此处钉
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+socketcan = { version = "4", default-features = false, features = ["netlink", "tokio"] }
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+todo = "warn"
