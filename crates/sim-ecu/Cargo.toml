@@ -12,8 +12,12 @@ openape-bus.workspace = true
 openape-cal-core.workspace = true
 openape-diag.workspace = true
 openape-xcp-proto.workspace = true
+tracing.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+openape-bus-socketcan.workspace = true
 
 [lints]
 workspace = true

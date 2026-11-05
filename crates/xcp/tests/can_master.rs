@@ -209,8 +209,8 @@ async fn read_returns_exactly_the_requested_bytes() {
     assert_eq!(sent[1].id, CanId::Standard(0x600));
     assert_eq!(
         sent[1].data,
-        vec![0xFF, 0xF4, 0x02, 0x00, 0x00, 0x02, 0x10, 0x00],
-        "SHORT_UPLOAD 帧：PID + 命令码 + len + ext + 填充 + 地址"
+        vec![0xFF, 0xF4, 0x02, 0x00, 0x02, 0x10, 0x00, 0x00],
+        "SHORT_UPLOAD 帧：PID + 命令码 + len + ext + 地址（地址落在整帧 offset 4）"
     );
 }
 

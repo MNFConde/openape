@@ -165,7 +165,11 @@ pub enum Response {
 }
 
 impl Response {
-    /// 编码成整帧（含 PID），并按 CAN 帧定长补 0 到 8 字节。
+    /// 编码成整帧（含 PID）。
+    ///
+    /// **不补齐到 8 字节**：补齐会抹掉 DLC，进而抹掉"响应是否被截断"这一
+    /// 信息。是否填充由传输层决定——发往真 ECU 的请求帧要填满，从站回帧
+    /// 保留真实长度，两者都不影响本函数的解码。
     pub fn encode(&self) -> Vec<u8> {
         let mut frame = Vec::with_capacity(MAX_CTO);
         match self {
@@ -179,7 +183,6 @@ impl Response {
                 frame.push(*code);
             }
         }
-        frame.resize(MAX_CTO, 0);
         frame
     }
 
@@ -214,23 +217,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ok_response_echoes_command_and_pads_to_eight() {
+    fn ok_response_echoes_command_and_keeps_real_length() {
         let frame = Response::Ok {
             command: CommandCode::Upload as u8,
             payload: vec![0xAA],
         }
         .encode();
-        assert_eq!(frame, vec![0xFF, 0xF5, 0xAA, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            frame,
+            vec![0xFF, 0xF5, 0xAA],
+            "保留真实长度，长度本身是信息"
+        );
     }
 
     #[test]
-    fn error_response_is_two_bytes_then_padding() {
+    fn error_response_is_two_bytes() {
         let frame = Response::Err {
             code: ErrorCode::OutOfRange as u8,
         }
         .encode();
-        assert_eq!(frame[..2], [0xFE, 0x12]);
-        assert_eq!(frame.len(), MAX_CTO);
+        assert_eq!(frame, vec![0xFE, 0x12]);
     }
 
     #[test]

@@ -13,8 +13,10 @@ pub(crate) struct Decoder<'a> {
 }
 
 impl<'a> Decoder<'a> {
-    pub(crate) fn new(buf: &'a [u8]) -> Self {
-        Self { buf, off: 0 }
+    /// 从整帧的某一偏移开始读。对齐按整帧偏移算——XCP 的填充规则以帧起点
+    /// 为基准，不是以命令码为基准。
+    pub(crate) fn at(buf: &'a [u8], start: usize) -> Self {
+        Self { buf, off: start }
     }
 
     fn align(&mut self, width: usize) {
@@ -71,9 +73,11 @@ pub(crate) struct Encoder {
 }
 
 impl Encoder {
-    /// 以命令码开头。
-    pub(crate) fn with_code(code: u8) -> Self {
-        Self { buf: vec![code] }
+    /// 整帧起点：先放 PID，再放命令码，之后的参数按整帧偏移对齐。
+    pub(crate) fn with_frame(code: u8) -> Self {
+        Self {
+            buf: vec![crate::PID_CMD_RES, code],
+        }
     }
 
     fn align(&mut self, width: usize) {
@@ -114,22 +118,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn u32_is_aligned_to_four_after_a_single_byte() {
-        // 与 spike 的 SET_MTA 帧一致：命令码 + ext 之后补 2 个填充字节。
-        let frame = Encoder::with_code(0xF6).u8(0).u32(0x1000).finish();
-        assert_eq!(frame, vec![0xF6, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00]);
+    fn u32_is_aligned_to_four_from_the_frame_start() {
+        // 整帧：PID、命令码、扩展地址之后补到 4 字节边界，地址落在 offset 4。
+        let frame = Encoder::with_frame(0xF6).u8(0).u32(0x1000).finish();
+        assert_eq!(frame, vec![0xFF, 0xF6, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00]);
     }
 
     #[test]
     fn u16_is_aligned_to_two() {
-        let frame = Encoder::with_code(0xEB).u8(0).u8(0).u16(1).finish();
-        assert_eq!(frame, vec![0xEB, 0x00, 0x00, 0x00, 0x01, 0x00]);
+        // PID + 命令码 + mode + seg 之后正好 4，page 落在 offset 4。
+        let frame = Encoder::with_frame(0xEB).u8(0).u8(0).u16(1).finish();
+        assert_eq!(frame, vec![0xFF, 0xEB, 0x00, 0x00, 0x01, 0x00]);
     }
 
     #[test]
     fn decoder_reads_aligned_fields_and_reports_offset() {
-        let frame = [0xF6, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00];
-        let mut decoder = Decoder::new(&frame);
+        let frame = [0xFF, 0xF6, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00];
+        let mut decoder = Decoder::at(&frame, 1);
         assert_eq!(decoder.u8().expect("命令码"), 0xF6);
         assert_eq!(decoder.u8().expect("扩展地址"), 0);
         assert_eq!(decoder.u32().expect("地址"), 0x1000);
@@ -138,7 +143,8 @@ mod tests {
 
     #[test]
     fn truncated_input_reports_how_much_was_needed() {
-        let mut decoder = Decoder::new(&[0xF6, 0x00, 0x00, 0x00]);
+        let frame = [0xFF, 0xF6, 0x00, 0x00];
+        let mut decoder = Decoder::at(&frame, 1);
         let _ = decoder.u8().expect("命令码");
         let _ = decoder.u8().expect("扩展地址");
         let err = decoder.u32().expect_err("地址被截断");

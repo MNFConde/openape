@@ -11,9 +11,7 @@ use std::time::Duration;
 
 use openape_bus::{Bus, CanFrame, CanId};
 use openape_diag::{Domain, Fault, FaultCode, Severity};
-use openape_xcp_proto::{
-    Command, ErrorCode, PID_CMD_RES, PROTOCOL_VERSION, Response, TRANSPORT_VERSION, resource,
-};
+use openape_xcp_proto::{Command, ErrorCode, PID_CMD_RES, Response, resource};
 
 /// 虚拟内存大小（64 KiB），够放标定页与观测量。
 pub const MEM_SIZE: usize = 0x10000;
@@ -79,9 +77,9 @@ impl SimEcu {
         &self.memory[start..start + len]
     }
 
-    /// 处理一条命令载荷（含命令码，不含 PID），默认按标准回显命令码。
-    pub fn handle(&mut self, payload: &[u8]) -> Response {
-        match Command::decode(payload) {
+    /// 处理一整帧（含 PID 与命令码），默认按标准回显命令码。
+    pub fn handle(&mut self, frame: &[u8]) -> Response {
+        match Command::decode(frame) {
             Err(_) => err(ErrorCode::CmdSyntax),
             Ok(command) => self.dispatch(command),
         }
@@ -92,21 +90,11 @@ impl SimEcu {
         match command {
             Command::Connect { .. } => {
                 self.running = true;
+                // CAN 上 maxCto = 8：PID + 命令码之后只剩 6 字节参数。
+                // 版本字段放不下，master 侧因此按"缺席"处理，不臆造默认值。
                 ok(
                     code,
-                    vec![
-                        resource::CAL_PAG | resource::DAQ,
-                        0x00,
-                        8,
-                        0x00,
-                        8,
-                        0x00,
-                        0x00,
-                        PROTOCOL_VERSION.0,
-                        PROTOCOL_VERSION.1,
-                        TRANSPORT_VERSION.0,
-                        TRANSPORT_VERSION.1,
-                    ],
+                    vec![resource::CAL_PAG | resource::DAQ, 0x00, 8, 0x00, 8, 0x00],
                 )
             }
             Command::Disconnect => {
@@ -195,7 +183,11 @@ pub async fn serve(mut ecu: SimEcu, bus: Arc<dyn Bus>) -> Result<(), Fault> {
             Ok(frame) => frame,
             // 超时只是没命令，继续等。
             Err(openape_bus::BusError::Timeout { .. }) => continue,
-            Err(err) => return Err(bus_fault(&err)),
+            Err(err) => {
+                let fault = bus_fault(&err);
+                tracing::error!(target: "openape::sim", %fault, "从站收帧失败，退出");
+                return Err(fault);
+            }
         };
         if frame.id != config.command_id {
             continue;
@@ -206,13 +198,15 @@ pub async fn serve(mut ecu: SimEcu, bus: Arc<dyn Bus>) -> Result<(), Fault> {
         if pid != PID_CMD_RES {
             continue;
         }
-        let response = ecu.handle(&frame.data[1..]);
+        let response = ecu.handle(&frame.data);
         let data = response.encode();
         let Some(outbound) = CanFrame::new(config.response_id, data) else {
             continue;
         };
         if let Err(err) = bus.send(outbound).await {
-            return Err(bus_fault(&err));
+            let fault = bus_fault(&err);
+            tracing::error!(target: "openape::sim", %fault, "从站发响应失败，退出");
+            return Err(fault);
         }
     }
 }
@@ -226,15 +220,15 @@ fn bus_fault(err: &openape_bus::BusError) -> Fault {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openape_xcp_proto::CommandCode;
+    use openape_xcp_proto::{CommandCode, MAX_CTO};
 
     fn ecu() -> SimEcu {
         SimEcu::new(SimEcuConfig::default_ids())
     }
 
     fn send(ecu: &mut SimEcu, command: Command) -> Response {
-        let payload = command.encode().expect("测试命令都能编码");
-        ecu.handle(&payload)
+        let frame = command.encode().expect("测试命令都能编码");
+        ecu.handle(&frame)
     }
 
     fn expect_ok(response: Response, command: CommandCode) -> Vec<u8> {
@@ -404,9 +398,56 @@ mod tests {
     }
 
     #[test]
+    fn every_response_fits_in_one_can_frame() {
+        // 经典 CAN 一帧 8 字节；从站回超长响应会被总线层拒绝，
+        // 现象是 master 一直等到超时。这里把每个命令的响应长度钉住。
+        let commands = [
+            Command::Connect { mode: 0 },
+            Command::Disconnect,
+            Command::GetStatus,
+            Command::Synch,
+            Command::GetCommModeInfo,
+            Command::SetMta {
+                address_extension: 0,
+                address: 0x1000,
+            },
+            Command::ShortUpload {
+                len: 6,
+                address_extension: 0,
+                address: 0x1000,
+            },
+            Command::Upload { len: 6 },
+            Command::Download {
+                len: 5,
+                data: vec![0; 5],
+            },
+            Command::GetCalPage {
+                mode: 0,
+                segment: 0,
+            },
+            Command::SetCalPage {
+                mode: 0,
+                segment: 0,
+                page: 1,
+            },
+        ];
+        let mut ecu = ecu();
+        ecu.poke(0x1000, &[0; 8]);
+        for command in commands {
+            let response = send(&mut ecu, command.clone());
+            let frame = response.encode();
+            assert!(
+                frame.len() <= MAX_CTO,
+                "{command:?} 的响应 {} 字节，超过一帧上限 {MAX_CTO}",
+                frame.len()
+            );
+        }
+    }
+
+    #[test]
     fn unknown_command_byte_is_a_syntax_error() {
         let mut ecu = ecu();
-        match ecu.handle(&[0x01, 0x02]) {
+        match ecu.handle(&[0x01, 0x02, 0x00]) {
             Response::Err { code } => assert_eq!(code, ErrorCode::CmdSyntax as u8),
             other => panic!("期望语法错误，实际 {other:?}"),
         }

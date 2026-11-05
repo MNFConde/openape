@@ -131,33 +131,33 @@ impl Command {
         }
     }
 
-    /// 编码成载荷（含命令码，不含 PID）。超过 `MAX_CTO` 返回错误。
+    /// 编码成整帧（PID + 命令码 + 参数）。超过 `MAX_CTO` 返回错误。
     pub fn encode(&self) -> Result<Vec<u8>, EncodeError> {
         let bytes = match self {
-            Self::Connect { mode } => Encoder::with_code(CommandCode::Connect as u8)
+            Self::Connect { mode } => Encoder::with_frame(CommandCode::Connect as u8)
                 .u8(*mode)
                 .finish(),
-            Self::Disconnect => Encoder::with_code(CommandCode::Disconnect as u8).finish(),
-            Self::GetStatus => Encoder::with_code(CommandCode::GetStatus as u8).finish(),
-            Self::Synch => Encoder::with_code(CommandCode::Synch as u8).finish(),
+            Self::Disconnect => Encoder::with_frame(CommandCode::Disconnect as u8).finish(),
+            Self::GetStatus => Encoder::with_frame(CommandCode::GetStatus as u8).finish(),
+            Self::Synch => Encoder::with_frame(CommandCode::Synch as u8).finish(),
             Self::GetCommModeInfo => {
-                Encoder::with_code(CommandCode::GetCommModeInfo as u8).finish()
+                Encoder::with_frame(CommandCode::GetCommModeInfo as u8).finish()
             }
             Self::SetMta {
                 address_extension,
                 address,
-            } => Encoder::with_code(CommandCode::SetMta as u8)
+            } => Encoder::with_frame(CommandCode::SetMta as u8)
                 .u8(*address_extension)
                 .u32(*address)
                 .finish(),
-            Self::Upload { len } => Encoder::with_code(CommandCode::Upload as u8)
+            Self::Upload { len } => Encoder::with_frame(CommandCode::Upload as u8)
                 .u8(*len)
                 .finish(),
             Self::ShortUpload {
                 len,
                 address_extension,
                 address,
-            } => Encoder::with_code(CommandCode::ShortUpload as u8)
+            } => Encoder::with_frame(CommandCode::ShortUpload as u8)
                 .u8(*len)
                 .u8(*address_extension)
                 .u32(*address)
@@ -169,20 +169,22 @@ impl Command {
                         actual: data.len(),
                     });
                 }
-                Encoder::with_code(CommandCode::Download as u8)
+                Encoder::with_frame(CommandCode::Download as u8)
                     .u8(*len)
                     .bytes(data)
                     .finish()
             }
-            Self::GetCalPage { mode, segment } => Encoder::with_code(CommandCode::GetCalPage as u8)
-                .u8(*mode)
-                .u8(*segment)
-                .finish(),
+            Self::GetCalPage { mode, segment } => {
+                Encoder::with_frame(CommandCode::GetCalPage as u8)
+                    .u8(*mode)
+                    .u8(*segment)
+                    .finish()
+            }
             Self::SetCalPage {
                 mode,
                 segment,
                 page,
-            } => Encoder::with_code(CommandCode::SetCalPage as u8)
+            } => Encoder::with_frame(CommandCode::SetCalPage as u8)
                 .u8(*mode)
                 .u8(*segment)
                 .u16(*page)
@@ -197,9 +199,14 @@ impl Command {
         Ok(bytes)
     }
 
-    /// 从载荷解码（载荷含命令码，不含 PID）。
-    pub fn decode(payload: &[u8]) -> Result<Self, DecodeError> {
-        let mut decoder = Decoder::new(payload);
+    /// 从整帧解码（校验 PID，然后从命令码开始读）。
+    pub fn decode(frame: &[u8]) -> Result<Self, DecodeError> {
+        match frame.first() {
+            Some(&crate::PID_CMD_RES) => {}
+            Some(&other) => return Err(DecodeError::UnknownCommand { code: other }),
+            None => return Err(DecodeError::Truncated { need: 1, got: 0 }),
+        }
+        let mut decoder = Decoder::at(frame, 1);
         let raw = decoder.u8()?;
         let code = CommandCode::from_u8(raw).ok_or(DecodeError::UnknownCommand { code: raw })?;
         Ok(match code {
@@ -263,7 +270,7 @@ mod tests {
             }
             .encode()
             .expect("一帧放得下"),
-            vec![0xF6, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00]
+            vec![0xFF, 0xF6, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00]
         );
         assert_eq!(
             Command::ShortUpload {
@@ -273,11 +280,11 @@ mod tests {
             }
             .encode()
             .expect("一帧放得下"),
-            vec![0xF4, 0x02, 0x00, 0x00, 0x02, 0x10, 0x00, 0x00]
+            vec![0xFF, 0xF4, 0x02, 0x00, 0x02, 0x10, 0x00, 0x00]
         );
         assert_eq!(
             Command::Upload { len: 4 }.encode().expect("一帧放得下"),
-            vec![0xF5, 0x04]
+            vec![0xFF, 0xF5, 0x04]
         );
         assert_eq!(
             Command::Download {
@@ -286,7 +293,7 @@ mod tests {
             }
             .encode()
             .expect("一帧放得下"),
-            vec![0xF0, 0x03, 0xAA, 0xBB, 0xCC]
+            vec![0xFF, 0xF0, 0x03, 0xAA, 0xBB, 0xCC]
         );
         assert_eq!(
             Command::SetCalPage {
@@ -296,7 +303,7 @@ mod tests {
             }
             .encode()
             .expect("一帧放得下"),
-            vec![0xEB, 0x00, 0x00, 0x00, 0x01, 0x00]
+            vec![0xFF, 0xEB, 0x00, 0x00, 0x01, 0x00]
         );
     }
 
@@ -367,6 +374,7 @@ mod tests {
 
     #[test]
     fn download_wider_than_a_frame_is_refused() {
+        // 整帧 = PID + 命令码 + len + 数据；7 字节数据要 10 字节帧。
         let err = Command::Download {
             len: 7,
             data: vec![0; 7],
@@ -376,7 +384,7 @@ mod tests {
         assert_eq!(
             err,
             EncodeError::TooLong {
-                len: 9,
+                len: 10,
                 max: MAX_CTO
             }
         );
@@ -384,7 +392,8 @@ mod tests {
 
     #[test]
     fn truncated_download_payload_is_reported() {
-        let err = Command::decode(&[0xF0, 0x04, 0x01, 0x02]).expect_err("声明 4 字节只给了 2");
-        assert_eq!(err, DecodeError::Truncated { need: 6, got: 4 });
+        let err =
+            Command::decode(&[0xFF, 0xF0, 0x04, 0x01, 0x02]).expect_err("声明 4 字节只给了 2");
+        assert_eq!(err, DecodeError::Truncated { need: 7, got: 5 });
     }
 }

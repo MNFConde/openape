@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use openape_bus::{Bus, BusError, CanFrame, CanId};
 use openape_cal_core::{Address, ByteLen};
 use openape_diag::{Fault, Severity};
-use openape_xcp_proto::{Command, DecodeError, ErrorCode, MAX_CTO, PID_CMD_RES, Response};
+use openape_xcp_proto::{Command, DecodeError, ErrorCode, MAX_CTO, Response};
 
 use crate::connection::{self, ConnectInfo, SessionStatus, XcpConnection, seq};
 
@@ -71,9 +71,9 @@ impl CanXcpMaster {
             .encode()
             .map_err(|err| connection::fault(seq::CODEC, Severity::Error, err.to_string()))?;
 
-        let mut data = Vec::with_capacity(MAX_CTO);
-        data.push(PID_CMD_RES);
-        data.extend_from_slice(&payload);
+        // 命令已编码成整帧（PID + 命令码 + 参数），补齐到 8 字节发出去：
+        // 真 ECU 期望满帧。
+        let mut data = payload;
         data.resize(MAX_CTO, 0);
         let frame = CanFrame::new(self.config.command_id, data).ok_or_else(|| {
             connection::fault(seq::CODEC, Severity::Error, "命令帧长超过 CAN 上限")
