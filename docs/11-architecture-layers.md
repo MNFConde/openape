@@ -27,7 +27,7 @@ updated: 2026-11-05
 
 ### 装配层唯一
 
-只有装配层知道具体后端 crate 的存在。`xcp` 不依赖任何 `bus-*`，只依赖 `Bus` trait；具体后端在装配层实例化为 `Arc<dyn Bus>` 注入。
+只有装配层知道具体后端 crate 的存在。`xcp` 不依赖任何 `bus-*`，只依赖 `Bus` trait；具体后端在装配层实例化为 `Arc<dyn Bus>` 注入。独立装配 crate 属后置项，M1 由 `session` 兼任（见下节「切分判据与后置项」）。
 
 ```
 xcp  ──依赖──> bus（trait）
@@ -43,10 +43,10 @@ xcp  ──依赖──> bus（trait）
 | 档 | crate | 约束 |
 |---|---|---|
 | L0 基础 | `diag` | 不依赖任何业务 crate，否则成环 |
-| L1 契约 | `cal-core`、`xcp-proto`、`proto` | 跨 crate 的类型只准在这里定义 |
+| L1 契约 | `cal-core`、`xcp-proto`、`proto`（M1 空档） | 跨 crate 的类型只准在这里定义，且保持轻依赖 |
 | L2 实现 | `bus`、`bus-*`、`format-*`、`xcp` | 只准依赖 L0 与 L1 |
 | L3 编排 | `session`、`sim-ecu` | 只准依赖 L0 至 L2 |
-| L4 装配 | `assembly` | 唯一允许指名具体后端 crate 的位置 |
+| L4 装配 | `assembly`（M1 空档） | 唯一允许指名具体后端 crate 的位置 |
 | L5 外壳 | `daemon`、`cli`、`ui` | 只准依赖 L0 至 L4 |
 
 ```
@@ -63,7 +63,37 @@ ui ─> proto <─ cli        daemon ─> proto
 2. `bus-*` 只依赖 `bus`，不依赖 `session` 或 `xcp`；装配由 L4 完成。
 3. `sim-ecu` 与 `xcp` 共享 `xcp-proto` 的帧编解码，主从两侧的协议理解只有一份。
 
-方向靠门禁守住，不靠人工记忆：`script/check-deps.py` 按本表比对每个 crate 的 Cargo.toml（M1 落地，命令单一源见 [.agents/rules/commit.md](../.agents/rules/commit.md) 门禁流水线节）。
+## 切分判据与后置项
+
+### 依赖方向由构建图强制
+
+crate 只能 `use` 自己 Cargo.toml 里声明过的依赖，反向引用在**编译期**即失败。依赖方向被固化在 Cargo 依赖图里——违规依赖在 Rust 里根本写不出来，不是需要人或脚本去发现的问题。本节的档位表是**这个既成事实的记录与切分理由**，不是执行者；不设依赖方向检查。
+
+真正会做错的是切分本身：分错了照样编译通过，边界白设。判据只有四条，不满足任何一条时同 crate 内模块就够：
+
+| 切 crate 的充分理由 | 说明 |
+|---|---|
+| 需要物理上不可能反向引用的边界 | 契约类的唯一不可替代理由 |
+| 依赖重量差一个量级 | 契约 crate 保持轻依赖，实现 crate 才拖重库——否则下层的消费者被迫背上全家桶 |
+| 出现第二个消费者 | 只有一个消费者时抽离没有收益 |
+| 用户需要裁剪编译 | 真实存在想 feature 掉某个后端的用户 |
+
+配套的轻依赖约束：L0 与 L1 只许 `serde` / `thiserror` 一类基础库，不得依赖 L2 及以上，也不得引入重实现库。这条是"依赖重量差"判据的延续，同样靠 Cargo.toml 声明守住。
+
+### 后置项
+
+文档先记结论、实现按触发条件推进——"后置"必须写明原因与到期条件，否则会变成隐性偷懒：
+
+| 后置项 | 现在不做的原因 | 触发实施的条件 | 到期未做的后果 |
+|---|---|---|---|
+| `proto` crate | M2 前没有第二个消费者 | UI 与 CLI 同时需要同一套 schema（M2 落 gRPC） | 两处各自定义结构，开始漂移 |
+| 独立 `assembly` crate | 只有一个总线后端，一个 `match` 放 `session` 里就够 | 出现第二种重后端，且确有裁剪编译的需求 | 无硬伤，`session` 先变臃肿 |
+
+### M1 的 crate 集合
+
+按上述判据，M1 只建九个：`diag`、`cal-core`、`xcp-proto`、`bus`、`bus-socketcan`、`xcp`、`session`、`sim-ecu`、`cli`。
+
+`xcp-proto` 在 M1 即成立而非后置，因为主从两侧同时出现（`xcp` 与 `sim-ecu`），满足"第二个消费者"。其余 `format-*` 与其它 `bus-*` 随各自里程碑按需建立；L1 的 `proto` 与 L4 的 `assembly` 当前为空档。
 
 ## 接口一致性
 
@@ -73,7 +103,7 @@ ui ─> proto <─ cli        daemon ─> proto
 | 分发方式 | 跨 crate 边界一律对象安全 trait（`dyn`），crate 内部才用泛型；避免泛型参数污染公开签名 |
 | 错误分层 | 每 crate 自有 `Error`，但必须可转 `diag::Fault`；跨边界不传 `anyhow`，只在二进制外壳里用 |
 | trait 演进 | `#[non_exhaustive]` 加默认方法，加能力不改签名 |
-| 公开面漂移 | `cargo semver-checks` 比对公开 API，破坏性变更必须显式（M1 起挂门禁） |
+| 公开面漂移 | `cargo semver-checks` 比对公开 API，破坏性变更必须显式（公开面稳定后启用） |
 
 ## 双前端共享引擎
 

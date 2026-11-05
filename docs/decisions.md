@@ -169,8 +169,8 @@ updated: 2026-11-05
 - 规范位置：[11-architecture-layers.md](11-architecture-layers.md#crate-分档与依赖方向)
 - 背景：外部差异（硬件、传输介质、信息源格式）会在多个 crate 同时出现；若只靠 crate 边界而不定依赖方向，半年后必然出现"上层判别后端名"和环形依赖。
 - 决策：crate 分六档——L0 `diag` / L1 契约（`cal-core`、`xcp-proto`、`proto`）/ L2 实现（`bus`、`bus-*`、`format-*`、`xcp`）/ L3 编排（`session`、`sim-ecu`）/ L4 装配（`assembly`）/ L5 外壳（`daemon`、`cli`、`ui`）。依赖只准向下、同档不互赖；跨 crate 类型只在 L1 定义；跨边界一律对象安全 trait。**三道墙**为 `Bus`、`XcpConnection`、`CalibrationSource`，另加 `BusCapabilities` 供上层按能力降级——禁止按后端名分支。只有装配层可指名具体后端 crate。
-- 依据：（1）"加 Vector 只改装配一行"这一诉求只能靠依赖倒置满足，trait 本身不够；（2）`diag` 被全层依赖，必须自身零业务依赖才不成环；（3）类型单一源与统一错误转换是接口一致性的最低成本手段；（4）方向靠门禁而非记忆，故 `script/check-deps.py` 按分档表校验 Cargo.toml（M1 落地）。
-- 影响：新增硬件 = 新建 `bus-*` crate 加装配层一个分支；`xcp` 与 `session` 不动；`cargo semver-checks` 与 `cargo-deny` 一并入门禁；`00-overview.md` 拓扑表按本分档重排并登记新 crate。
+- 依据：（1）"加 Vector 只改装配一行"这一诉求只能靠依赖倒置满足，trait 本身不够；（2）`diag` 被全层依赖，必须自身零业务依赖才不成环；（3）类型单一源与统一错误转换是接口一致性的最低成本手段；（4）**依赖方向由 Cargo 依赖图强制**——crate 只能 `use` 自己声明过的依赖，反向引用在编译期即失败，无需检查脚本或评审纪律；真正会错的是切分本身，故把切分判据与后置项写成文档规则（[11-architecture-layers.md](11-architecture-layers.md#切分判据与后置项)）。
+- 影响：新增硬件 = 新建 `bus-*` crate 并在装配处加一个分支，`xcp` 与 `session` 不动；`00-overview.md` 拓扑表按本分档重排并登记新 crate；M1 只建九 crate，`proto` 与独立 `assembly` 按触发条件后置。
 
 ## D-18 双前端共享引擎
 
