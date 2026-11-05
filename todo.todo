@@ -4,7 +4,7 @@
 [x] M0-2 spike：xcp-lite 在 vcan 上跑通 XCP-on-CAN 最小环（connect + 采集 + 页切换）——裁决：xcp-lite 无 CAN 传输层，从站改自研并在 vcan 上跑通，见 D-12
 [x] M0-3 spike：tonic grpc-web 浏览器侧流式连通 —— 裁决：主案成立不降级，20 帧 + grpc-status:0 连跑 3 次通过，三条实现约束记 D-05
 [x] M0-4 spike：a2lfile 生成 A2L 子集 + a2ltool 的 DWARF 逻辑库化复用 —— 裁决：复用成立，fork 提 pub 即可（4 文件 52 行），见 D-02
-[ ] M0-5 设计：Curve/Map 轴点注记约定 RFC（轴为独立实体 + 引用 + 绑定 + 工程配置格式；单位/换算归 A2L 档，见 D-13），出 golden 样例，落 docs/10- 号段
+[x] M0-5 设计：Curve/Map 轴点注记约定 RFC —— 落 docs/10-axis-binding-rfc.md，golden 样例经 a2lfile 严格模式实测；轴为独立实体 + 维度顺序 + 绑定配置 + R1-R7 校验
 [ ] M1：workspace 脚手架 + Bus trait + socketcan/vcan 后端 + sim-ecu 连通 + XCP connect/读标定量；真机抽验清单产出
 [ ] M2：cal-core IR + A2L 前端 + DAQ 流 + gRPC 推流 + Web 最小曲线页
 [ ] M3：ELF 前端 + ELF→A2L 导出 + DBC 解码显示 + A2L/解析 golden 落地（档一/档二启用）

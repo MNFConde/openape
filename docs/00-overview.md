@@ -53,5 +53,6 @@ OpenAPE 是一个 Rust 开发的**开放汽车标定工具**（对标 CANape/INC
 |---|---|---|
 | [README.md](README.md) | 文档地图与稳定度分组 | 找文档时 |
 | [requirements.md](requirements.md) | 需求基线与验收口径 | 扩范围/验收前 |
+| [10-axis-binding-rfc.md](10-axis-binding-rfc.md) | Curve/Map 轴点注记约定与绑定配置格式 | 实现变量模型或 ELF→A2L 导出时 |
 | [decisions.md](decisions.md) | 决策记录 D-xx | 查"为什么这么选"时 |
 | [AGENTS.md](AGENTS.md) | docs/ 写作约束 | 写/改 docs/ 前 |
