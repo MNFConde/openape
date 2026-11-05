@@ -1,6 +1,6 @@
 # AGENTS.md
 
-OpenAPE —— Rust 开发的开放汽车标定工具：headless daemon + Web UI 双形态，XCP-on-CAN 采集与标定写入，ELF / A2L / DBC 解析，本地与远程同一套网页。当前状态：治理结构已初始化（docs/ 规则 门禁 钩子 就位），代码未起步；**M0 风险 spike 与前置设计全部完成**（M0-1 至 M0-5：CAN 从站自研 D-12、grpc-web 流式可行 D-05、a2ltool/a2lfile 双复用 D-02、轴点注记约定 [10-axis-binding-rfc](docs/10-axis-binding-rfc.md)；automotive 已由 D-16 转为行为参考，其依赖路径 D-07/D-11 部分作废）；**分层架构已定稿**（[11-architecture-layers](docs/11-architecture-layers.md)：三道屏蔽墙、crate 六档依赖、双前端共享 session、可观测层、公开面承诺，D-17 至 D-20），下一步是 M1 脚手架，进度以 todo.todo 为准；cairn 沉淀层已初始化（独立 git 仓库，不入本仓库）。开发环境：WSL2 Ubuntu-24.04（OpenBitFun WSL 工作区），Windows 侧保留 ZLG 真机验证。
+OpenAPE —— Rust 开发的开放汽车标定工具：headless daemon + Web UI 双形态，XCP-on-CAN 采集与标定写入，ELF / A2L / DBC 解析，本地与远程同一套网页。当前状态：**M1 已完成**——九个 crate 落地，vcan 上 `sim-ecu` 作从站、CLI 打通 probe → connect → 读标定量全链路（含设备锁、按域分段的退出码、帧级记录开关），真机抽验清单见 [12-hardware-checklist](docs/12-hardware-checklist.md)；此前 **M0 风险 spike 与前置设计全部完成**（M0-1 至 M0-5：CAN 从站自研 D-12、grpc-web 流式可行 D-05、a2ltool/a2lfile 双复用 D-02、轴点注记约定 [10-axis-binding-rfc](docs/10-axis-binding-rfc.md)；automotive 已由 D-16 转为行为参考，其依赖路径 D-07/D-11 部分作废），**分层架构已定稿**（[11-architecture-layers](docs/11-architecture-layers.md)：三道屏蔽墙、crate 六档依赖、双前端共享 session、可观测层、公开面承诺，D-17 至 D-20），下一步是 M2（cal-core IR 与 A2L 前端起），进度以 todo.todo 为准；cairn 沉淀层已初始化（独立 git 仓库，不入本仓库）。开发环境：WSL2 Ubuntu-24.04（OpenBitFun WSL 工作区），Windows 侧保留 ZLG 真机验证。
 
 仓库存在 cairn/ 时先读其规则文件（cairn/RULES.md），否则跳过；知识/教训沉淀唯一走 cairn，未安装时由各规则文件的「经验与坑」节就地承担。
 

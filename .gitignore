@@ -8,3 +8,4 @@ ui/node_modules/
 /tmp/
 # 质量门禁工具的产物
 .metrics/
+/.openbitfun/

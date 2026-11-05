@@ -58,5 +58,5 @@ MVP 不做的：见下"不做 / 预留不做 / 怪癖兼容"三段。
 
 - **MVP 完成定义**：todo.todo 中 M1–M4 全部勾完——即：vcan 上 sim-ecu 与 daemon 全链路采集/标定写入/页切换跑通；A2L 与 ELF 双前端 + ELF→A2L 导出出件；Web UI 曲线与标定量表格本地/远程可用；dataset 对比与 DCM 导入可用；CLI 分阶段探测命令与统一故障面板可用
 - **档二 golden（适用）**：ELF→A2L 导出在 M3 落地、DCM 解析在 M4 与实现同批落地——golden 不能先于被测对象存在；fixtures 入库，纯重构以零 diff 为通过线
-- **档三 人工抽验（适用，M1 起建清单）**：里程碑合入前用真机抽验——周立功 CAN-FD 卡 + 目标 ECU，检查点矩阵随 M1 产出
+- **档三 人工抽验（适用，M1 起建清单）**：里程碑合入前用真机抽验——周立功 CAN-FD 卡 + 目标 ECU，检查点矩阵见 [12-hardware-checklist.md](12-hardware-checklist.md)（M1 产出）
 - 门禁（代码层）见 `.agents/rules/commit.md`，与本文档验收口径（产物层）并存

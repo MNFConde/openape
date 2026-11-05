@@ -6,21 +6,21 @@
 [x] M0-4 spike：a2lfile 生成 A2L 子集 + a2ltool 的 DWARF 逻辑库化复用 —— 裁决：复用成立，fork 提 pub 即可（4 文件 52 行），见 D-02
 [x] M0-5 设计：Curve/Map 轴点注记约定 RFC —— 落 docs/10-axis-binding-rfc.md，golden 样例经 a2lfile 严格模式实测；轴为独立实体 + 维度顺序 + 绑定配置 + R1-R7 校验
 
-[ ] M1 vcan 全链路：sim-ecu 作从站，cli 打通 probe → connect → 读标定量（14 项）
-[ ] M1-01 chore(workspace)：根 Cargo.toml（九 crate、统一 edition 与共享依赖）+ rust-toolchain + .gitignore + 双许可 LICENSE + 九 crate 空骨架 → 验收：build/test/fmt/clippy 全绿，cargo tree 无环
-[ ] M1-02 feat(diag)：Fault（编号按域分段、严重度、上下文、可操作建议、错误链）+ 与 CLI 退出码对齐的映射 → 验收：分段唯一性与退出码一一对应有单测
-[ ] M1-03 feat(diag)：日志接入（常规运行日志 + 帧级记录运行时开关）+ 单次初始化 → 验收：开关切换不重启进程生效
-[ ] M1-04 feat(cal-core)：地址/长度/句柄 newtype（M1 只此三类，IR 后置）→ 验收：全仓无自定义等价类型，依赖仅 serde/thiserror 量级
-[ ] M1-05 feat(bus)：async Bus trait（对象安全）+ BusCapabilities（经典/FD 位、硬件时间戳、通道枚举）+ BusError → 验收：dyn Bus 可装箱，测试桩可替换后端
-[ ] M1-06 feat(bus-socketcan)：socketcan 后端（打开/过滤/发/收、无硬件时间戳时降级）+ vcan 回环集成测试 → 验收：vcan 双向收发通，能力位如实上报
-[ ] M1-07 feat(xcp-proto)：CTO 命令码与帧编解码（CAN 对齐填充、长度与超时参数）+ 与 M0-2 spike 记录逐字节对照的测试 → 验收：spike 样本回放全过
-[ ] M1-08 feat(xcp)：XcpConnection trait（隔离传输介质）+ CAN 传输会话 + CONNECT/GET_STATUS 握手 → 验收：连不通时给出带建议的 Fault，不抛裸错误
-[ ] M1-09 feat(xcp)：读通路（SET_MTA + UPLOAD、SHORT_UPLOAD）+ 从站错误码映射 → 验收：越界读返回可分类故障
-[ ] M1-10 feat(sim-ecu)：从站 CAN 传输层 + CONNECT / 内存读写 / 页切换（对齐 D-12 spike 的 13 项断言）→ 验收：该断言集在 Rust 侧重跑全通
-[ ] M1-11 feat(session)：最小引擎（装配总线后端、建连接、读）+ 进程级设备锁（后端/通道）→ 验收：双进程同开时后者报锁冲突（L4 装配暂由 session 兼任）
-[ ] M1-12 feat(cli)：probe bus / probe xcp / read 三命令 + 人类可读与 --json 双模 + 内建超时与分段退出码 → 验收：一条命令一次自足事务；JSON 先用本地 serde，M2-11 迁 proto
-[ ] M1-13 test：vcan 全链路集成测试（sim-ecu + session + cli 子进程）→ 验收：三命令连跑 3 次输出一致
-[ ] M1-14 docs：真机抽验检查点矩阵（周立功 CAN-FD + 目标 ECU）+ 状态回写 AGENTS.md 与 requirements 的 M1 起建清单 → 验收：抽验项可逐条打勾
+[x] M1 vcan 全链路：sim-ecu 作从站，cli 打通 probe → connect → 读标定量（14 项）
+[x] M1-01 chore(workspace)：根 Cargo.toml（九 crate、统一 edition 与共享依赖）+ rust-toolchain + .gitignore + 双许可 LICENSE + 九 crate 空骨架 → 验收：build/test/fmt/clippy 全绿，cargo tree 无环
+[x] M1-02 feat(diag)：Fault（编号按域分段、严重度、上下文、可操作建议、错误链）+ 与 CLI 退出码对齐的映射 → 验收：分段唯一性与退出码一一对应有单测
+[x] M1-03 feat(diag)：日志接入（常规运行日志 + 帧级记录运行时开关）+ 单次初始化 → 验收：开关切换不重启进程生效
+[x] M1-04 feat(cal-core)：地址/长度/句柄 newtype（M1 只此三类，IR 后置）→ 验收：全仓无自定义等价类型，依赖仅 serde/thiserror 量级
+[x] M1-05 feat(bus)：async Bus trait（对象安全）+ BusCapabilities（经典/FD 位、硬件时间戳、通道枚举）+ BusError → 验收：dyn Bus 可装箱，测试桩可替换后端
+[x] M1-06 feat(bus-socketcan)：socketcan 后端（打开/过滤/发/收、无硬件时间戳时降级）+ vcan 回环集成测试 → 验收：vcan 双向收发通，能力位如实上报
+[x] M1-07 feat(xcp-proto)：CTO 命令码与帧编解码（CAN 对齐填充、长度与超时参数）+ 与 M0-2 spike 记录逐字节对照的测试 → 验收：spike 样本回放全过
+[x] M1-08 feat(xcp)：XcpConnection trait（隔离传输介质）+ CAN 传输会话 + CONNECT/GET_STATUS 握手 → 验收：连不通时给出带建议的 Fault，不抛裸错误
+[x] M1-09 feat(xcp)：读通路（SET_MTA + UPLOAD、SHORT_UPLOAD）+ 从站错误码映射 → 验收：越界读返回可分类故障
+[x] M1-10 feat(sim-ecu)：从站 CAN 传输层 + CONNECT / 内存读写 / 页切换（对齐 D-12 spike 的 13 项断言）→ 验收：该断言集在 Rust 侧重跑全通
+[x] M1-11 feat(session)：最小引擎（装配总线后端、建连接、读）+ 进程级设备锁（后端/通道）→ 验收：双进程同开时后者报锁冲突（L4 装配暂由 session 兼任）
+[x] M1-12 feat(cli)：probe bus / probe xcp / read 三命令 + 人类可读与 --json 双模 + 内建超时与分段退出码 → 验收：一条命令一次自足事务；JSON 先用本地 serde，M2-11 迁 proto
+[x] M1-13 test：vcan 全链路集成测试（sim-ecu + session + cli 子进程）→ 验收：三命令连跑 3 次输出一致
+[x] M1-14 docs：真机抽验检查点矩阵（周立功 CAN-FD + 目标 ECU）+ 状态回写 AGENTS.md 与 requirements 的 M1 起建清单 → 验收：抽验项可逐条打勾
 
 [ ] M2 cal-core IR + A2L 前端 + DAQ 流 + gRPC 推流 + Web 最小曲线页（15 项）
 [ ] M2-01 feat(cal-core)：IR 变量树与观测/标定量模型（语义字段一律 Option，缺失显 raw）→ 验收：仅 ELF 档能无填充地表达
