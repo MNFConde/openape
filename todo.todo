@@ -39,19 +39,20 @@
 [ ] M2-14 feat(cli)：--via-daemon 经本地 gRPC 复用运行中的会话 → 验收：daemon 持有硬件时 CLI 探测不抢锁
 [ ] M2-15 docs：复核 pyXCP 两处非标准行为（GET_CAL_PAGE 响应补齐、WRITE_DAQ 指针自增）并落 D-12 更正 → 验收：结论带 ASAM 条款或实测证据
 
-[ ] M3 ELF 前端 + ELF→A2L 导出 + DBC 解码显示 + 档二 golden + 用户显示属性 + 交叉校验（12 项）
+[ ] M3 ELF 前端 + ELF→A2L 导出 + DBC 解码显示 + 档二 golden + 用户显示属性 + 交叉校验（13 项）
 [ ] M3-01 feat(format-elf)：crate 成立 + DWARF 抽取（gimli/object，借 a2ltool 逻辑）→ 名/类型/地址/长度/布局/enum → 验收：fixtures ELF 抽取结果与 C 源码一致
 [ ] M3-02 feat(format-elf)：加载体检（-g / 未 strip 检测 + 逐条可操作提示，只警告不阻断）+ static 同名跨 CU 加前缀 → 验收：strip 过的 ELF 给出带修复命令的提示
 [ ] M3-03 feat(format-elf)：ELF → IR（仅 ELF 档：语义字段 None、角色留待用户指定）→ 验收：不推断单位、量程与角色
 [ ] M3-04 feat(format-elf)：ELF → A2L 导出（自定义 section 标记 + DWARF struct 轴关联）→ 验收：导出件能被 a2lfile 严格模式接受
 [ ] M3-05 test：档二 golden——ELF→A2L 字节级对比，三件套入库（DCM 部分随 M4 实现同批）→ 验收：纯重构零 diff
-[ ] M3-06 feat(cal-core)：用户显示属性（单位/量程/缩放，仅显示、不参与换算）与工程配置扩展 → 验收：属性变更不影响任何换算与写入判定
-[ ] M3-07 feat(cal-core)：A2L 与 ELF 交叉校验（地址/尺寸/类型冲突报告）→ 验收：冲突在 probe source 阶段即出报告
-[ ] M3-08 feat(format-dbc)：crate 成立 + DBC 解析 + 信号 pack/unpack（自研）→ 验收：与 can-dbc 解析结果对照一致
-[ ] M3-09 feat(session)：DBC 解码接入观测通路 → 验收：同一总线帧既能出原始位也能出物理值
-[ ] M3-10 feat(cli)：probe source / probe ecu 完整化（含交叉校验报告与 [raw] 标注）→ 验收：仅 ELF 档缺失字段标 [raw] 而非填默认值
-[ ] M3-11 feat(ui)：标定量表格 + 显示属性编辑 + 统一故障面板 → 验收：故障面板只读 diag 的 Fault，不自造错误类型
-[ ] M3-12 docs：M3 收尾（golden 说明、fixtures 补件、状态回写）→ 验收：文档与实现无矛盾
+[ ] M3-06 test：轴绑定 golden 三件套入库（ELF 夹具、工程配置、期望 JSON 与 A2L 片段），按 10 号 RFC 第 8 节的字节级口径 → 验收：正例全过、R1–R7 反例各一条
+[ ] M3-07 feat(cal-core)：用户显示属性（单位/量程/缩放，仅显示、不参与换算）与工程配置扩展 → 验收：属性变更不影响任何换算与写入判定
+[ ] M3-08 feat(cal-core)：A2L 与 ELF 交叉校验（地址/尺寸/类型冲突报告）→ 验收：冲突在 probe source 阶段即出报告
+[ ] M3-09 feat(format-dbc)：crate 成立 + DBC 解析 + 信号 pack/unpack（自研）→ 验收：与 can-dbc 解析结果对照一致
+[ ] M3-10 feat(session)：DBC 解码接入观测通路 → 验收：同一总线帧既能出原始位也能出物理值
+[ ] M3-11 feat(cli)：probe source / probe ecu 完整化（含交叉校验报告与 [raw] 标注）→ 验收：仅 ELF 档缺失字段标 [raw] 而非填默认值
+[ ] M3-12 feat(ui)：标定量表格 + 显示属性编辑 + 统一故障面板 → 验收：故障面板只读 diag 的 Fault，不自造错误类型
+[ ] M3-13 docs：M3 收尾（golden 说明、fixtures 补件、状态回写）→ 验收：文档与实现无矛盾
 
 [ ] M4 标定写入（含写前快照与审计日志）+ 页切换与页对比 + 条件触发录制 + A2L 量程校验 + dataset JSON/DCM 导入/对比（含 DCM 解析的档二 golden）—— MVP 完成
 [ ] M5+ MDF4 录制与离线重开分析 / 怪癖配置层完善 / ZLG FFI 后端实作 / CAN-FD 实作 / XCP-on-Ethernet
