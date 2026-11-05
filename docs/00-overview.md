@@ -33,6 +33,7 @@ OpenAPE 是一个 Rust 开发的**开放汽车标定工具**（对标 CANape/INC
 | 目录 | 职责 | git 归属 |
 |---|---|---|
 | `docs/` | 治理文档（地图见 [README.md](README.md)） | tracked |
+| `fixtures/` | 入库测试夹具：ELF 溯源 C 源码、A2L golden（见 [fixtures/README.md](../fixtures/README.md)） | tracked |
 | `.agents/rules/` | 低频协作规则，条件加载 | tracked |
 | `script/` | 门禁检查脚本与台账 | tracked |
 | `.githooks/` | commit-msg 钩子薄壳 | tracked |

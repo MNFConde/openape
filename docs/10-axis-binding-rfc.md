@@ -123,7 +123,7 @@ R1 能挡住绝大多数顺序写错的情况，但方阵除外（见第 3 节�
 
 ## 8. Golden 样例
 
-输入取 M0-4 探针的夹具：`float cal_map[4][3]`、`cal_axis_x[3]`、`cal_axis_y[4]`（源码见 `tmp/spike-m0-4/fixtures/calib.c`，M3 时随 fixtures 入库）。
+输入取 M0-4 探针的夹具：`float cal_map[4][3]`、`cal_axis_x[3]`、`cal_axis_y[4]`（源码已入库：[fixtures/elf/calib.c](../fixtures/elf/calib.c)，编译方式见 [fixtures/README.md](../fixtures/README.md)）。
 
 配置：
 
@@ -186,7 +186,7 @@ axes = ["y_temp", "x_speed"]
 
 注意 `MATRIX_DIM 3 4` 与 `dims = [4, 3]` 是逆序关系，且两个 `AXIS_DESCR` 的顺序与 `axes` 顺序一致（x 在前）——A2L 内 `AXIS_DESCR` 的排列顺序按 x、y、z 递增，与 `axes` 的「内层优先」相反，这是最容易写反的一处，golden 必须锁死。
 
-上面这段片段已用 `a2lfile` **严格模式**实测解析通过（`warnings=0`，读回 `type=Map`、`MATRIX_DIM [3, 4]`、`AXIS_PTS_REF` 依次为 `x_speed`、`y_temp`），不是纸面示意。解析时需自备 `RECORD_LAYOUT RL` 与 `PROJECT`/`MODULE` 外壳——严格模式会因引用缺失而报错，这一点在 golden 落地时同样要遵守。
+上面这段片段已用 `a2lfile` **严格模式**实测解析通过（`warnings=0`，读回 `type=Map`、`MATRIX_DIM [3, 4]`、`AXIS_PTS_REF` 依次为 `x_speed`、`y_temp`），不是纸面示意；片段全文在 [fixtures/a2l/axis-binding-golden.a2l](../fixtures/a2l/axis-binding-golden.a2l)。解析时需自备 `RECORD_LAYOUT RL` 与 `PROJECT`/`MODULE` 外壳——严格模式会因引用缺失而报错，这一点在 golden 落地时同样要遵守。
 
 反向用例（必须报 R1 错）：`axes = ["x_speed", "y_temp"]` 时 `len=3` 对 `dims[0]=4` 不匹配。
 
