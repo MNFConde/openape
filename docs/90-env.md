@@ -44,6 +44,13 @@ uv venv .venv
 uv pip install --python .venv/bin/python pyxcp==0.30.2 python-can==4.6.1
 ```
 
+## 浏览器侧验证环境（M0-3 起）
+
+- **npm/npx**：`apt install -y npm`（9.2.0，与已装 node 18.19 配套）。此前 `/usr/bin/npm` 不存在，`npm` 解析到 Windows scoop 的 `/mnt/d/...`，全局安装会落进 Windows 侧。
+- **protoc**：`apt install -y protobuf-compiler`（libprotoc 3.21.12），tonic 的 build 脚本依赖。
+- **Chrome**：装 Google 官方 deb（`google-chrome-stable`，157）。Ubuntu 24.04 的 `chromium-browser` 是 snap 过渡包，WSL 无 snap 装不上。headless 需 `--no-sandbox --disable-dev-shm-usage`（root 运行）。
+- **抓浏览器执行结果**：让页面把结果 POST 回服务端落文件，比 `--dump-dom` 可靠——后者在 load 后即退出，异步流还没跑完。
+
 ## 本机 agent 工具链
 
 - **skills-manager CLI**（`~/.local/bin/skills-manager-cli`）：技能库在 `~/.skills-manager/skills`，对远程 `skills-manager-backup` 仓库只做**只读镜像**——push 地址指向 `DISABLED_PULL_ONLY`，推送被物理阻断；同步入口 `sm-sync`（fetch → `reset --hard` → `clean -fd` → CLI 索引重建 → 死链检查），本地改动一律丢弃。
@@ -66,6 +73,13 @@ uv pip install --python .venv/bin/python pyxcp==0.30.2 python-can==4.6.1
 - 对策：`sm-sync` 末尾遍历各 agent 的 skills_dir 检查链接目标是否存在，报出 agent / 链接路径 / 目标路径并以非零退出码提示。
 - 校验：`sm-sync` 输出「ok: N 个符号链接全部有效」；出现死链时按提示 `skills undeploy` 后重新 deploy。
 - 详情：就地展开（2026-11-05 实测：造死链能被精确报出，正常态 12/12 有效）。
+
+### 3. `pkill -f` 会连自己所在的 shell 一起杀
+
+- 坑：`pkill -f 'target/debug/spike-m0-3'` 里，执行这条命令的 shell 命令行本身就含该字符串，于是把自己也匹配上——进程收到 SIGTERM，命令返回 143，看起来像构建失败。
+- 对策：按进程名精确杀 `pkill -x spike-m0-3`；脚本里 `trap cleanup EXIT` 同样用精确匹配。
+- 校验：杀完 `pgrep -x spike-m0-3` 无输出。
+- 详情：就地展开（2026-11-05 M0-3 spike 实测，构建步骤被误判为 SIGTERM）。
 
 ## 相关
 

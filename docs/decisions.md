@@ -61,6 +61,7 @@ updated: 2026-11-05
 - 决策：gRPC（tonic）+ grpc-web 先行，proto 即契约；若流式调试难度不可接受，降级为 REST + WebSocket（DAQ 流走 msgpack/二进制帧）。
 - 依据：强类型 IDL 对前后端一致性与未来多语言自动化控制端价值大；grpc-web 流式存在已知坑，降级预案前置到 M0-3 spike 验证。
 - 影响：M0-3 spike 是 go/no-go 闸门；降级触发即改本文标记并同步 decisions。
+- 验证结论（2026-11-05，M0-3 spike）：**主案成立，不降级**。Chrome headless 实测 tonic + `GrpcWebLayer` 的 server-streaming 20 帧全收、`grpc-status:0`、连跑 3 次一致，客户端 abort 后服务端 task 正确退出。三条实现约束并入 M2 约定：（1）tonic 0.14 用 `GrpcWebLayer` 替代已移除的 `tonic_web::enable()`，服务端须 `accept_http1(true)`；（2）**daemon 必须单端口同时提供静态页面与 grpc-web**——跨端口时 `CorsLayer` 覆盖不到 OPTIONS 预检（tonic 在路由前返回 400），浏览器侧必挂；做法是 axum 包 tonic service，注意请求体 `axum::body::Body → tonic::body::Body`、响应体反向转换；（3）长流靠 `mpsc::Sender::send` 返回 `Err` 判定客户端断开，需留 task 退出路径。细节见 `tmp/spike-m0-3/REPORT.md`。
 
 ## D-06 模拟器与怪癖机制
 
