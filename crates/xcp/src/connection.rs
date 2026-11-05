@@ -2,6 +2,7 @@
 //! 传输介质（CAN 现在、以太网后补）差异收在实现里。
 
 use async_trait::async_trait;
+use openape_cal_core::{Address, ByteLen};
 use openape_diag::{Domain, Fault, FaultCode, Severity};
 
 /// 建链后从站报告的会话参数。
@@ -41,6 +42,9 @@ pub trait XcpConnection: Send + Sync {
 
     /// 查会话状态。
     async fn status(&mut self) -> Result<SessionStatus, Fault>;
+
+    /// 读一段内存。按地址短读，不动传输地址。
+    async fn read(&mut self, address: Address, len: ByteLen) -> Result<Vec<u8>, Fault>;
 }
 
 /// XCP 域的故障序号。集中在此，避免各处散落魔法数字。
@@ -57,6 +61,8 @@ pub mod seq {
     pub const NOT_CONNECTED: u32 = 5;
     /// 底层总线出错。
     pub const BUS: u32 = 6;
+    /// 读长度超出单帧能力。
+    pub const TOO_LONG: u32 = 7;
 }
 
 /// 构造一条 XCP 域故障。序号固定在 [`seq`] 的常量里，构造不会失败。

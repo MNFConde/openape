@@ -7,5 +7,5 @@
 pub mod can;
 pub mod connection;
 
-pub use can::{CanXcpMaster, XcpConfig};
+pub use can::{CanXcpMaster, MAX_SHORT_UPLOAD_LEN, XcpConfig};
 pub use connection::{ConnectInfo, SessionStatus, XcpConnection};

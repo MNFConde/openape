@@ -5,10 +5,14 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use openape_bus::{Bus, BusError, CanFrame, CanId};
+use openape_cal_core::{Address, ByteLen};
 use openape_diag::{Fault, Severity};
 use openape_xcp_proto::{Command, DecodeError, ErrorCode, MAX_CTO, PID_CMD_RES, Response};
 
 use crate::connection::{self, ConnectInfo, SessionStatus, XcpConnection, seq};
+
+/// SHORT_UPLOAD 单次可读的最大字节数：响应帧 `PID + 命令码 + 数据` 共 8 字节。
+pub const MAX_SHORT_UPLOAD_LEN: u16 = (MAX_CTO - 2) as u16;
 
 /// 会话参数。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -185,6 +189,58 @@ impl XcpConnection for CanXcpMaster {
             protection,
         })
     }
+
+    async fn read(&mut self, address: Address, len: ByteLen) -> Result<Vec<u8>, Fault> {
+        if !self.connected {
+            return Err(connection::fault(
+                seq::NOT_CONNECTED,
+                Severity::Error,
+                "读之前必须先 connect",
+            )
+            .with_hint("会话未建立，从站不会响应内存类命令"));
+        }
+
+        let total = len.get() as usize;
+        // 一帧装得下就用 SHORT_UPLOAD：一条命令、不动传输地址。
+        if total <= MAX_SHORT_UPLOAD_LEN as usize {
+            let payload = self
+                .transact(&Command::ShortUpload {
+                    len: total as u8,
+                    address_extension: 0,
+                    address: address.get(),
+                })
+                .await?;
+            return take_exact(payload, total);
+        }
+
+        // 装不下就 SET_MTA 一次，再按 UPLOAD 逐帧搬；UPLOAD 自己会推进地址。
+        self.transact(&Command::SetMta {
+            address_extension: 0,
+            address: address.get(),
+        })
+        .await?;
+
+        let mut out = Vec::with_capacity(total);
+        while out.len() < total {
+            let remaining = total - out.len();
+            let chunk = remaining.min(MAX_SHORT_UPLOAD_LEN as usize);
+            let payload = self.transact(&Command::Upload { len: chunk as u8 }).await?;
+            out.extend_from_slice(&take_exact(payload, chunk)?);
+        }
+        Ok(out)
+    }
+}
+
+/// 取前 `wanted` 字节；不足即报协议错，不拿填充字节冒充数据。
+fn take_exact(payload: Vec<u8>, wanted: usize) -> Result<Vec<u8>, Fault> {
+    if payload.len() < wanted {
+        return Err(connection::fault(
+            seq::PROTOCOL,
+            Severity::Error,
+            format!("要求 {wanted} 字节，从站只回了 {} 字节", payload.len()),
+        ));
+    }
+    Ok(payload[..wanted].to_vec())
 }
 
 /// 解析 CONNECT 响应。CAN 上参数放不全时版本字段缺席，不臆造。
