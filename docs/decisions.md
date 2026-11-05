@@ -9,7 +9,7 @@ updated: 2026-11-05
 
 单文件形态（约 10 条以内）；超过 10 条拆 `adr/` 一篇一文件。需求"做什么"见 [requirements.md](requirements.md)，本文只记"为什么这么选"。
 
-> 现状（2026-11-05）：已 13 条，超阈值。拆分需迁移全部 `#d-xx` 锚点与外部引用，风险高于收益，故并入 M1 文档工作一并处理，此处登记为技术债，不静默破例。
+> 现状（2026-11-05）：已 18 条，超阈值。拆分需迁移全部 `#d-xx` 锚点与外部引用，风险高于收益，故并入 M1 文档工作一并处理，此处登记为技术债，不静默破例。
 
 ## D-01 协议与范围
 
@@ -84,6 +84,7 @@ updated: 2026-11-05
 - 决策：`xcp` crate 基于 automotive 二次封装；其 adapter trait 若不能挂自研 ZLG 后端则 fork 抽层（M0-1 spike 裁决）。
 - 依据：省掉最磨人的 DAQ 配置/页切换协议逻辑；协议行为另以 pyXCP 与 ASAM 标准对照。
 - 影响：上游为单人维护，接口面收在 `xcp` crate 内部，不外漏；M0-1 裁决已出——**可外挂、无需 fork**，见 D-11。
+- 更正说明（2026-11-05）：本决策的"基于 automotive 二次封装"已被 [D-16](#d-16-xcp-master-自研) 推翻——`xcp` 改为自研 master，automotive 降为**行为参考**，不再作为依赖。D-07 保留原判断以留决策轨迹。
 
 ## D-08 数据集格式
 
@@ -124,6 +125,7 @@ updated: 2026-11-05
 - 决策：**无需 fork**。`CanAdapter` 为公开阻塞式 trait（send/recv 必需，其余带默认实现），外部 crate 直接实现；`AsyncCanAdapter::new<T: CanAdapter + Send + 'static>` 泛型收值起 worker 线程，`XCPOnCAN::new(Arc<AsyncCanAdapter>, XCPCanConfig)` 消费，`fd: true` 构造成功（spike 编译运行实测，SPIKE-GREEN）。
 - 依据：源码裁决（automotive @ 2026-11-04 master，默认 `features = []` 核心零后端可编译）+ 编译运行实测；ZLG 后端只需在 `bus-zlg` 填三个 FFI 面——`ZCAN_OpenDevice`（构造）、`ZCAN_Transmit`（send）、`ZCAN_Receive`（recv），BRS 由通道时序配置出 `default_brs`。
 - 影响：M5 ZLG 后端按外挂实现；CAN 标准帧 ID 上限 0x7FF，超限用 `Identifier::extended`；生产依赖取 crates.io 版本（spike 用源码路径 dep）；automotive 上游变更风险仍收在 `xcp` crate 内部。
+- 更正说明（2026-11-05）：裁决事实（`CanAdapter` 可外挂）仍成立，但**采用路径作废**——[D-16](#d-16-xcp-master-自研) 决定 `xcp` 自研后不再存在"把自研后端挂到 automotive 上"的需求。ZLG 与 Vector 等后端改在 [D-03](#d-03-平台与硬件) 的 `Bus` 抽象下实现，与 XCP 层解耦。
 
 ## D-12 XCP-on-CAN 从站自研
 
@@ -149,4 +151,54 @@ updated: 2026-11-05
   - **构建前提转为加载体检**：ELF 须带 `-g` 且未 strip；不满足时只警告不阻断，逐条给可操作提示；`static` 同名跨编译单元自动加 CU 前缀。
 - 依据：（1）DWARF 无角色/单位/轴归属字段，启发式误判的代价是写坏 ECU 内存；（2）XCP `DOWNLOAD` 按地址直写、从站不校验语义，角色不明时必须收紧写路径；（3）旁车的维护成本与 A2L 同级，违背"仅 ELF 更省事"的初衷；（4）轴长度可由 DWARF 或符号大小硬校验，绑定本身可信。
 - 影响：M0-5 的 RFC 范围收窄为"轴为独立实体 + 引用 + 绑定 + 工程配置格式"，单位与换算移出（归 A2L 档）；IR 语义字段统一 `Option`；录制文件与 dataset schema 需带模式标记（仅 ELF / 带 A2L），避免两档数值被混比。
+
+## D-16 XCP master 自研
+
+- 状态：已决策
+- 日期：2026-11-05
+- 规范位置：[11-architecture-layers.md](11-architecture-layers.md#三道屏蔽墙)、[credits.md](credits.md#行为参考)
+- 背景：[D-07](#d-07-xcp-master-复用) 决策"基于 automotive 二次封装"、[D-11](#d-11-automotive-后端外挂裁决) 裁决"其 adapter 可外挂自研后端"。但 automotive 把 XCP 会话逻辑（DAQ 配置、页切换、上下载）与 CAN 传输实现焊在同一个类型上：一旦需要以太网等其它传输，其上层逻辑无法复用；同时 IP 直接依赖会让单人维护的上游接口变动持续穿透到本项目。
+- 决策：`xcp` crate **自研 XCP master**；automotive 降为**行为参考**——阅读其命令序列与处理顺序，代码自写，在 [credits.md](credits.md) 登记并致谢。D-07 与 D-11 的"复用 automotive"部分随之失效。协议帧编解码抽为 L1 的 `xcp-proto`，由 master（`xcp`）与从站（`sim-ecu`）共享。
+- 依据：（1）M0-2 已自研从站协议层，命令码、帧对齐填充、ODT 编号等细节已掌握；（2）主从共享编解码，从结构上消除两侧协议理解漂移；（3）自主实现让 CAN 与以太网在同一抽象下平等，符合 [D-01](#d-01-协议与范围) 留传输层的口径；（4）D-11 的实测已证明其上层逻辑不可分离，所谓薄封装名不副实。
+- 影响：`xcp` 增加 DAQ 配置逻辑的自研工作量（评估 2–3k 行，M2 内消化）；automotive 退出依赖表；ZLG 与 Vector 后端统一走 `Bus` 抽象，D-11 的"外挂 automotive 后端"路径作废；协议行为另以 pyXCP 与 ASAM 标准对照。
+
+## D-17 crate 分档与依赖方向
+
+- 状态：已决策
+- 日期：2026-11-05
+- 规范位置：[11-architecture-layers.md](11-architecture-layers.md#crate-分档与依赖方向)
+- 背景：外部差异（硬件、传输介质、信息源格式）会在多个 crate 同时出现；若只靠 crate 边界而不定依赖方向，半年后必然出现"上层判别后端名"和环形依赖。
+- 决策：crate 分六档——L0 `diag` / L1 契约（`cal-core`、`xcp-proto`、`proto`）/ L2 实现（`bus`、`bus-*`、`format-*`、`xcp`）/ L3 编排（`session`、`sim-ecu`）/ L4 装配（`assembly`）/ L5 外壳（`daemon`、`cli`、`ui`）。依赖只准向下、同档不互赖；跨 crate 类型只在 L1 定义；跨边界一律对象安全 trait。**三道墙**为 `Bus`、`XcpConnection`、`CalibrationSource`，另加 `BusCapabilities` 供上层按能力降级——禁止按后端名分支。只有装配层可指名具体后端 crate。
+- 依据：（1）"加 Vector 只改装配一行"这一诉求只能靠依赖倒置满足，trait 本身不够；（2）`diag` 被全层依赖，必须自身零业务依赖才不成环；（3）类型单一源与统一错误转换是接口一致性的最低成本手段；（4）方向靠门禁而非记忆，故 `script/check-deps.py` 按分档表校验 Cargo.toml（M1 落地）。
+- 影响：新增硬件 = 新建 `bus-*` crate 加装配层一个分支；`xcp` 与 `session` 不动；`cargo semver-checks` 与 `cargo-deny` 一并入门禁；`00-overview.md` 拓扑表按本分档重排并登记新 crate。
+
+## D-18 双前端共享引擎
+
+- 状态：已决策
+- 日期：2026-11-05
+- 规范位置：[11-architecture-layers.md](11-architecture-layers.md#双前端共享引擎)
+- 背景：项目需要两种形态——常驻作业（daemon 加 UI，本地或远程）与单次探测（一条命令看现象，供脚本与 AI 代理编排快速测试环境）。若各自实现，行为必然分叉。
+- 决策：编排逻辑（设备装配、DAQ 环形缓冲、录制、状态机、设备锁）落在 L3 的 `session` 纯库；`daemon` 与 `cli` 是其两个外壳，前者常驻、后者进程即退。CLI 遵守四条纪律：一条命令即一次自足事务、分阶段可组合（`probe bus` / `probe xcp` / `probe source` / `probe ecu`）、输出双模（人类可读与 `--json`，结构源同 `proto`，退出码按故障类别分段）、超时内建。设备独占由 `session` 按（后端、通道）加进程级锁，另有 `--via-daemon` 经本地 gRPC 复用正在运行的会话。
+- 依据：（1）一套实现天然保证两种形态行为一致；（2）结构化输出让外部脚本与 AI 代理不必解析散文，探测循环可自动化；（3）CAN 硬件通常不允许两进程同开，锁与转发路径必须前置，否则 CLI 与 daemon 会互相打死。
+- 影响：`daemon` 退化为薄外壳（`session` 加 gRPC 与静态托管）；`proto` 必须同时服务 UI 与 CLI 输出；`cli` 的探测子命令与 `doctor` 自检共用判定实现。
+
+## D-19 可观测层合并
+
+- 状态：已决策
+- 日期：2026-11-05
+- 规范位置：[11-architecture-layers.md](11-architecture-layers.md#可观测层)
+- 背景：维测日志、故障上报、性能监测三项都是横切关注点，共用会话与 ECU 上下文；分散成多个 crate 会产生多份初始化、多次依赖声明与不一致的上下文字段。
+- 决策：三者合并为 L0 的 `diag` crate（内部 `log` / `fault` / `metrics` 三模块）。日志分三层：常规运行日志、维测帧级记录（运行时开关）、黑匣子环形缓冲（故障触发时落盘）。故障用单一 `Fault` 结构（稳定编号、严重度、上下文、可操作建议、错误链），编号按域分段并与 CLI 退出码对齐；`FaultClassifier` 是**唯一**允许判别后端差异的位置；上报走 `FaultSink` 多实现，外部上报默认关闭。一等指标五项：DAQ 帧率、丢帧数、命令延迟分位、背压排队深度、进程内存。
+- 依据：（1）共用上下文与单次初始化即可覆盖三件事；（2）黑匣子针对现场偶发问题，事后追加日志开关无效；（3）错误归一化集中在唯一位置，才能让上层全用 `?` 而不写后端判别；（4）丢帧是高频采集最先崩的地方，必须是一等指标。
+- 影响：所有 crate 依赖 `diag`，其零业务依赖成为硬约束（见 [D-17](#d-17-crate-分档与依赖方向)）；UI 侧只做一个统一故障面板；`diag` 本身是 M1 首批落地内容。
+
+## D-20 公开面分层承诺
+
+- 状态：已决策
+- 日期：2026-11-05
+- 规范位置：[11-architecture-layers.md](11-architecture-layers.md#公开面策略)
+- 背景：既要让别人能基于本项目继续开发（不能因抽象不合理或函数不公开而用不起来），又不能把所有函数都公开——后者等于给内部实现永久承诺 semver。
+- 决策：按层承诺——L1 契约全公开且 semver 严格；L2 实现只公开 trait 实现与少量构造器，内部模块 `pub(crate)`；L3 编排对外一个 facade 加配置与事件枚举、字段全私有；L5 外壳不对外。四条机制：facade 手势（私有字段、构造走 `new`/Builder）、扩展点必须在 trait 且可 `dyn` 取出、半成品放 `pub mod unstable` 并声明不保证兼容、每个契约 crate 至少一个只用公开 API 的 `examples/` 流程作为抽象验收。反向规则：不为"将来可能有用"而公开，先 `pub(crate)`，放开是兼容变更、收紧是破坏性变更。
+- 依据：（1）example 写不出来即抽象不足，这是最廉价也最真实的可用性检验；（2）扩展点落在 trait 上而非函数上，外部才能在不改本项目的前提下接入新硬件与新信息源；（3）私有字段让内部结构调整不构成破坏性变更。
+- 影响：`examples/` 成为契约 crate 的完成标准之一；公开面变更由 `cargo semver-checks` 把守（见 [D-17](#d-17-crate-分档与依赖方向)）。
 
