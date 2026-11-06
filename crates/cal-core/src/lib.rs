@@ -10,8 +10,11 @@
 
 #![forbid(unsafe_code)]
 
+mod config;
 mod ir;
 mod types;
+
+pub use config::{ConfigError, ProjectConfig, SCHEMA_VERSION};
 
 pub use ir::{
     Axis, AxisBinding, AxisKind, AxisSpec, BadId, BadRange, BadSymbol, BindingError, BindingSpec,

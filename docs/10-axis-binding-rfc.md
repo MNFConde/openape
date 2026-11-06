@@ -194,6 +194,6 @@ axes = ["y_temp", "x_speed"]
 
 - **M2**：`cal-core` 落轴与值的 IR 类型、TOML 解析、R1 至 R7 校验与单元测试；配置文件位置与解析入口随 IR 一并确定。M1 的 `cal-core` 只有地址、长度、句柄等基础类型，不含 IR（见 [11-architecture-layers.md](11-architecture-layers.md#切分判据与后置项)）
   - 已落（M2-01、M2-02）：IR 类型与 R1–R7 校验在 `crates/cal-core/src/ir/`，第 8 节的期望快照即为单元测试的断言目标，反例逐条各有一条测试
-  - 待落（M2-03）：TOML 解析与配置文件位置
+  - 已落（M2-03）：`ProjectConfig::from_toml` 读第 4 节格式，带版本字段、容忍未知字段、错误带行号与修法；文件位置由外壳决定，`cal-core` 不碰文件系统
 - **M3**：golden 三件套入库（ELF 夹具、配置、期望 JSON 与 A2L 片段），档二 golden 的字节级对比以本文第 8 节为准
 - 未决：三维及以上的暴露方式、轴排序与单调性是否进 M1 校验、本配置是否与 quirk 配置同文件——三项都留给 M1 决定，不影响当前格式（未知字段容忍已预留）
