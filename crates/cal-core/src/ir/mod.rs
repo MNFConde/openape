@@ -17,6 +17,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::{Address, ByteLen};
 
+pub mod axis;
+
+pub use axis::{
+    Axis, AxisBinding, AxisKind, AxisSpec, BadId, BindingError, BindingSpec, BoundValue,
+    Diagnostic, Id, Rule, Severity, ValueKind, ValueSpec,
+};
+
+/// 名字通行规则：非空，且首尾没有空白。
+///
+/// [`Symbol`] 与 [`Id`] 共用这一条——两处各写一遍，迟早一处放行一处拒绝。
+pub(crate) fn check_name(raw: &str) -> bool {
+    !raw.is_empty() && raw.trim() == raw
+}
+
 /// 变量符号路径，如 `cal_gains.kp`。
 ///
 /// 空符号或首尾带空白的符号没有意义，构造时就拒绝。
@@ -27,10 +41,7 @@ pub struct Symbol(String);
 impl Symbol {
     /// 构造符号；空串或首尾空白返回 `None`。
     pub fn new(raw: &str) -> Option<Self> {
-        if raw.is_empty() || raw.trim() != raw {
-            return None;
-        }
-        Some(Self(raw.to_owned()))
+        check_name(raw).then(|| Self(raw.to_owned()))
     }
 
     /// 符号原文。

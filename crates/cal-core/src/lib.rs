@@ -14,7 +14,8 @@ mod ir;
 mod types;
 
 pub use ir::{
-    BadRange, BadSymbol, DuplicateSymbol, ElemType, EmptyUnit, Range, Role, Scale, Semantics,
-    Symbol, Unit, Variable, VariableTree,
+    Axis, AxisBinding, AxisKind, AxisSpec, BadId, BadRange, BadSymbol, BindingError, BindingSpec,
+    BoundValue, Diagnostic, DuplicateSymbol, ElemType, EmptyUnit, Id, Range, Role, Rule, Scale,
+    Semantics, Severity, Symbol, Unit, ValueKind, ValueSpec, Variable, VariableTree,
 };
 pub use types::{Address, ByteLen, Handle, ZeroLen};
