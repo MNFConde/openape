@@ -91,6 +91,12 @@ impl Encoder {
         self
     }
 
+    // u16 与 u32 结构同构（对齐 + 小端 + 追加），dryer 报相似度 1.00。
+    // **刻意保留**：要消掉得引入自定义 trait 或宏，为一个 4 方法的小工具造
+    // 抽象层，比三行重复更难读。触发修改的条件（任一满足即改）：
+    // 1. 出现第三种宽度（u64 时间戳）或 Decoder 侧也变成同构，重复份数到 4；
+    // 2. 抽象后调用点仍保留语义（`enc.int(x)` 会丢宽度信息，`enc.u16(x)` 不会）；
+    // 3. dryer 进 CI 门禁，逐条争论例外的成本高于写一次 trait。
     pub(crate) fn u16(mut self, value: u16) -> Self {
         self.align(2);
         self.buf.extend_from_slice(&value.to_le_bytes());

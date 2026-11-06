@@ -265,6 +265,23 @@ mod tests {
     }
 
     #[test]
+    fn error_code_table_covers_every_known_value() {
+        let table = [
+            (0x00, ErrorCode::CmdSynch),
+            (0x01, ErrorCode::CmdBusy),
+            (0x02, ErrorCode::DaqActive),
+            (0x10, ErrorCode::CmdUnknown),
+            (0x11, ErrorCode::CmdSyntax),
+            (0x12, ErrorCode::OutOfRange),
+            (0x23, ErrorCode::PageNotValid),
+        ];
+        for (byte, code) in table {
+            assert_eq!(ErrorCode::from_u8(byte), Some(code), "{byte:#04x}");
+        }
+        assert_eq!(ErrorCode::from_u8(0x7F), None, "未登记的错误码不猜");
+    }
+
+    #[test]
     fn standard_error_codes_differ_from_spike_values() {
         // spike 把未知命令记成 0x22；标准 0x22 是 ERR_ACCESS_LOCKED。
         assert_eq!(ErrorCode::from_u8(0x10), Some(ErrorCode::CmdUnknown));

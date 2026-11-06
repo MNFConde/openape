@@ -114,7 +114,8 @@ pub enum Command {
 }
 
 impl Command {
-    /// 命令码。
+    /// 命令码。分支数等于命令表条数，CRAP 刻意保留在阈值之上，见
+    /// [`Command::decode_command`]。
     pub const fn code(&self) -> CommandCode {
         match self {
             Self::Connect { .. } => CommandCode::Connect,
@@ -133,31 +134,27 @@ impl Command {
 
     /// 编码成整帧（PID + 命令码 + 参数）。超过 `MAX_CTO` 返回错误。
     pub fn encode(&self) -> Result<Vec<u8>, EncodeError> {
+        // 命令码只有 `code()` 一处来源；这里不再逐个硬编码，否则改一处漏一处。
+        let code = self.code() as u8;
         let bytes = match self {
-            Self::Connect { mode } => Encoder::with_frame(CommandCode::Connect as u8)
-                .u8(*mode)
-                .finish(),
-            Self::Disconnect => Encoder::with_frame(CommandCode::Disconnect as u8).finish(),
-            Self::GetStatus => Encoder::with_frame(CommandCode::GetStatus as u8).finish(),
-            Self::Synch => Encoder::with_frame(CommandCode::Synch as u8).finish(),
-            Self::GetCommModeInfo => {
-                Encoder::with_frame(CommandCode::GetCommModeInfo as u8).finish()
-            }
+            Self::Connect { mode } => Encoder::with_frame(code).u8(*mode).finish(),
+            Self::Disconnect => Encoder::with_frame(code).finish(),
+            Self::GetStatus => Encoder::with_frame(code).finish(),
+            Self::Synch => Encoder::with_frame(code).finish(),
+            Self::GetCommModeInfo => Encoder::with_frame(code).finish(),
             Self::SetMta {
                 address_extension,
                 address,
-            } => Encoder::with_frame(CommandCode::SetMta as u8)
+            } => Encoder::with_frame(code)
                 .u8(*address_extension)
                 .u32(*address)
                 .finish(),
-            Self::Upload { len } => Encoder::with_frame(CommandCode::Upload as u8)
-                .u8(*len)
-                .finish(),
+            Self::Upload { len } => Encoder::with_frame(code).u8(*len).finish(),
             Self::ShortUpload {
                 len,
                 address_extension,
                 address,
-            } => Encoder::with_frame(CommandCode::ShortUpload as u8)
+            } => Encoder::with_frame(code)
                 .u8(*len)
                 .u8(*address_extension)
                 .u32(*address)
@@ -169,22 +166,16 @@ impl Command {
                         actual: data.len(),
                     });
                 }
-                Encoder::with_frame(CommandCode::Download as u8)
-                    .u8(*len)
-                    .bytes(data)
-                    .finish()
+                Encoder::with_frame(code).u8(*len).bytes(data).finish()
             }
             Self::GetCalPage { mode, segment } => {
-                Encoder::with_frame(CommandCode::GetCalPage as u8)
-                    .u8(*mode)
-                    .u8(*segment)
-                    .finish()
+                Encoder::with_frame(code).u8(*mode).u8(*segment).finish()
             }
             Self::SetCalPage {
                 mode,
                 segment,
                 page,
-            } => Encoder::with_frame(CommandCode::SetCalPage as u8)
+            } => Encoder::with_frame(code)
                 .u8(*mode)
                 .u8(*segment)
                 .u16(*page)
@@ -209,49 +200,78 @@ impl Command {
         let mut decoder = Decoder::at(frame, 1);
         let raw = decoder.u8()?;
         let code = CommandCode::from_u8(raw).ok_or(DecodeError::UnknownCommand { code: raw })?;
+        Self::decode_command(code, &mut decoder)
+    }
+
+    /// 按命令码分派参数解析。
+    ///
+    /// CRAP 报告里本函数的圈复杂度是 11，与 [`Command::code`] 的 12 一样高于
+    /// 阈值 10：这两个分支数是 XCP 命令表本身，不是设计缺陷——拆到底还是
+    /// 十一条臂。**刻意保留**，不再拆分。
+    fn decode_command(code: CommandCode, decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
         Ok(match code {
-            CommandCode::Connect => Self::Connect {
-                mode: decoder.u8()?,
-            },
+            CommandCode::Connect => Self::decode_connect(decoder)?,
             CommandCode::Disconnect => Self::Disconnect,
             CommandCode::GetStatus => Self::GetStatus,
             CommandCode::Synch => Self::Synch,
             CommandCode::GetCommModeInfo => Self::GetCommModeInfo,
-            CommandCode::SetMta => {
-                let address_extension = decoder.u8()?;
-                Self::SetMta {
-                    address_extension,
-                    address: decoder.u32()?,
-                }
-            }
-            CommandCode::Upload => Self::Upload { len: decoder.u8()? },
-            CommandCode::ShortUpload => {
-                let len = decoder.u8()?;
-                let address_extension = decoder.u8()?;
-                Self::ShortUpload {
-                    len,
-                    address_extension,
-                    address: decoder.u32()?,
-                }
-            }
-            CommandCode::Download => {
-                let len = decoder.u8()?;
-                let data = decoder.take(len as usize)?.to_vec();
-                Self::Download { len, data }
-            }
-            CommandCode::GetCalPage => Self::GetCalPage {
-                mode: decoder.u8()?,
-                segment: decoder.u8()?,
-            },
-            CommandCode::SetCalPage => {
-                let mode = decoder.u8()?;
-                let segment = decoder.u8()?;
-                Self::SetCalPage {
-                    mode,
-                    segment,
-                    page: decoder.u16()?,
-                }
-            }
+            CommandCode::SetMta => Self::decode_set_mta(decoder)?,
+            CommandCode::Upload => Self::decode_upload(decoder)?,
+            CommandCode::ShortUpload => Self::decode_short_upload(decoder)?,
+            CommandCode::Download => Self::decode_download(decoder)?,
+            CommandCode::GetCalPage => Self::decode_get_cal_page(decoder)?,
+            CommandCode::SetCalPage => Self::decode_set_cal_page(decoder)?,
+        })
+    }
+
+    fn decode_connect(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
+        Ok(Self::Connect {
+            mode: decoder.u8()?,
+        })
+    }
+
+    fn decode_set_mta(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
+        let address_extension = decoder.u8()?;
+        Ok(Self::SetMta {
+            address_extension,
+            address: decoder.u32()?,
+        })
+    }
+
+    fn decode_upload(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
+        Ok(Self::Upload { len: decoder.u8()? })
+    }
+
+    fn decode_short_upload(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
+        let len = decoder.u8()?;
+        let address_extension = decoder.u8()?;
+        Ok(Self::ShortUpload {
+            len,
+            address_extension,
+            address: decoder.u32()?,
+        })
+    }
+
+    fn decode_download(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
+        let len = decoder.u8()?;
+        let data = decoder.take(len as usize)?.to_vec();
+        Ok(Self::Download { len, data })
+    }
+
+    fn decode_get_cal_page(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
+        Ok(Self::GetCalPage {
+            mode: decoder.u8()?,
+            segment: decoder.u8()?,
+        })
+    }
+
+    fn decode_set_cal_page(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
+        let mode = decoder.u8()?;
+        let segment = decoder.u8()?;
+        Ok(Self::SetCalPage {
+            mode,
+            segment,
+            page: decoder.u16()?,
         })
     }
 }
@@ -347,6 +367,109 @@ mod tests {
                 "{command:?}"
             );
         }
+    }
+
+    #[test]
+    fn every_command_reports_its_own_code() {
+        // 命令码只有 code() 一处来源，这里把整张表钉住。
+        let pairs = [
+            (Command::Connect { mode: 0 }, CommandCode::Connect),
+            (Command::Disconnect, CommandCode::Disconnect),
+            (Command::GetStatus, CommandCode::GetStatus),
+            (Command::Synch, CommandCode::Synch),
+            (Command::GetCommModeInfo, CommandCode::GetCommModeInfo),
+            (
+                Command::SetMta {
+                    address_extension: 0,
+                    address: 0,
+                },
+                CommandCode::SetMta,
+            ),
+            (Command::Upload { len: 1 }, CommandCode::Upload),
+            (
+                Command::ShortUpload {
+                    len: 1,
+                    address_extension: 0,
+                    address: 0,
+                },
+                CommandCode::ShortUpload,
+            ),
+            (
+                Command::Download {
+                    len: 0,
+                    data: vec![],
+                },
+                CommandCode::Download,
+            ),
+            (
+                Command::GetCalPage {
+                    mode: 0,
+                    segment: 0,
+                },
+                CommandCode::GetCalPage,
+            ),
+            (
+                Command::SetCalPage {
+                    mode: 0,
+                    segment: 0,
+                    page: 0,
+                },
+                CommandCode::SetCalPage,
+            ),
+        ];
+        for (command, expected) in pairs {
+            assert_eq!(command.code(), expected, "{command:?}");
+            assert_eq!(
+                command.encode().expect("一帧放得下")[1],
+                expected as u8,
+                "编码出来的命令码必须与 code() 一致"
+            );
+        }
+    }
+
+    #[test]
+    fn command_code_table_covers_every_wire_value() {
+        let table = [
+            (0xFF, CommandCode::Connect),
+            (0xFE, CommandCode::Disconnect),
+            (0xFD, CommandCode::GetStatus),
+            (0xFC, CommandCode::Synch),
+            (0xFB, CommandCode::GetCommModeInfo),
+            (0xF6, CommandCode::SetMta),
+            (0xF5, CommandCode::Upload),
+            (0xF4, CommandCode::ShortUpload),
+            (0xF0, CommandCode::Download),
+            (0xEA, CommandCode::GetCalPage),
+            (0xEB, CommandCode::SetCalPage),
+        ];
+        for (byte, code) in table {
+            assert_eq!(CommandCode::from_u8(byte), Some(code), "{byte:#04x}");
+        }
+        assert_eq!(CommandCode::from_u8(0x00), None, "未登记的命令码不猜");
+    }
+
+    #[test]
+    fn error_messages_state_the_problem_and_the_numbers() {
+        assert_eq!(
+            DecodeError::Truncated { need: 6, got: 4 }.to_string(),
+            "载荷被截断：需要 6 字节，只有 4 字节"
+        );
+        assert_eq!(
+            DecodeError::UnknownCommand { code: 0x22 }.to_string(),
+            "未知 CTO 命令码 0x22"
+        );
+        assert_eq!(
+            EncodeError::TooLong { len: 9, max: 8 }.to_string(),
+            "帧长 9 超过上限 8"
+        );
+        assert_eq!(
+            EncodeError::LenMismatch {
+                declared: 4,
+                actual: 2
+            }
+            .to_string(),
+            "声明 4 字节但给了 2 字节"
+        );
     }
 
     #[test]
