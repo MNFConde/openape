@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use openape_bus::{Bus, BusCapabilities, BusError, CanFrame, CanId, FrameKinds};
+use openape_bus::{Bus, BusCapabilities, BusError, CanFrame, CanId};
 use openape_cal_core::{Address, ByteLen};
 use openape_diag::Domain;
 use openape_xcp::{CanXcpMaster, XcpConfig, XcpConnection};
@@ -58,10 +58,7 @@ impl Bus for ScriptedBus {
     }
 
     fn capabilities(&self) -> BusCapabilities {
-        BusCapabilities {
-            backends: FrameKinds::classic_only(),
-            hardware_timestamp: false,
-        }
+        BusCapabilities::CLASSIC_SOFT_TIMESTAMP
     }
 
     async fn send(&self, frame: CanFrame) -> Result<(), BusError> {

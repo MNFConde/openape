@@ -48,7 +48,7 @@ pub(crate) mod test_support {
 
     use async_trait::async_trait;
 
-    use crate::{Bus, BusCapabilities, BusError, CanFrame, FrameKinds};
+    use crate::{Bus, BusCapabilities, BusError, CanFrame};
 
     /// 把发出的帧存在内存里，`recv` 从队列取。队列空时按超时返回。
     #[derive(Debug, Default)]
@@ -85,10 +85,7 @@ pub(crate) mod test_support {
         }
 
         fn capabilities(&self) -> BusCapabilities {
-            BusCapabilities {
-                backends: FrameKinds::classic_only(),
-                hardware_timestamp: false,
-            }
+            BusCapabilities::CLASSIC_SOFT_TIMESTAMP
         }
 
         async fn send(&self, frame: CanFrame) -> Result<(), BusError> {

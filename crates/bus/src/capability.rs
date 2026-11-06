@@ -11,20 +11,16 @@ pub struct FrameKinds {
 
 impl FrameKinds {
     /// 只支持经典 CAN。
-    pub const fn classic_only() -> Self {
-        Self {
-            classic: true,
-            fd: false,
-        }
-    }
+    pub const CLASSIC_ONLY: Self = Self {
+        classic: true,
+        fd: false,
+    };
 
     /// 两者都支持。
-    pub const fn both() -> Self {
-        Self {
-            classic: true,
-            fd: true,
-        }
-    }
+    pub const BOTH: Self = Self {
+        classic: true,
+        fd: true,
+    };
 }
 
 /// 后端能力。
@@ -38,6 +34,12 @@ pub struct BusCapabilities {
 }
 
 impl BusCapabilities {
+    /// 经典 CAN、无硬件时间戳：M1 所有后端的能力组合。
+    pub const CLASSIC_SOFT_TIMESTAMP: Self = Self {
+        backends: FrameKinds::CLASSIC_ONLY,
+        hardware_timestamp: false,
+    };
+
     /// 是否能发经典 CAN 帧。
     pub fn classic_can(&self) -> bool {
         self.backends.classic
@@ -55,10 +57,7 @@ mod tests {
 
     #[test]
     fn classic_only_backend_degrades_fd() {
-        let caps = BusCapabilities {
-            backends: FrameKinds::classic_only(),
-            hardware_timestamp: false,
-        };
+        let caps = BusCapabilities::CLASSIC_SOFT_TIMESTAMP;
         assert!(caps.classic_can());
         assert!(!caps.can_fd());
     }
@@ -66,7 +65,7 @@ mod tests {
     #[test]
     fn fd_backend_reports_both_kinds() {
         let caps = BusCapabilities {
-            backends: FrameKinds::both(),
+            backends: FrameKinds::BOTH,
             hardware_timestamp: true,
         };
         assert!(caps.classic_can() && caps.can_fd());

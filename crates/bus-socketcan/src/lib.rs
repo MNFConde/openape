@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use openape_bus::{Bus, BusCapabilities, BusError, CanFrame, CanId, FrameKinds};
+use openape_bus::{Bus, BusCapabilities, BusError, CanFrame, CanId};
 use socketcan::EmbeddedFrame as _;
 use socketcan::tokio::CanSocket;
 
@@ -61,13 +61,9 @@ impl Bus for SocketCanBus {
     }
 
     fn capabilities(&self) -> BusCapabilities {
-        BusCapabilities {
-            backends: FrameKinds::classic_only(),
-            // M1 走软时间戳路径：内核能提供硬件时间戳，但本后端尚未接入
-            // 读取路径，故对外报 false。接上 read_frame_with_hw_timestamp
-            // 之后才改成如实上报硬件能力。
-            hardware_timestamp: false,
-        }
+        // M1 走软时间戳路径：内核能提供硬件时间戳，但本后端尚未接入读取
+        // 路径，故对外报 false。接上 read_frame_with_hw_timestamp 之后才改。
+        BusCapabilities::CLASSIC_SOFT_TIMESTAMP
     }
 
     async fn send(&self, frame: CanFrame) -> Result<(), BusError> {
@@ -153,10 +149,7 @@ mod tests {
     #[test]
     fn capabilities_do_not_claim_fd() {
         // 能力位必须与实际发送路径一致：M1 只发经典帧。
-        let caps = BusCapabilities {
-            backends: FrameKinds::classic_only(),
-            hardware_timestamp: false,
-        };
+        let caps = BusCapabilities::CLASSIC_SOFT_TIMESTAMP;
         assert!(caps.classic_can());
         assert!(!caps.can_fd());
     }
