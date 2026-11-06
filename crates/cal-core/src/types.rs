@@ -63,6 +63,12 @@ pub struct ByteLen(u16);
 impl ByteLen {
     /// 一个字节。
     pub const ONE: Self = Self(1);
+    /// 两个字节。
+    pub const TWO: Self = Self(2);
+    /// 四个字节。
+    pub const FOUR: Self = Self(4);
+    /// 八个字节。
+    pub const EIGHT: Self = Self(8);
 
     /// 构造长度；`raw == 0` 返回 `None`。
     pub const fn new(raw: u16) -> Option<Self> {
