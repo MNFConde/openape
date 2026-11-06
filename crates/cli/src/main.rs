@@ -5,14 +5,13 @@
 
 #![forbid(unsafe_code)]
 
+mod commands;
+mod output;
+
 use std::process::ExitCode;
-use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use openape_cal_core::{Address, ByteLen};
-use openape_diag::{Fault, Verbosity, log};
-use openape_session::{ChannelProbe, Session, SessionConfig, list_channels, probe_channel};
-use serde::Serialize;
+use openape_diag::{Fault, FaultCode, Severity, Verbosity, log};
 
 #[derive(Debug, Parser)]
 #[command(name = "openape", version, about = "XCP 标定与观测工具")]
@@ -101,168 +100,54 @@ fn parse_u32(text: &str) -> Result<u32, std::num::ParseIntError> {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct BusReport {
-    channels: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    probed: Option<ProbeReport>,
-}
-
-#[derive(Debug, Serialize)]
-struct ProbeReport {
-    channel: String,
-    backend: String,
-    classic_can: bool,
-    can_fd: bool,
-    hardware_timestamp: bool,
-}
-
-impl From<ChannelProbe> for ProbeReport {
-    fn from(probe: ChannelProbe) -> Self {
-        Self {
-            channel: probe.channel,
-            backend: probe.backend.to_owned(),
-            classic_can: probe.capabilities.classic_can(),
-            can_fd: probe.capabilities.can_fd(),
-            hardware_timestamp: probe.capabilities.hardware_timestamp,
-        }
-    }
-}
-
-#[derive(Debug, Serialize)]
-struct ConnectReport {
-    channel: String,
-    resource: u8,
-    max_cto: u16,
-    max_dto: u16,
-    protocol_version: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct ReadReport {
-    channel: String,
-    address: String,
-    len: u16,
-    data_hex: String,
-}
-
-fn session_config(
-    channel: &str,
-    tx_id: u32,
-    rx_id: u32,
-    timeout_ms: u64,
-) -> Result<SessionConfig, Fault> {
-    let mut config = SessionConfig::new(channel);
-    config.command_id = openape_bus::CanId::standard(tx_id as u16)
-        .ok_or_else(|| usage_fault(format!("--tx-id {tx_id:#x} 超出 11 位标准帧范围")))?;
-    config.response_id = openape_bus::CanId::standard(rx_id as u16)
-        .ok_or_else(|| usage_fault(format!("--rx-id {rx_id:#x} 超出 11 位标准帧范围")))?;
-    config.timeout = Duration::from_millis(timeout_ms);
-    Ok(config)
-}
-
-fn usage_fault(message: String) -> Fault {
+/// 命令行用法错误。归内部域：这不是 ECU 或总线的问题。
+pub(crate) fn usage_fault(message: String) -> Fault {
     Fault::new(
-        openape_diag::FaultCode::new(openape_diag::Domain::Internal, 1).expect("序号 1 合法"),
-        openape_diag::Severity::Error,
+        FaultCode::new(openape_diag::Domain::Internal, 1).expect("序号 1 合法"),
+        Severity::Error,
         message,
     )
-    .with_hint("标识符取 0x000..=0x7FF；扩展帧暂不支持")
+    .with_hint("用 `openape <命令> --help` 查看参数")
 }
 
 async fn run(cli: &Cli) -> Result<String, Fault> {
     match &cli.command {
-        Command::Probe { target } => {
-            match target {
-                ProbeTarget::Bus(args) => {
-                    let channels = list_channels();
-                    let probed = match &args.channel {
-                        Some(channel) => Some(ProbeReport::from(probe_channel(channel)?)),
-                        None => None,
-                    };
-                    let report = BusReport { channels, probed };
-                    Ok(render(cli.json, &report, || {
-                        let mut out = String::new();
-                        out.push_str(&format!("通道 {} 条", report.channels.len()));
-                        if report.channels.is_empty() {
-                            out.push_str("\n  无 CAN 通道；vcan 可用 `ip link add dev vcan0 type vcan` 建一个");
-                        }
-                        for channel in &report.channels {
-                            out.push_str(&format!("\n  {channel}"));
-                        }
-                        if let Some(probe) = &report.probed {
-                            out.push_str(&format!(
-                                "\n探测 {}（{}）：经典 CAN={} CAN-FD={} 硬件时间戳={}",
-                                probe.channel,
-                                probe.backend,
-                                probe.classic_can,
-                                probe.can_fd,
-                                probe.hardware_timestamp
-                            ));
-                        }
-                        out
-                    })?)
-                }
-                ProbeTarget::Xcp(args) => {
-                    let config =
-                        session_config(&args.channel, args.tx_id, args.rx_id, args.timeout_ms)?;
-                    let mut session = Session::open(config)?;
-                    let info = session.connect(0).await?;
-                    let report = ConnectReport {
-                        channel: session.channel().to_owned(),
-                        resource: info.resource,
-                        max_cto: info.max_cto,
-                        max_dto: info.max_dto,
-                        protocol_version: info
-                            .protocol_version
-                            .map(|(major, minor)| format!("{major}.{minor}")),
-                    };
-                    session.disconnect().await.ok();
-                    Ok(render(cli.json, &report, || {
-                        format!(
-                            "{} 建链成功：resource={:#04x} maxCto={} maxDto={}",
-                            report.channel, report.resource, report.max_cto, report.max_dto
-                        )
-                    })?)
-                }
+        Command::Probe { target } => match target {
+            ProbeTarget::Bus(args) => commands::probe_bus(args.channel.as_deref(), cli.json).await,
+            ProbeTarget::Xcp(args) => {
+                commands::probe_xcp(
+                    &args.channel,
+                    args.tx_id,
+                    args.rx_id,
+                    args.timeout_ms,
+                    cli.json,
+                )
+                .await
             }
-        }
+        },
         Command::Read(args) => {
-            let config = session_config(&args.channel, args.tx_id, args.rx_id, args.timeout_ms)?;
-            let mut session = Session::open(config)?;
-            session.connect(0).await?;
-            let address = Address::new(args.address);
-            let len =
-                ByteLen::new(args.len).ok_or_else(|| usage_fault("--len 必须大于 0".into()))?;
-            let data = session.read(address, len).await?;
-            session.disconnect().await.ok();
-            let report = ReadReport {
-                channel: session.channel().to_owned(),
-                address: address.to_string(),
-                len: len.get(),
-                data_hex: data
-                    .iter()
-                    .map(|b| format!("{b:02x}"))
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            };
-            Ok(render(cli.json, &report, || {
-                format!("{} {} = [{}]", report.address, report.len, report.data_hex)
-            })?)
+            commands::read_memory(
+                &args.channel,
+                args.address,
+                args.len,
+                args.tx_id,
+                args.rx_id,
+                args.timeout_ms,
+                cli.json,
+            )
+            .await
         }
     }
 }
 
-fn render<T: Serialize>(
-    json: bool,
-    value: &T,
-    human: impl FnOnce() -> String,
-) -> Result<String, Fault> {
+fn report_fault(fault: &Fault, json: bool) {
     if json {
-        serde_json::to_string_pretty(value)
-            .map_err(|err| usage_fault(format!("结构化输出失败：{err}")))
+        match serde_json::to_string_pretty(fault) {
+            Ok(text) => eprintln!("{text}"),
+            Err(_) => eprintln!("{fault}"),
+        }
     } else {
-        Ok(human())
+        eprintln!("{fault}");
     }
 }
 
@@ -289,15 +174,27 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(fault) => {
-            if cli.json {
-                match serde_json::to_string_pretty(&fault) {
-                    Ok(text) => eprintln!("{text}"),
-                    Err(_) => eprintln!("{fault}"),
-                }
-            } else {
-                eprintln!("{fault}");
-            }
+            report_fault(&fault, cli.json);
             ExitCode::from(fault.exit_code())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_and_decimal_ids_parse() {
+        assert_eq!(parse_u32("0x600").expect("十六进制"), 0x600);
+        assert_eq!(parse_u32("0X10").expect("大写前缀"), 0x10);
+        assert_eq!(parse_u32("1536").expect("十进制"), 1536);
+        assert!(parse_u32("0xZZ").is_err());
+    }
+
+    #[test]
+    fn cli_definition_is_valid() {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
     }
 }
