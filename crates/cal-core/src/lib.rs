@@ -18,7 +18,7 @@ pub use config::{ConfigError, ProjectConfig, SCHEMA_VERSION};
 
 pub use ir::{
     Axis, AxisBinding, AxisKind, AxisSpec, BadId, BadRange, BadSymbol, BindingError, BindingSpec,
-    BoundValue, Diagnostic, DuplicateSymbol, ElemType, EmptyUnit, Id, Range, Role, Rule, Scale,
-    Semantics, Severity, Symbol, Unit, ValueKind, ValueSpec, Variable, VariableTree,
+    BoundValue, ByteOrder, Diagnostic, DuplicateSymbol, ElemType, EmptyUnit, Id, Range, Role, Rule,
+    Scale, Semantics, Severity, Symbol, Unit, ValueKind, ValueSpec, Variable, VariableTree,
 };
 pub use types::{Address, ByteLen, Handle, ZeroLen};

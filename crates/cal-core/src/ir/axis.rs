@@ -327,6 +327,31 @@ pub struct Axis {
 }
 
 impl Axis {
+    /// 直接构造已解析的轴。`points == 0` 返回 `None`——零点数的轴不存在。
+    ///
+    /// 供权威来源（A2L 解析、ELF 加配置）使用；由用户配置驱动的情况走
+    /// [`AxisBinding::resolve`]，那条路会跑 R1–R7。
+    pub fn new(
+        id: Id,
+        symbol: Symbol,
+        address: Address,
+        elem: ElemType,
+        points: u32,
+        kind: AxisKind,
+    ) -> Option<Self> {
+        if points == 0 {
+            return None;
+        }
+        Some(Self {
+            id,
+            symbol,
+            address,
+            elem,
+            len: points,
+            kind,
+        })
+    }
+
     /// id。
     pub fn id(&self) -> &Id {
         &self.id
@@ -395,6 +420,31 @@ pub struct BoundValue {
 }
 
 impl BoundValue {
+    /// 直接构造已解析的值。
+    ///
+    /// 同 [`Axis::new`]：这条口子面向权威来源，不跑 R1–R7。不变量仍在
+    /// 这里守住——维度不能为空、不能含 0，轴数必须等于维度数。
+    pub fn new(
+        id: Id,
+        symbol: Symbol,
+        address: Address,
+        elem: ElemType,
+        dims: Vec<u32>,
+        axes: Vec<Id>,
+    ) -> Option<Self> {
+        if dims.is_empty() || dims.contains(&0) || dims.len() != axes.len() {
+            return None;
+        }
+        Some(Self {
+            id,
+            symbol,
+            address,
+            elem,
+            dims,
+            axes,
+        })
+    }
+
     /// id。
     pub fn id(&self) -> &Id {
         &self.id
@@ -462,6 +512,15 @@ pub struct AxisBinding {
 }
 
 impl AxisBinding {
+    /// 由已解析的轴与值直接组装，用于权威来源（A2L 或 ELF 加配置）。
+    pub fn from_parts(axes: Vec<Axis>, values: Vec<BoundValue>) -> Self {
+        Self {
+            axes,
+            values,
+            diagnostics: Vec::new(),
+        }
+    }
+
     /// 轴。
     pub fn axes(&self) -> &[Axis] {
         &self.axes
@@ -558,14 +617,14 @@ fn collect_axes(tree: &VariableTree, spec: &BindingSpec) -> Vec<Axis> {
         .iter()
         .filter_map(|declared| {
             let variable = tree.get(declared.symbol())?;
-            Some(Axis {
-                id: declared.id().clone(),
-                symbol: declared.symbol().clone(),
-                address: variable.address(),
-                elem: variable.elem(),
-                len: axis_len(variable),
-                kind: declared.kind(),
-            })
+            Axis::new(
+                declared.id().clone(),
+                declared.symbol().clone(),
+                variable.address(),
+                variable.elem(),
+                axis_len(variable),
+                declared.kind(),
+            )
         })
         .collect()
 }
@@ -580,14 +639,14 @@ fn collect_values(tree: &VariableTree, spec: &BindingSpec) -> Vec<BoundValue> {
         .iter()
         .filter_map(|declared| {
             let variable = tree.get(declared.symbol())?;
-            Some(BoundValue {
-                id: declared.id().clone(),
-                symbol: declared.symbol().clone(),
-                address: variable.address(),
-                elem: variable.elem(),
-                dims: variable.dims().to_vec(),
-                axes: declared.axes().to_vec(),
-            })
+            BoundValue::new(
+                declared.id().clone(),
+                declared.symbol().clone(),
+                variable.address(),
+                variable.elem(),
+                variable.dims().to_vec(),
+                declared.axes().to_vec(),
+            )
         })
         .collect()
 }
@@ -824,6 +883,52 @@ mod tests {
             "diagnostics": []
         });
         assert_eq!(json, expected);
+    }
+
+    #[test]
+    fn constructors_reject_impossible_shapes() {
+        assert!(
+            Axis::new(
+                id("a"),
+                sym("x"),
+                Address::new(0),
+                ElemType::U8,
+                0,
+                AxisKind::Shared
+            )
+            .is_none(),
+            "零点数的轴不存在"
+        );
+        assert!(
+            Axis::new(
+                id("a"),
+                sym("x"),
+                Address::new(0),
+                ElemType::U8,
+                3,
+                AxisKind::Inline
+            )
+            .is_some()
+        );
+        let base = || (id("v"), sym("m"), Address::new(0), ElemType::F32);
+        let (i, s, a, e) = base();
+        assert!(BoundValue::new(i.clone(), s.clone(), a, e, Vec::new(), Vec::new()).is_none());
+        assert!(
+            BoundValue::new(
+                i.clone(),
+                s.clone(),
+                a,
+                e,
+                vec![4, 0],
+                vec![id("x"), id("y")]
+            )
+            .is_none()
+        );
+        assert!(
+            BoundValue::new(i.clone(), s.clone(), a, e, vec![4, 3], vec![id("x")]).is_none(),
+            "轴数必须等于维度数"
+        );
+        assert!(BoundValue::new(i, s, a, e, vec![4, 3], vec![id("y"), id("x")]).is_some());
     }
 
     #[test]

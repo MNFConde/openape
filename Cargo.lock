@@ -3,6 +3,28 @@
 version = 4
 
 [[package]]
+name = "a2lfile"
+version = "3.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65fcc64b21fb8ac013f4b07c2b16f9e361c62c57f267817ecdae8c393bb9a5bb"
+dependencies = [
+ "a2lmacros",
+ "fnv",
+ "num-traits",
+ "thiserror",
+]
+
+[[package]]
+name = "a2lmacros"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc77d245dcf8a4f9778211028972f706425ea4856cd43d5a3b1373d771eb5c1a"
+dependencies = [
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -529,6 +551,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-traits"
+version = "0.2.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -599,6 +630,17 @@ dependencies = [
  "thiserror",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "openape-format-a2l"
+version = "0.1.0"
+dependencies = [
+ "a2lfile",
+ "openape-cal-core",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

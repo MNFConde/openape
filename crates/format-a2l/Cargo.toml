@@ -1,0 +1,20 @@
+[package]
+name = "openape-format-a2l"
+description = "A2L 信息源：解析为变量 IR，并导出回 A2L"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+a2lfile = "3.5"
+openape-cal-core.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

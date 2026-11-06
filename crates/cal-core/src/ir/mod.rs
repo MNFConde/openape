@@ -99,6 +99,10 @@ pub enum ElemType {
     U32,
     /// 有符号 32 位。
     I32,
+    /// 无符号 64 位。
+    U64,
+    /// 有符号 64 位。
+    I64,
     /// 32 位浮点。
     F32,
     /// 64 位浮点。
@@ -112,9 +116,20 @@ impl ElemType {
             Self::U8 | Self::I8 => ByteLen::ONE,
             Self::U16 | Self::I16 => ByteLen::TWO,
             Self::U32 | Self::I32 | Self::F32 => ByteLen::FOUR,
-            Self::F64 => ByteLen::EIGHT,
+            Self::U64 | Self::I64 | Self::F64 => ByteLen::EIGHT,
         }
     }
+}
+
+/// 多字节数值的字节序。A2L 缺省 `MSB_LAST` 即大端；ELF 与真机可能相反。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ByteOrder {
+    /// 高位字节在前（A2L 的 `MSB_LAST`）。
+    #[default]
+    Big,
+    /// 低位字节在前（A2L 的 `MSB_FIRST`）。
+    Little,
 }
 
 /// 变量扮演的角色。仅 ELF 档没有语义来源，由用户指定，故为 `Option`。
@@ -338,6 +353,7 @@ pub struct Variable {
     symbol: Symbol,
     address: Address,
     elem: ElemType,
+    byte_order: ByteOrder,
     dims: Vec<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     role: Option<Role>,
@@ -352,6 +368,7 @@ impl Variable {
             symbol,
             address,
             elem,
+            byte_order: ByteOrder::Big,
             dims: Vec::new(),
             role: None,
             semantics: Semantics::none(),
@@ -365,6 +382,12 @@ impl Variable {
         }
         self.dims = dims;
         Some(self)
+    }
+
+    /// 指定字节序。
+    pub fn with_byte_order(mut self, byte_order: ByteOrder) -> Self {
+        self.byte_order = byte_order;
+        self
     }
 
     /// 指定角色。
@@ -392,6 +415,11 @@ impl Variable {
     /// 元素类型。
     pub fn elem(&self) -> ElemType {
         self.elem
+    }
+
+    /// 字节序。
+    pub fn byte_order(&self) -> ByteOrder {
+        self.byte_order
     }
 
     /// 各维长度；空表示标量。
@@ -525,7 +553,19 @@ mod tests {
         assert_eq!(ElemType::U32.width().get(), 4);
         assert_eq!(ElemType::I32.width().get(), 4);
         assert_eq!(ElemType::F32.width().get(), 4);
+        assert_eq!(ElemType::U64.width().get(), 8);
+        assert_eq!(ElemType::I64.width().get(), 8);
         assert_eq!(ElemType::F64.width().get(), 8);
+    }
+
+    #[test]
+    fn byte_order_defaults_to_big_and_can_switch() {
+        let v = Variable::new(symbol("kp"), addr(0x1000), ElemType::U16);
+        assert_eq!(v.byte_order(), ByteOrder::Big, "A2L 缺省 MSB_LAST 即大端");
+        assert_eq!(
+            v.with_byte_order(ByteOrder::Little).byte_order(),
+            ByteOrder::Little
+        );
     }
 
     #[test]
