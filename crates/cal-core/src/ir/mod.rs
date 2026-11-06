@@ -24,6 +24,59 @@ pub use axis::{
     Diagnostic, Id, Rule, Severity, ValueKind, ValueSpec,
 };
 
+/// 为"非空且首尾无空白"的字符串 newtype 生成整套样板：`new`、`as_str`、
+/// `TryFrom<String>`、`From<X> for String` 与 `Display`。
+///
+/// 符号、单位、id 三者的校验规则本来是同一条，却被抄了三份，dryer 报了 15 处
+/// 1.00。规则收进 [`check_name`]，样板收进这个宏，三个类型只剩 derive。
+macro_rules! string_newtype {
+    ($ty:ident, $err:ident, $what:literal) => {
+        impl $ty {
+            /// 构造。空串或首尾带空白返回 `None`。
+            pub fn new(raw: &str) -> Option<Self> {
+                crate::ir::check_name(raw).then(|| Self(raw.to_owned()))
+            }
+
+            /// 原文。
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl TryFrom<String> for $ty {
+            type Error = $err;
+
+            fn try_from(raw: String) -> Result<Self, Self::Error> {
+                Self::new(&raw).ok_or($err(raw))
+            }
+        }
+
+        impl From<$ty> for String {
+            fn from(value: $ty) -> Self {
+                value.0
+            }
+        }
+
+        impl fmt::Display for $ty {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(&self.0)
+            }
+        }
+
+        impl $err {
+            /// 原始文本。
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+
+            /// 出错的字段类。
+            pub const WHAT: &'static str = $what;
+        }
+    };
+}
+
+pub(crate) use string_newtype;
+
 /// 名字通行规则：非空，且首尾没有空白。
 ///
 /// [`Symbol`] 与 [`Id`] 共用这一条——两处各写一遍，迟早一处放行一处拒绝。
@@ -38,38 +91,6 @@ pub(crate) fn check_name(raw: &str) -> bool {
 #[serde(try_from = "String", into = "String")]
 pub struct Symbol(String);
 
-impl Symbol {
-    /// 构造符号；空串或首尾空白返回 `None`。
-    pub fn new(raw: &str) -> Option<Self> {
-        check_name(raw).then(|| Self(raw.to_owned()))
-    }
-
-    /// 符号原文。
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl TryFrom<String> for Symbol {
-    type Error = BadSymbol;
-
-    fn try_from(raw: String) -> Result<Self, Self::Error> {
-        Self::new(&raw).ok_or(BadSymbol(raw))
-    }
-}
-
-impl From<Symbol> for String {
-    fn from(symbol: Symbol) -> Self {
-        symbol.0
-    }
-}
-
-impl fmt::Display for Symbol {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
 /// 符号不合法：空串或首尾带空白。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BadSymbol(String);
@@ -79,6 +100,8 @@ impl fmt::Display for BadSymbol {
         write!(f, "符号 {:?} 不合法：不能为空，且首尾不能有空白", self.0)
     }
 }
+
+string_newtype!(Symbol, BadSymbol, "符号");
 
 impl std::error::Error for BadSymbol {}
 
@@ -148,53 +171,19 @@ pub enum Role {
 #[serde(try_from = "String", into = "String")]
 pub struct Unit(String);
 
-impl Unit {
-    /// 构造单位；空串返回 `None`——"没有单位"用 `Option` 表达，不是空串。
-    pub fn new(raw: &str) -> Option<Self> {
-        if raw.is_empty() {
-            None
-        } else {
-            Some(Self(raw.to_owned()))
-        }
-    }
-
-    /// 单位原文。
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl TryFrom<String> for Unit {
-    type Error = EmptyUnit;
-
-    fn try_from(raw: String) -> Result<Self, Self::Error> {
-        Self::new(&raw).ok_or(EmptyUnit)
-    }
-}
-
-impl From<Unit> for String {
-    fn from(unit: Unit) -> Self {
-        unit.0
-    }
-}
-
-impl fmt::Display for Unit {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-/// 单位为空。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EmptyUnit;
+/// 单位为空。带着原始文本，便于报错时点名。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmptyUnit(pub(crate) String);
 
 impl fmt::Display for EmptyUnit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("单位不能为空串；没有单位请用 None")
+        write!(f, "单位 {:?} 不合法：不能为空串；没有单位请用 None", self.0)
     }
 }
 
 impl std::error::Error for EmptyUnit {}
+
+string_newtype!(Unit, EmptyUnit, "单位");
 
 /// 量程。上下限颠倒或含 NaN 都造不出来。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

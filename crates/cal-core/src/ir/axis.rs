@@ -21,37 +21,7 @@ use crate::types::Address;
 #[serde(try_from = "String", into = "String")]
 pub struct Id(String);
 
-impl Id {
-    /// 构造 id；空串或首尾带空白返回 `None`。
-    pub fn new(raw: &str) -> Option<Self> {
-        crate::ir::check_name(raw).then(|| Self(raw.to_owned()))
-    }
-
-    /// id 原文。
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl TryFrom<String> for Id {
-    type Error = BadId;
-
-    fn try_from(raw: String) -> Result<Self, Self::Error> {
-        Self::new(&raw).ok_or(BadId(raw))
-    }
-}
-
-impl From<Id> for String {
-    fn from(id: Id) -> Self {
-        id.0
-    }
-}
-
-impl fmt::Display for Id {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+crate::ir::string_newtype!(Id, BadId, "id");
 
 /// id 不合法：空串或首尾带空白。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -883,6 +853,28 @@ mod tests {
             "diagnostics": []
         });
         assert_eq!(json, expected);
+    }
+
+    #[test]
+    fn unbound_diagnostic_serializes_with_rule_and_severity() {
+        let mut variables: Vec<crate::ir::Variable> = golden_tree().iter().cloned().collect();
+        variables.push(
+            crate::ir::Variable::new(sym("lonely"), Address::new(0x3000), ElemType::U16)
+                .with_dims(vec![2, 2])
+                .expect("合法"),
+        );
+        let tree = VariableTree::new(variables).expect("无重复");
+        let binding = AxisBinding::resolve(&tree, &golden_spec()).expect("只是警告");
+
+        let json = serde_json::to_value(binding.diagnostics()).expect("可序列化");
+        assert_eq!(json[0]["rule"], "R5");
+        assert_eq!(json[0]["severity"], "warning");
+        assert_eq!(json[0]["subject"], "lonely");
+        assert!(
+            json[0]["message"]
+                .as_str()
+                .is_some_and(|text| text.contains("未绑定"))
+        );
     }
 
     #[test]
