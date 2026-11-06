@@ -1,7 +1,8 @@
 # Rust 构建产物
 target/
-# UI 依赖
+# UI 依赖与构建产物（产物由 daemon 运行时读取，不入库）
 ui/node_modules/
+ui/dist/
 # Local working files, not part of the project
 /cairn/
 /.cairn/

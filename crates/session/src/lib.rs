@@ -5,8 +5,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod daq_stream;
 pub mod engine;
 pub mod lock;
 
+pub use daq_stream::{DaqSample, DaqStats, DaqStream, DaqStreamReader};
 pub use engine::{ChannelProbe, Session, SessionConfig, list_channels, probe_channel};
 pub use lock::DeviceLock;
