@@ -22,26 +22,28 @@ pub enum Domain {
 }
 
 impl Domain {
+    /// 域段表：编号段基数与退出码段基数。
+    ///
+    /// 两者在同一条臂里给出——它们是同一个决定（这个域占哪一段），分成两个
+    /// match 迟早改一处漏一处，出现"编号 2011 配退出码 30"这种错配。
+    const fn bases(self) -> (u32, u8) {
+        match self {
+            Self::Bus => (1_000, 10),
+            Self::Xcp => (2_000, 20),
+            Self::Source => (3_000, 30),
+            Self::Session => (4_000, 40),
+            Self::Internal => (9_000, 90),
+        }
+    }
+
     /// 编号段基数：域内序号从 1 到 999。
     pub const fn code_base(self) -> u32 {
-        match self {
-            Self::Bus => 1_000,
-            Self::Xcp => 2_000,
-            Self::Source => 3_000,
-            Self::Session => 4_000,
-            Self::Internal => 9_000,
-        }
+        self.bases().0
     }
 
     /// CLI 退出码段基数。与编号段一一对应，便于脚本按类别分流。
     pub const fn exit_base(self) -> u8 {
-        match self {
-            Self::Bus => 10,
-            Self::Xcp => 20,
-            Self::Source => 30,
-            Self::Session => 40,
-            Self::Internal => 90,
-        }
+        self.bases().1
     }
 }
 
@@ -258,6 +260,23 @@ mod tests {
             .with_cause(inner);
         let messages: Vec<&str> = outer.chain().map(|f| f.message()).collect();
         assert_eq!(messages, ["连接失败", "socket 已关闭"]);
+    }
+
+    #[test]
+    fn display_shows_code_message_and_hint() {
+        let plain = Fault::build(Domain::Bus, 3, Severity::Error, "打不开通道").expect("合法");
+        assert_eq!(
+            plain.to_string(),
+            "[1003] 打不开通道",
+            "无建议时不该多出括号"
+        );
+
+        let hinted = plain.with_hint("先确认通道存在");
+        assert_eq!(
+            hinted.to_string(),
+            "[1003] 打不开通道（先确认通道存在）",
+            "有建议时要跟在同一行"
+        );
     }
 
     #[test]

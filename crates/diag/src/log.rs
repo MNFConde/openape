@@ -124,6 +124,19 @@ mod tests {
     }
 
     #[test]
+    fn hex_bytes_render_as_frame_trace_column() {
+        assert_eq!(HexBytes(&[0xaa, 0x00, 0xff]).to_string(), "aa 00 ff");
+        assert_eq!(HexBytes(&[]).to_string(), "", "空载荷不该留多余空格");
+        assert_eq!(HexBytes(&[0x05]).to_string(), "05", "单字节不补前导空格");
+    }
+
+    #[test]
+    fn direction_labels_are_stable() {
+        assert_eq!(Direction::Tx.as_str(), "tx");
+        assert_eq!(Direction::Rx.as_str(), "rx");
+    }
+
+    #[test]
     fn verbosity_maps_to_filter_directives() {
         assert_eq!(Verbosity::Quiet.filter(), "error");
         assert_eq!(Verbosity::Normal.filter(), "info");
