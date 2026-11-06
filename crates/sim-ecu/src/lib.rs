@@ -489,6 +489,160 @@ mod tests {
     }
 
     #[test]
+    fn daq_capability_reports_match_the_documented_shape() {
+        let mut ecu = ecu();
+        let processor = expect_ok(
+            send(&mut ecu, Command::GetDaqProcessorInfo),
+            CommandCode::GetDaqProcessorInfo,
+        );
+        assert_eq!(processor, vec![0x03, 4, 0x00, 1, 0x00, 0x00]);
+
+        let resolution = expect_ok(
+            send(&mut ecu, Command::GetDaqResolutionInfo),
+            CommandCode::GetDaqResolutionInfo,
+        );
+        assert_eq!(
+            resolution,
+            vec![1, 7, 0, 0, 0, 0],
+            "条目粒度 1 字节、上限 7 字节"
+        );
+    }
+
+    /// 配一条 list：一个 ODT、一个两字节条目，供 DAQ 命令用例复用。
+    fn daily_configure(ecu: &mut SimEcu) {
+        expect_ok(
+            send(ecu, Command::AllocDaq { count: 1 }),
+            CommandCode::AllocDaq,
+        );
+        expect_ok(
+            send(
+                ecu,
+                Command::AllocOdt {
+                    daq_list: 0,
+                    odt_count: 1,
+                },
+            ),
+            CommandCode::AllocOdt,
+        );
+        expect_ok(
+            send(
+                ecu,
+                Command::AllocOdtEntry {
+                    daq_list: 0,
+                    odt: 0,
+                    entries: 1,
+                },
+            ),
+            CommandCode::AllocOdtEntry,
+        );
+        expect_ok(
+            send(
+                ecu,
+                Command::SetDaqPtr {
+                    daq_list: 0,
+                    odt: 0,
+                    entry: 0,
+                },
+            ),
+            CommandCode::SetDaqPtr,
+        );
+        expect_ok(
+            send(
+                ecu,
+                Command::WriteDaq {
+                    bit_offset: 0,
+                    size: 2,
+                    address_extension: 0,
+                    address: 0x1000,
+                },
+            ),
+            CommandCode::WriteDaq,
+        );
+    }
+
+    #[test]
+    fn start_stop_synch_drives_every_list() {
+        let mut ecu = ecu();
+        daily_configure(&mut ecu);
+        expect_ok(
+            send(&mut ecu, Command::StartStopSynch { mode: 1 }),
+            CommandCode::StartStopSynch,
+        );
+        assert!(!ecu.on_tick().frames.is_empty(), "同步启动后应出帧");
+        expect_ok(
+            send(&mut ecu, Command::StartStopSynch { mode: 0 }),
+            CommandCode::StartStopSynch,
+        );
+        assert!(ecu.on_tick().frames.is_empty(), "同步停止后不再出帧");
+    }
+
+    #[test]
+    fn download_may_fill_the_last_byte_but_not_pass_it() {
+        let mut ecu = ecu();
+        let last = (MEM_SIZE - 1) as u32;
+        expect_ok(
+            send(
+                &mut ecu,
+                Command::SetMta {
+                    address_extension: 0,
+                    address: last,
+                },
+            ),
+            CommandCode::SetMta,
+        );
+        expect_ok(
+            send(
+                &mut ecu,
+                Command::Download {
+                    len: 1,
+                    data: vec![0x5A],
+                },
+            ),
+            CommandCode::Download,
+        );
+        assert_eq!(ecu.peek(last, 1), &[0x5A], "正好写满末尾要允许");
+
+        expect_ok(
+            send(
+                &mut ecu,
+                Command::SetMta {
+                    address_extension: 0,
+                    address: last,
+                },
+            ),
+            CommandCode::SetMta,
+        );
+        let response = send(
+            &mut ecu,
+            Command::Download {
+                len: 2,
+                data: vec![0x11, 0x22],
+            },
+        );
+        match response {
+            Response::Err { code } => assert_eq!(code, ErrorCode::OutOfRange as u8),
+            other => panic!("越过末尾要拒绝，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn short_upload_may_end_exactly_at_the_last_byte() {
+        let mut ecu = ecu();
+        let payload = expect_ok(
+            send(
+                &mut ecu,
+                Command::ShortUpload {
+                    len: 2,
+                    address_extension: 0,
+                    address: (MEM_SIZE - 2) as u32,
+                },
+            ),
+            CommandCode::ShortUpload,
+        );
+        assert_eq!(payload.len(), 2, "读到内存末尾正好要允许");
+    }
+
+    #[test]
     fn connect_reports_resources_and_frame_limits() {
         let mut ecu = ecu();
         let payload = expect_ok(

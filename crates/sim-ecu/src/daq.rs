@@ -324,11 +324,15 @@ mod tests {
         let mut daq = configured();
         daq.set_mode(0, 0, 3).expect("预分频 3");
         daq.start_stop_list(0, true).expect("启动");
-        let mut sent = 0;
-        for _ in 0..6 {
-            sent += daq.tick().len();
+        let mut rounds = Vec::new();
+        for tick in 1..=6 {
+            if !daq.tick().is_empty() {
+                rounds.push(tick);
+            }
         }
-        assert_eq!(sent, 4, "6 个 tick 只发 2 轮，每轮两个 ODT");
+        // 发帧时机是断言的一部分：只数总数的话，"发完把计数置 1"这类
+        // 偏移错误照样能凑出相同的轮数
+        assert_eq!(rounds, vec![3, 6], "每 3 个 tick 发一轮");
     }
 
     #[test]
@@ -412,13 +416,42 @@ mod tests {
     fn clear_list_drops_entries_and_stops_it() {
         let mut daq = configured();
         daq.start_stop_list(0, true).expect("启动");
+        assert!(daq.list(0).expect("有 list").is_running());
         daq.clear_list(0).expect("清空");
+        assert!(!daq.any_running(), "清空要把运行位一起清掉");
         assert!(daq.tick().is_empty(), "清空后不再发");
         assert_eq!(
             daq.list(0).map(DaqList::odt_count),
             Some(2),
             "ODT 还在，条目没了"
         );
+    }
+
+    #[test]
+    fn restarting_resets_the_prescaler_counter() {
+        let mut daq = configured();
+        daq.set_mode(0, 0, 3).expect("预分频 3");
+        daq.start_stop_list(0, true).expect("启动");
+        assert!(daq.tick().is_empty(), "第 1 个 tick 还在计数");
+        assert!(daq.tick().is_empty(), "第 2 个 tick 还在计数");
+        daq.start_stop_list(0, false).expect("停");
+        daq.start_stop_list(0, true).expect("重启");
+        // 计数必须归零：若从 1 起算，第 2 个 tick 就会发
+        assert!(daq.tick().is_empty(), "重启后第 1 个 tick 仍在计数");
+        assert!(daq.tick().is_empty(), "重启后第 2 个 tick 仍在计数");
+        assert!(!daq.tick().is_empty(), "第 3 个 tick 才发");
+    }
+
+    #[test]
+    fn synch_restart_also_resets_the_counter() {
+        let mut daq = configured();
+        daq.set_mode(0, 0, 2).expect("预分频 2");
+        daq.start_stop_synch(true);
+        assert!(daq.tick().is_empty(), "第 1 个 tick 只计数");
+        daq.start_stop_synch(false);
+        daq.start_stop_synch(true);
+        assert!(daq.tick().is_empty(), "同步重启后第 1 个 tick 仍在计数");
+        assert!(!daq.tick().is_empty(), "第 2 个 tick 才发");
     }
 
     #[test]

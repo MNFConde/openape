@@ -187,6 +187,27 @@ mod tests {
     }
 
     #[test]
+    fn signals_that_exactly_fill_an_odt_stay_together() {
+        // 4 + 3 = 7 正好装满，切换条件是「超过」而不是「达到」
+        let odts = plan_odts(&[signal(0x1000, 4), signal(0x1004, 3)], 7).expect("放得下");
+        assert_eq!(odts.len(), 1, "正好装满不该被切开");
+    }
+
+    #[test]
+    fn the_new_odt_starts_empty_not_at_one() {
+        // 4+3 装满第一组后，第二组从 0 开始算才有 4+3 又装满
+        let signals = vec![
+            signal(0x1000, 4),
+            signal(0x1004, 3),
+            signal(0x1008, 4),
+            signal(0x100c, 3),
+        ];
+        let odts = plan_odts(&signals, 7).expect("放得下");
+        assert_eq!(odts.len(), 2, "8 字节不该拆成三段");
+        assert_eq!((odts[0].len(), odts[1].len()), (2, 2));
+    }
+
+    #[test]
     fn a_signal_wider_than_the_limit_is_rejected() {
         let err = plan_odts(&[signal(0x2000, 8)], 7).expect_err("8 字节装不进 7");
         let text = err.to_string();

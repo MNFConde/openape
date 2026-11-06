@@ -437,3 +437,45 @@ fn parse_connect_info(payload: &[u8]) -> Result<ConnectInfo, Fault> {
         transport_version,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openape_xcp_proto::PID_DAQ_MAX;
+
+    #[test]
+    fn first_pid_accepts_the_last_daq_number_and_rejects_the_command_range() {
+        assert_eq!(first_pid(&[0x00]).ok(), Some(0));
+        assert_eq!(first_pid(&[PID_DAQ_MAX]).ok(), Some(PID_DAQ_MAX));
+        assert!(first_pid(&[PID_DAQ_MAX + 1]).is_err(), "0xFC 起是命令 PID");
+        assert!(first_pid(&[]).is_err(), "空响应取不到编号");
+    }
+
+    #[test]
+    fn connect_info_reads_versions_only_when_the_frame_holds_them() {
+        // 8 字节：正好装得下协议版本，装不下传输层版本
+        let full = [0x05, 0x00, 8, 0, 8, 0, 1, 1];
+        let info = parse_connect_info(&full).expect("8 字节合法");
+        assert_eq!(info.resource, 0x05);
+        assert_eq!(info.comm_mode_basic, 0x00, "取第 1 字节，不是第 0 字节");
+        assert_eq!(info.protocol_version, Some((1, 1)));
+        assert_eq!(info.transport_version, None);
+
+        // 10 字节：加上传输层版本
+        let full = [0x05, 0x00, 8, 0, 8, 0, 1, 1, 1, 1];
+        let info = parse_connect_info(&full).expect("10 字节合法");
+        assert_eq!(info.transport_version, Some((1, 1)));
+    }
+
+    #[test]
+    fn connect_info_rejects_short_and_zero_max_cto() {
+        assert!(
+            parse_connect_info(&[0x05, 0x00, 8, 0, 8]).is_err(),
+            "不足 6 字节"
+        );
+        assert!(
+            parse_connect_info(&[0x05, 0x00, 0, 0, 8, 0]).is_err(),
+            "maxCto 为 0 说明响应被截断"
+        );
+    }
+}

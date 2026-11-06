@@ -362,6 +362,25 @@ async fn configure_daq_emits_the_expected_command_sequence() {
             0xDE, // START_STOP_DAQ_LIST
         ]
     );
+    // 参数字节也要钉住：只对命令码的话，扩展地址、模式、优先级写错都发现不了
+    let frames = bus.sent_frames();
+    let set_ptr = &frames[6].data;
+    assert_eq!(
+        (set_ptr[0], set_ptr[5]),
+        (0xE2, 0x00),
+        "SET_DAQ_PTR 的 entry 为 0"
+    );
+    let write = &frames[7].data;
+    assert_eq!(
+        (write[0], write[3]),
+        (0xE1, 0x00),
+        "WRITE_DAQ 的地址扩展为 0"
+    );
+    let mode = &frames[12].data;
+    assert_eq!(mode[0], 0xE0);
+    assert_eq!(mode[1], 0x00, "SET_DAQ_LIST_MODE 的 mode 为 0");
+    assert_eq!(mode[7], 0x00, "priority 为 0");
+
     assert_eq!(layout.len(), 2, "8 字节切成两个 ODT");
     assert_eq!(
         layout.decode(0, &[1, 2, 3, 4, 5, 6]),
@@ -371,6 +390,81 @@ async fn configure_daq_emits_the_expected_command_sequence() {
         layout.decode(1, &[7, 8, 9, 10]),
         Some(vec![&[7u8, 8][..], &[9, 10][..]])
     );
+}
+
+#[tokio::test]
+async fn status_reports_running_bit_and_protection() {
+    let bus = Arc::new(ScriptedBus::new());
+    bus.queue_response(Response::Ok {
+        payload: connect_ok_payload(),
+    });
+    // GET_STATUS：byte0 的 bit0 是 running，byte2 是 protection
+    bus.queue_response(Response::Ok {
+        payload: vec![0x01, 0x00, 0x07],
+    });
+
+    let mut master = master_with(&bus, 0);
+    master.connect(0).await.expect("建链成功");
+    let status = master.status().await.expect("要能读状态");
+    assert!(status.running, "bit0 为 1");
+    assert_eq!(status.protection, 0x07, "取第 3 字节");
+
+    // 空载荷：两项都回落为 0，不臆造
+    bus.queue_response(Response::Ok { payload: vec![] });
+    let status = master.status().await.expect("空响应也要能读");
+    assert!(!status.running);
+    assert_eq!(status.protection, 0);
+}
+
+#[tokio::test]
+async fn a_seven_byte_read_still_fits_one_short_upload() {
+    let bus = Arc::new(ScriptedBus::new());
+    bus.queue_response(Response::Ok {
+        payload: connect_ok_payload(),
+    });
+    bus.queue_response(Response::Ok {
+        payload: vec![1, 2, 3, 4, 5, 6, 7],
+    });
+
+    let mut master = master_with(&bus, 0);
+    master.connect(0).await.expect("建链成功");
+    let data = master
+        .read(Address::new(0x1000), ByteLen::new(7).expect("7 合法"))
+        .await
+        .expect("7 字节正好一帧");
+    assert_eq!(data.len(), 7);
+    assert_eq!(
+        bus.send_count(),
+        2,
+        "CONNECT 加一条 SHORT_UPLOAD：7 字节仍在单帧能力内"
+    );
+    assert_eq!(bus.sent_frames()[1].data[0], 0xF4);
+}
+
+#[tokio::test]
+async fn long_reads_use_a_zero_address_extension() {
+    let bus = Arc::new(ScriptedBus::new());
+    bus.queue_response(Response::Ok {
+        payload: connect_ok_payload(),
+    });
+    bus.queue_response(Response::Ok { payload: vec![] });
+    bus.queue_response(Response::Ok {
+        payload: vec![0; 7],
+    });
+    bus.queue_response(Response::Ok {
+        payload: vec![0; 5],
+    });
+
+    let mut master = master_with(&bus, 0);
+    master.connect(0).await.expect("建链成功");
+    master
+        .read(Address::new(0x2000), ByteLen::new(12).expect("12 合法"))
+        .await
+        .expect("长读走 SET_MTA");
+
+    let set_mta = &bus.sent_frames()[1].data;
+    assert_eq!(set_mta[0], 0xF6);
+    assert_eq!(set_mta[1], 0, "地址扩展字节必须是 0");
 }
 
 #[tokio::test]
