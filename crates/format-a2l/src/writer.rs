@@ -319,6 +319,7 @@ fn layout_name(elem: ElemType) -> String {
     format!("RL_{}", datatype(elem))
 }
 
+/// 与读入侧的映射互为逆表，圈复杂度同样等于数据类型数，刻意保留。
 fn datatype(elem: ElemType) -> &'static str {
     match elem {
         ElemType::U8 => "UBYTE",
@@ -333,5 +334,74 @@ fn datatype(elem: ElemType) -> &'static str {
         ElemType::F64 => "FLOAT64_IEEE",
         // 非穷尽枚举的新变体：宁可编不过，也不要静默写错类型
         other => unreachable!("未支持的元素类型 {other:?} 不该进入导出"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openape_cal_core::{Address, Role, Symbol, Variable, VariableTree};
+
+    #[test]
+    fn every_elem_type_has_an_a2l_spelling() {
+        let cases = [
+            (ElemType::U8, "UBYTE"),
+            (ElemType::I8, "SBYTE"),
+            (ElemType::U16, "UWORD"),
+            (ElemType::I16, "SWORD"),
+            (ElemType::U32, "ULONG"),
+            (ElemType::I32, "SLONG"),
+            (ElemType::U64, "A_UINT64"),
+            (ElemType::I64, "A_INT64"),
+            (ElemType::F32, "FLOAT32_IEEE"),
+            (ElemType::F64, "FLOAT64_IEEE"),
+        ];
+        for (elem, spelling) in cases {
+            assert_eq!(datatype(elem), spelling);
+            assert_eq!(layout_name(elem), format!("RL_{spelling}"));
+        }
+    }
+
+    #[test]
+    fn bound_values_above_two_dimensions_are_refused() {
+        // 绑了轴的三维值没有对应的 A2L 结构（CUBOID 不在 MVP 范围）
+        let symbol = Symbol::new("wide").expect("合法");
+        let variable = Variable::new(symbol.clone(), Address::new(0x1000), ElemType::F32)
+            .with_dims(vec![2, 2, 2])
+            .expect("三维")
+            .with_role(Role::Characteristic);
+        let tree = VariableTree::new(vec![variable]).expect("无重复");
+        let axis_id = openape_cal_core::Id::new("a").expect("合法");
+        let value = openape_cal_core::BoundValue::new(
+            openape_cal_core::Id::new("wide").expect("合法"),
+            symbol,
+            Address::new(0x1000),
+            ElemType::F32,
+            vec![2, 2, 2],
+            vec![axis_id.clone(), axis_id.clone(), axis_id],
+        )
+        .expect("三维值可构造");
+        let binding = AxisBinding::from_parts(Vec::new(), vec![value]);
+        let err = write(&tree, &binding).expect_err("三维不导出");
+        assert!(err.to_string().contains("三维"), "{err}");
+    }
+
+    #[test]
+    fn unbound_arrays_are_written_as_val_blk() {
+        let variable = Variable::new(
+            Symbol::new("table").expect("合法"),
+            Address::new(0x1000),
+            ElemType::U16,
+        )
+        .with_dims(vec![2, 4])
+        .expect("二维")
+        .with_role(Role::Characteristic);
+        let tree = VariableTree::new(vec![variable]).expect("无重复");
+        let text = write(&tree, &AxisBinding::default()).expect("要能导出");
+        assert!(text.contains("VAL_BLK"), "{text}");
+        assert!(
+            text.contains("MATRIX_DIM 4 2"),
+            "MATRIX_DIM 快速维在前：{text}"
+        );
     }
 }

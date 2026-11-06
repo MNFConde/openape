@@ -18,6 +18,7 @@ tokio.workspace = true
 
 [dev-dependencies]
 openape-bus-socketcan.workspace = true
+openape-xcp.workspace = true
 
 [lints]
 workspace = true

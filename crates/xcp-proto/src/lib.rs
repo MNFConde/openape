@@ -52,6 +52,9 @@ pub struct DaqFrame<'a> {
 
 impl<'a> DaqFrame<'a> {
     /// 解析一帧。首字节 > [`PID_DAQ_MAX`] 说明这是命令或响应，不是 DAQ 帧。
+    ///
+    /// 调用方要**先按标识符过滤**：CRO 上的命令帧 byte0 也是命令码，同样
+    /// 落在 0x00..=0xFB 区间，只看 byte0 会把命令当数据。
     pub fn parse(frame: &'a [u8]) -> Option<Self> {
         let odt = *frame.first()?;
         (odt <= PID_DAQ_MAX).then_some(Self {

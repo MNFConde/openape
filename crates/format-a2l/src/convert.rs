@@ -219,16 +219,29 @@ impl Builder<'_> {
         if !bound {
             return Ok((None, variable));
         }
+        let value = self.register_value(&name, symbol, address, elem, dims, axes)?;
+        Ok((Some(value), variable))
+    }
+
+    /// 把新出现的轴并进轴表，再用它们建一条绑定值。
+    fn register_value(
+        &mut self,
+        name: &str,
+        symbol: Symbol,
+        address: Address,
+        elem: ElemType,
+        dims: Vec<u32>,
+        axes: Vec<Axis>,
+    ) -> Result<BoundValue, String> {
         let axis_ids: Vec<Id> = axes.iter().map(|axis| axis.id().clone()).collect();
         for axis in axes {
             if self.axes.iter().all(|known| known.id() != axis.id()) {
                 self.axes.push(axis);
             }
         }
-        let id = Id::new(&name).ok_or_else(|| format!("名字 {name:?} 不能作为 id"))?;
-        let value = BoundValue::new(id, symbol, address, elem, dims, axis_ids)
-            .ok_or_else(|| "轴数与维度数不一致".to_owned())?;
-        Ok((Some(value), variable))
+        let id = Id::new(name).ok_or_else(|| format!("名字 {name:?} 不能作为 id"))?;
+        BoundValue::new(id, symbol, address, elem, dims, axis_ids)
+            .ok_or_else(|| "轴数与维度数不一致".to_owned())
     }
 
     fn dims_of_characteristic(&mut self, declared: &Characteristic) -> Result<Vec<u32>, String> {

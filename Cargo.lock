@@ -664,6 +664,7 @@ dependencies = [
  "openape-bus-socketcan",
  "openape-cal-core",
  "openape-diag",
+ "openape-xcp",
  "openape-xcp-proto",
  "thiserror",
  "tokio",

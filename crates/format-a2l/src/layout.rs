@@ -37,6 +37,9 @@ pub(crate) fn object_byte_order(
 }
 
 /// A2L 的 `datatype` 到 IR 元素类型。`FLOAT16_IEEE` 不在 MVP 范围内。
+///
+/// 圈复杂度等于 A2L 数据类型数：这是一张外部规范给的映射表，拆到底还是
+/// 十一条臂，与 xcp 的命令分派同属刻意保留的例外。
 pub(crate) fn elem_of_datatype(datatype: DataType) -> Option<ElemType> {
     match datatype {
         DataType::Ubyte => Some(ElemType::U8),
@@ -99,12 +102,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn datatype_map_covers_supported_widths() {
-        assert_eq!(elem_of_datatype(DataType::Ubyte), Some(ElemType::U8));
-        assert_eq!(elem_of_datatype(DataType::Sword), Some(ElemType::I16));
-        assert_eq!(elem_of_datatype(DataType::Float32Ieee), Some(ElemType::F32));
-        assert_eq!(elem_of_datatype(DataType::Float64Ieee), Some(ElemType::F64));
-        assert_eq!(elem_of_datatype(DataType::Float16Ieee), None);
+    fn datatype_map_covers_every_variant() {
+        let cases = [
+            (DataType::Ubyte, Some(ElemType::U8)),
+            (DataType::Sbyte, Some(ElemType::I8)),
+            (DataType::Uword, Some(ElemType::U16)),
+            (DataType::Sword, Some(ElemType::I16)),
+            (DataType::Ulong, Some(ElemType::U32)),
+            (DataType::Slong, Some(ElemType::I32)),
+            (DataType::AUint64, Some(ElemType::U64)),
+            (DataType::AInt64, Some(ElemType::I64)),
+            (DataType::Float32Ieee, Some(ElemType::F32)),
+            (DataType::Float64Ieee, Some(ElemType::F64)),
+            (DataType::Float16Ieee, None),
+        ];
+        for (datatype, expected) in cases {
+            assert_eq!(elem_of_datatype(datatype), expected, "{datatype:?}");
+        }
+    }
+
+    #[test]
+    fn missing_layout_falls_back_to_ubyte_with_a_warning() {
+        let text = r#"
+ASAP2_VERSION 1 71
+/begin PROJECT P ""
+  /begin MODULE M ""
+    /begin CHARACTERISTIC c "" VALUE 0x1000 NO_SUCH_LAYOUT 0 NO_COMPU_METHOD 0 10
+    /end CHARACTERISTIC
+  /end MODULE
+/end PROJECT
+"#;
+        let (file, _) = a2lfile::load_from_string(text, None, false).expect("解析通过");
+        let module = file.project.module.iter().next().expect("有一个模块");
+        let mut notes = Vec::new();
+        let elem = elem_of_deposit(module, "NO_SUCH_LAYOUT", "c", &mut notes);
+        assert_eq!(elem, Some(ElemType::U8), "按 A2L 缺省处理");
+        assert!(notes.iter().any(|note| note.message().contains("缺省")));
     }
 
     #[test]

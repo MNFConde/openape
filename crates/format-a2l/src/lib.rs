@@ -378,6 +378,100 @@ ASAP2_VERSION 1 71
     }
 
     #[test]
+    fn measurements_enter_the_tree_with_their_shape() {
+        let text = r#"
+ASAP2_VERSION 1 71
+/begin PROJECT P ""
+  /begin MODULE ECU ""
+    /begin MEASUREMENT scalar "" UWORD NO_COMPU_METHOD 1 0.0 0.0 100.0
+      ECU_ADDRESS 0x3000
+    /end MEASUREMENT
+    /begin MEASUREMENT array "" UBYTE NO_COMPU_METHOD 1 0.0 0.0 255.0
+      ECU_ADDRESS 0x3010
+      ARRAY_SIZE 4
+    /end MEASUREMENT
+  /end MODULE
+/end PROJECT
+"#;
+        let source = load_str(text, None).expect("要能读");
+        let tree = source.tree();
+        let scalar = tree
+            .get(&cal_core::Symbol::new("scalar").expect("合法"))
+            .expect("标量入树");
+        assert!(scalar.dims().is_empty());
+        assert_eq!(scalar.role(), Some(cal_core::Role::Measurement));
+
+        let array = tree
+            .get(&cal_core::Symbol::new("array").expect("合法"))
+            .expect("数组入树");
+        assert_eq!(array.dims(), &[4]);
+        assert!(source.binding().values().is_empty(), "观测量不进绑定表");
+    }
+
+    #[test]
+    fn measurement_without_address_is_skipped_with_reason() {
+        let text = r#"
+ASAP2_VERSION 1 71
+/begin PROJECT P ""
+  /begin MODULE ECU ""
+    /begin MEASUREMENT no_addr "" UWORD NO_COMPU_METHOD 1 0.0 0.0 100.0
+    /end MEASUREMENT
+  /end MODULE
+/end PROJECT
+"#;
+        let source = load_str(text, None).expect("跳过不是错误");
+        assert!(source.tree().is_empty());
+        assert!(
+            source
+                .notes()
+                .iter()
+                .any(|note| note.message().contains("ECU_ADDRESS")),
+            "要说清缺什么：{:?}",
+            source.notes()
+        );
+    }
+
+    #[test]
+    fn std_axis_becomes_an_inline_axis() {
+        let text = r#"
+ASAP2_VERSION 1 71
+/begin PROJECT P ""
+  /begin MODULE ECU ""
+    /begin RECORD_LAYOUT RL
+      FNC_VALUES 1 FLOAT32_IEEE ROW_DIR DIRECT
+    /end RECORD_LAYOUT
+    /begin CHARACTERISTIC inline_map "" MAP 0x2000 RL 0 NO_COMPU_METHOD -1.0E9 1.0E9
+      MATRIX_DIM 3 4
+      /begin AXIS_DESCR STD_AXIS NO_INPUT_QUANTITY NO_COMPU_METHOD 3 -1.0E9 1.0E9
+      /end AXIS_DESCR
+      /begin AXIS_DESCR STD_AXIS NO_INPUT_QUANTITY NO_COMPU_METHOD 4 -1.0E9 1.0E9
+      /end AXIS_DESCR
+    /end CHARACTERISTIC
+  /end MODULE
+/end PROJECT
+"#;
+        let source = load_str(text, None).expect("要能读");
+        let value = source
+            .binding()
+            .value(&cal_core::Id::new("inline_map").expect("合法"))
+            .expect("有值");
+        assert_eq!(value.dims(), &[4, 3]);
+        let axes = source.binding().axes();
+        assert_eq!(axes.len(), 2, "两个内嵌轴都登记了");
+        assert!(
+            axes.iter()
+                .all(|axis| axis.kind() == cal_core::AxisKind::Inline)
+        );
+        // 轴按 dims 顺序登记，所以逐维点数要与 dims 对得上
+        let points: Vec<u32> = value
+            .axes()
+            .iter()
+            .map(|id| source.binding().axis(id).expect("轴已登记").points())
+            .collect();
+        assert_eq!(points, value.dims(), "轴点数与维度必须对齐");
+    }
+
+    #[test]
     fn roundtrip_preserves_ir() {
         // 验收（M2-05）：导出再解析，语义零 diff
         let first = load_str(&golden(), None).expect("golden 必须能读");

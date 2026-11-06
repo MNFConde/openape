@@ -10,8 +10,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use openape_bus::{Bus, CanFrame, CanId};
-use openape_diag::{Domain, Fault, FaultCode, Severity};
+use openape_diag::{Domain, Fault, FaultCode, Metrics, Severity};
 use openape_xcp_proto::{Command, ErrorCode, Response, resource};
+
+pub mod daq;
+
+use daq::{DaqState, OdtEntry};
 
 /// 虚拟内存大小（64 KiB），够放标定页与观测量。
 pub const MEM_SIZE: usize = 0x10000;
@@ -23,6 +27,12 @@ pub struct SimEcuConfig {
     pub command_id: CanId,
     /// 响应帧标识符（从站发送）。
     pub response_id: CanId,
+    /// 事件通道周期。DAQ list 按它出帧。
+    pub event_period: Duration,
+    /// 出帧节拍的最大抖动：实际间隔落在 `period ± jitter`。
+    pub jitter: Duration,
+    /// 抖动用的伪随机种子。固定种子让"抖动"可复现，测试不靠运气。
+    pub jitter_seed: u64,
 }
 
 impl SimEcuConfig {
@@ -31,6 +41,9 @@ impl SimEcuConfig {
         Self {
             command_id: CanId::standard(0x600).expect("0x600 在 11 位内"),
             response_id: CanId::standard(0x601).expect("0x601 在 11 位内"),
+            event_period: Duration::from_millis(10),
+            jitter: Duration::ZERO,
+            jitter_seed: 0x5EED,
         }
     }
 }
@@ -43,6 +56,7 @@ pub struct SimEcu {
     mta: u32,
     page: u8,
     running: bool,
+    daq: DaqState,
 }
 
 impl SimEcu {
@@ -54,6 +68,7 @@ impl SimEcu {
             mta: 0,
             page: 0,
             running: false,
+            daq: DaqState::default(),
         }
     }
 
@@ -77,6 +92,35 @@ impl SimEcu {
         &self.memory[start..start + len]
     }
 
+    /// 推进一个事件 tick，返回本 tick 要发的 DTO 与丢弃数。
+    ///
+    /// 越界的条目整帧丢弃而不是补零：补零会让 master 把 0 当成真值记进曲线，
+    /// 比少一帧更难查。
+    pub fn on_tick(&mut self) -> TickOutput {
+        let response_id = self.config.response_id;
+        let plans = self.daq.tick();
+        let mut frames = Vec::with_capacity(plans.len());
+        let mut dropped = 0;
+        for plan in &plans {
+            match self.dto_of(plan, response_id) {
+                Some(frame) => frames.push(frame),
+                None => dropped += 1,
+            }
+        }
+        TickOutput { frames, dropped }
+    }
+
+    fn dto_of(&self, plan: &daq::FramePlan, id: CanId) -> Option<CanFrame> {
+        let mut data = Vec::with_capacity(1 + plan.entries.len() * 4);
+        data.push(plan.pid);
+        for entry in &plan.entries {
+            let start = entry.address as usize;
+            let end = start.checked_add(usize::from(entry.size))?;
+            data.extend_from_slice(self.memory.get(start..end)?);
+        }
+        CanFrame::new(id, data)
+    }
+
     /// 处理一整帧。byte0 就是命令码——CRO 没有 PID 前缀。
     pub fn handle(&mut self, frame: &[u8]) -> Response {
         match Command::decode(frame) {
@@ -85,8 +129,8 @@ impl SimEcu {
         }
     }
 
-    /// 按命令分派到各自的处理。圈复杂度等于从站支持的命令条数，与 master
-    /// 侧的编解码同属刻意保留的协议分派，不再拆分。
+    /// 按命令分派到各自的处理。圈复杂度等于从站支持的命令条数（当前 26 条），
+    /// 与 master 侧的编解码同属刻意保留的协议分派，不再拆分。
     fn dispatch(&mut self, command: Command) -> Response {
         let code = command.code() as u8;
         match command {
@@ -157,9 +201,68 @@ impl SimEcu {
                 self.page = page;
                 ok(code, vec![])
             }
-            // DAQ 从站侧在 M2-09 落地；在此之前如实回报"不认识这条命令"，
-            // 而不是假装配置成功——那会让 master 以为采集已经跑起来了。
-            _ => err(ErrorCode::CmdUnknown),
+            Command::GetDaqProcessorInfo => ok(
+                code,
+                // properties=预分频与动态 DAQ、最多 4 条 list、最多 1 个事件通道
+                vec![0x03, 4, 0x00, 1, 0x00, 0x00],
+            ),
+            Command::GetDaqResolutionInfo => ok(
+                code,
+                // 条目粒度 1 字节、最大条目 7 字节；时间戳暂不支持（全 0）
+                vec![1, 7, 0, 0, 0, 0],
+            ),
+            Command::FreeDaq => {
+                self.daq.free();
+                ok(code, vec![])
+            }
+            Command::AllocDaq { count } => reply(code, self.daq.alloc_lists(count)),
+            Command::AllocOdt {
+                daq_list,
+                odt_count,
+            } => reply(code, self.daq.alloc_odts(daq_list, odt_count)),
+            Command::AllocOdtEntry {
+                daq_list,
+                odt,
+                entries,
+            } => reply(code, self.daq.alloc_entries(daq_list, odt, entries)),
+            Command::SetDaqPtr {
+                daq_list,
+                odt,
+                entry,
+            } => reply(code, self.daq.set_ptr(daq_list, odt, entry)),
+            Command::WriteDaq {
+                bit_offset,
+                size,
+                address_extension,
+                address,
+            } => reply(
+                code,
+                self.daq.write_entry(OdtEntry {
+                    bit_offset,
+                    size,
+                    address_extension,
+                    address,
+                }),
+            ),
+            Command::SetDaqListMode {
+                mode: _,
+                daq_list,
+                event,
+                prescaler,
+                priority: _,
+            } => reply(code, self.daq.set_mode(daq_list, event, prescaler)),
+            Command::StartStopDaqList { mode, daq_list } => {
+                match self.daq.start_stop_list(daq_list, mode == 1) {
+                    // 响应唯一带值的地方：该 list 的首个绝对 ODT 编号
+                    Ok(first) => ok(code, vec![first, 0x00]),
+                    Err(error) => err(error),
+                }
+            }
+            Command::StartStopSynch { mode } => {
+                self.daq.start_stop_synch(mode == 1);
+                ok(code, vec![])
+            }
+            Command::ClearDaqList { daq_list } => reply(code, self.daq.clear_list(daq_list)),
         }
     }
 
@@ -175,34 +278,126 @@ fn ok(_code: u8, payload: Vec<u8>) -> Response {
     Response::Ok { payload }
 }
 
+/// 把状态机的结果翻成响应：成功回空正响应，失败回错误码。
+fn reply(code: u8, result: Result<(), ErrorCode>) -> Response {
+    match result {
+        Ok(()) => ok(code, vec![]),
+        Err(error) => err(error),
+    }
+}
+
 fn err(code: ErrorCode) -> Response {
     Response::Err { code: code as u8 }
+}
+
+/// 一个事件 tick 的产出。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TickOutput {
+    /// 要发到总线上的 DTO。
+    pub frames: Vec<CanFrame>,
+    /// 因为地址越界被丢掉的帧数。
+    pub dropped: usize,
 }
 
 /// 空闲时从站多久轮询一次。没有命令不是错误，继续等。
 const IDLE_POLL: Duration = Duration::from_millis(200);
 
 /// 在总线上跑从站，直到任务被取消。
-pub async fn serve(mut ecu: SimEcu, bus: Arc<dyn Bus>) -> Result<(), Fault> {
+pub async fn serve(ecu: SimEcu, bus: Arc<dyn Bus>) -> Result<(), Fault> {
+    serve_with_metrics(ecu, bus, Arc::new(Metrics::new())).await
+}
+
+/// 同上，但由调用方提供指标收集器——测试要读丢帧数。
+pub async fn serve_with_metrics(
+    mut ecu: SimEcu,
+    bus: Arc<dyn Bus>,
+    metrics: Arc<Metrics>,
+) -> Result<(), Fault> {
     let config = ecu.config.clone();
+    let mut rng = Lcg::new(config.jitter_seed);
+    let mut next_tick = tokio::time::Instant::now() + next_delay(&config, &mut rng);
+
     loop {
-        let frame = match bus.recv(IDLE_POLL).await {
-            Ok(frame) => frame,
-            Err(openape_bus::BusError::Timeout { .. }) => continue,
-            Err(err) => {
-                let fault = bus_fault(&err);
-                tracing::error!(target: "openape::sim", %fault, "从站收帧失败，退出");
-                return Err(fault);
+        tokio::select! {
+            biased;
+            received = bus.recv(IDLE_POLL) => {
+                let frame = match received {
+                    Ok(frame) => frame,
+                    // 空闲轮询到期不是错误，接着等
+                    Err(openape_bus::BusError::Timeout { .. }) => continue,
+                    Err(err) => {
+                        let fault = bus_fault(&err);
+                        tracing::error!(target: "openape::sim", %fault, "从站收帧失败，退出");
+                        return Err(fault);
+                    }
+                };
+                let Some(outbound) = respond(&mut ecu, &config, &frame) else {
+                    continue;
+                };
+                if let Err(err) = bus.send(outbound).await {
+                    let fault = bus_fault(&err);
+                    tracing::error!(target: "openape::sim", %fault, "从站发响应失败，退出");
+                    return Err(fault);
+                }
             }
-        };
-        let Some(outbound) = respond(&mut ecu, &config, &frame) else {
-            continue;
-        };
-        if let Err(err) = bus.send(outbound).await {
-            let fault = bus_fault(&err);
-            tracing::error!(target: "openape::sim", %fault, "从站发响应失败，退出");
-            return Err(fault);
+            _ = tokio::time::sleep_until(next_tick) => {
+                emit_daq(&mut ecu, &bus, &metrics).await;
+                next_tick = tokio::time::Instant::now() + next_delay(&config, &mut rng);
+            }
         }
+    }
+}
+
+/// 发一轮 DAQ。单帧发不出去只计丢帧继续跑——DAQ 少一帧不致命，
+/// 命令通道挂了才致命，两者不能同一种处理。
+async fn emit_daq(ecu: &mut SimEcu, bus: &Arc<dyn Bus>, metrics: &Metrics) {
+    let output = ecu.on_tick();
+    if output.dropped > 0 {
+        metrics.record_dropped_frames(output.dropped as u64);
+        tracing::warn!(target: "openape::sim", dropped = output.dropped, "地址越界，丢掉 DAQ 帧");
+    }
+    for frame in output.frames {
+        match bus.send(frame).await {
+            Ok(()) => metrics.record_daq_frames(1),
+            Err(err) => {
+                metrics.record_dropped_frames(1);
+                tracing::warn!(target: "openape::sim", %err, "DAQ 帧发不出去");
+            }
+        }
+    }
+}
+
+/// 下一次出帧的间隔：`period ± jitter`。没有抖动时就是固定周期。
+fn next_delay(config: &SimEcuConfig, rng: &mut Lcg) -> Duration {
+    if config.jitter.is_zero() {
+        return config.event_period;
+    }
+    let span = u64::try_from(config.jitter.as_nanos()).unwrap_or(0) * 2;
+    let offset = if span == 0 {
+        0
+    } else {
+        rng.next() % (span + 1)
+    };
+    config
+        .event_period
+        .saturating_sub(config.jitter)
+        .saturating_add(Duration::from_nanos(offset))
+}
+
+/// 线性同余伪随机。只要"抖动可复现"，不需要统计质量。
+struct Lcg(u64);
+
+impl Lcg {
+    fn new(seed: u64) -> Self {
+        Self(seed | 1)
+    }
+
+    fn next(&mut self) -> u64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        self.0 >> 33
     }
 }
 

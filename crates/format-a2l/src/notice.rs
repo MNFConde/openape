@@ -27,17 +27,17 @@ pub struct Notice {
 impl Notice {
     /// 信息级提示。
     pub fn info(subject: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            severity: Severity::Info,
-            subject: subject.into(),
-            message: message.into(),
-        }
+        Self::new(Severity::Info, subject, message)
     }
 
     /// 警告级提示。
     pub fn warning(subject: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::new(Severity::Warning, subject, message)
+    }
+
+    fn new(severity: Severity, subject: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
-            severity: Severity::Warning,
+            severity,
             subject: subject.into(),
             message: message.into(),
         }
