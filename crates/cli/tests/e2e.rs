@@ -167,6 +167,60 @@ async fn three_runs_of_the_same_read_agree() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn probe_bus_lists_and_inspects_channels() {
+    let Some(vcan) = Vcan::create("e") else {
+        return;
+    };
+
+    let output = tokio::process::Command::new(openape())
+        .args(["probe", "bus", "--json"])
+        .output()
+        .await
+        .expect("能起子进程");
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON");
+    let channels = json["channels"].as_array().expect("channels 是数组");
+    assert!(
+        channels.iter().any(|c| c.as_str() == Some(&vcan.name)),
+        "刚建的 {} 应在列表里，实际 {channels:?}",
+        vcan.name
+    );
+
+    let output = tokio::process::Command::new(openape())
+        .args(["probe", "bus", "--channel", &vcan.name, "--json"])
+        .output()
+        .await
+        .expect("能起子进程");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON");
+    assert_eq!(json["probed"]["channel"], vcan.name);
+    assert_eq!(json["probed"]["backend"], "socketcan");
+    assert_eq!(json["probed"]["classic_can"], true);
+    assert_eq!(json["probed"]["can_fd"], false);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn probe_bus_prints_human_readable_without_json() {
+    let Some(vcan) = Vcan::create("f") else {
+        return;
+    };
+    let output = tokio::process::Command::new(openape())
+        .args(["probe", "bus", "--channel", &vcan.name])
+        .output()
+        .await
+        .expect("能起子进程");
+    assert!(output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("通道"), "实际输出: {text}");
+    assert!(text.contains(&vcan.name));
+    assert!(text.contains("经典 CAN=true"), "能力位要出现在人读输出里");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn missing_channel_exits_with_the_bus_code() {
     let output = tokio::process::Command::new(openape())
         .args(["probe", "bus", "--channel", "nosuchif0"])

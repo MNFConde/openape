@@ -209,19 +209,19 @@ impl Command {
     /// 阈值 10：这两个分支数是 XCP 命令表本身，不是设计缺陷——拆到底还是
     /// 十一条臂。**刻意保留**，不再拆分。
     fn decode_command(code: CommandCode, decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
-        Ok(match code {
-            CommandCode::Connect => Self::decode_connect(decoder)?,
-            CommandCode::Disconnect => Self::Disconnect,
-            CommandCode::GetStatus => Self::GetStatus,
-            CommandCode::Synch => Self::Synch,
-            CommandCode::GetCommModeInfo => Self::GetCommModeInfo,
-            CommandCode::SetMta => Self::decode_set_mta(decoder)?,
-            CommandCode::Upload => Self::decode_upload(decoder)?,
-            CommandCode::ShortUpload => Self::decode_short_upload(decoder)?,
-            CommandCode::Download => Self::decode_download(decoder)?,
-            CommandCode::GetCalPage => Self::decode_get_cal_page(decoder)?,
-            CommandCode::SetCalPage => Self::decode_set_cal_page(decoder)?,
-        })
+        match code {
+            CommandCode::Connect => Self::decode_connect(decoder),
+            CommandCode::Disconnect => Ok(Self::Disconnect),
+            CommandCode::GetStatus => Ok(Self::GetStatus),
+            CommandCode::Synch => Ok(Self::Synch),
+            CommandCode::GetCommModeInfo => Ok(Self::GetCommModeInfo),
+            CommandCode::SetMta => Self::decode_set_mta(decoder),
+            CommandCode::Upload => Self::decode_upload(decoder),
+            CommandCode::ShortUpload => Self::decode_short_upload(decoder),
+            CommandCode::Download => Self::decode_download(decoder),
+            CommandCode::GetCalPage => Self::decode_get_cal_page(decoder),
+            CommandCode::SetCalPage => Self::decode_set_cal_page(decoder),
+        }
     }
 
     fn decode_connect(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {

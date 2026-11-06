@@ -172,16 +172,15 @@ fn err(code: ErrorCode) -> Response {
     Response::Err { code: code as u8 }
 }
 
+/// 空闲时从站多久轮询一次。没有命令不是错误，继续等。
+const IDLE_POLL: Duration = Duration::from_millis(200);
+
 /// 在总线上跑从站，直到任务被取消。
-///
-/// 收到非命令 PID 的帧（DAQ 的 DTO、事件）直接忽略：从站不处理自己发出的东西，
-/// 也不该把别人的数据帧当命令。
 pub async fn serve(mut ecu: SimEcu, bus: Arc<dyn Bus>) -> Result<(), Fault> {
     let config = ecu.config.clone();
     loop {
-        let frame = match bus.recv(Duration::from_millis(200)).await {
+        let frame = match bus.recv(IDLE_POLL).await {
             Ok(frame) => frame,
-            // 超时只是没命令，继续等。
             Err(openape_bus::BusError::Timeout { .. }) => continue,
             Err(err) => {
                 let fault = bus_fault(&err);
@@ -189,18 +188,7 @@ pub async fn serve(mut ecu: SimEcu, bus: Arc<dyn Bus>) -> Result<(), Fault> {
                 return Err(fault);
             }
         };
-        if frame.id != config.command_id {
-            continue;
-        }
-        let Some(pid) = frame.data.first().copied() else {
-            continue;
-        };
-        if pid != PID_CMD_RES {
-            continue;
-        }
-        let response = ecu.handle(&frame.data);
-        let data = response.encode();
-        let Some(outbound) = CanFrame::new(config.response_id, data) else {
+        let Some(outbound) = respond(&mut ecu, &config, &frame) else {
             continue;
         };
         if let Err(err) = bus.send(outbound).await {
@@ -209,6 +197,21 @@ pub async fn serve(mut ecu: SimEcu, bus: Arc<dyn Bus>) -> Result<(), Fault> {
             return Err(fault);
         }
     }
+}
+
+/// 给定一帧，决定要不要回、回什么。不是命令帧就返回 `None`。
+///
+/// 从站不处理别人的流量，也不该把命令标识符上的 DAQ DTO 当命令——那样会
+/// 回环自激。
+fn respond(ecu: &mut SimEcu, config: &SimEcuConfig, frame: &CanFrame) -> Option<CanFrame> {
+    if frame.id != config.command_id {
+        return None;
+    }
+    if frame.data.first().copied() != Some(PID_CMD_RES) {
+        return None;
+    }
+    let response = ecu.handle(&frame.data);
+    CanFrame::new(config.response_id, response.encode())
 }
 
 fn bus_fault(err: &openape_bus::BusError) -> Fault {
