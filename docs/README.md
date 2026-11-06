@@ -25,6 +25,7 @@ OpenAPE（Rust 开放汽车标定工具）项目文档索引。所有文档为�
 | [11-architecture-layers.md](11-architecture-layers.md) | 分层架构：三道屏蔽墙与能力描述、crate 六档依赖方向、双前端共享引擎、可观测层、公开面策略、代码组织 | 新建 crate / 定接口 / 接新硬件 / 加使用形态时 |
 | [10-axis-binding-rfc.md](10-axis-binding-rfc.md) | Curve/Map 轴点注记约定：轴独立实体、维度顺序、绑定配置格式、校验与 golden | 设计/实现变量模型、绑定或 ELF→A2L 导出时 |
 | [12-hardware-checklist.md](12-hardware-checklist.md) | 真机抽验检查点矩阵：链路、传输层、协议语义、作业前确认四组，含通过判据与记录表 | 里程碑合入前、接新硬件/新 ECU 时 |
+| [13-deployment.md](13-deployment.md) | 部署形态与网关边界：本机/独立服务/车载盒子三形态、daemon 对外四条契约、前端三条纪律、nginx 与 Caddy 反代示例 | 部署 daemon、接反向代理、决定监听地址时 |
 | [90-env.md](90-env.md) | 开发环境：uv 管理 Python、vcan 虚拟总线、pyXCP 对照 master、浏览器侧验证环境、本机 agent 工具链 | 搭环境/复现实验时 |
 | [AGENTS.md](AGENTS.md) | docs/ 写作约束：frontmatter、编号、单一事实源、存档 | 写/改 docs/ 前 |
 
@@ -35,7 +36,7 @@ OpenAPE（Rust 开放汽车标定工具）项目文档索引。所有文档为�
 | [decisions.md](decisions.md) | 决策记录 D-xx（单文件形态） | 遇到"为什么这么选"时 |
 | [credits.md](credits.md) | 外部致谢：依赖、行为参考、格式与规范三类出处 | 引入依赖或借鉴上游实现时 |
 
-> 领域篇（10-70 号段）随设计长出、不预建：`10-` 号段由 Curve/Map 轴点注记约定占用，`11-` 号段由分层架构占用；80-diff 按需占尾号，90 号段已由 [90-env.md](90-env.md) 占用。
+> 领域篇（10-70 号段）随设计长出、不预建：`10-` 号段由 Curve/Map 轴点注记约定占用，`11-` 号段由分层架构占用，`12-`/`13-` 号段分别由真机抽验与部署形态占用；；80-diff 按需占尾号，90 号段已由 [90-env.md](90-env.md) 占用。
 
 **推荐阅读顺序**（新加入者）：根 AGENTS.md → requirements → 00 总纲 → decisions 按需。
 

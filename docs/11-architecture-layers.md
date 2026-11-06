@@ -95,6 +95,8 @@ crate 只能 `use` 自己 Cargo.toml 里声明过的依赖，反向引用在**�
 | `format-elf` / `format-a2l` | M1 的读写按裸地址进行，没有信息源消费者 | 分别随 M3 / M2 引入变量模型时 | 变量只能手填地址，无自动建立 |
 | `format-dbc` / `format-dcm` / `format-mf4` | 各自能力的里程碑未到 | DBC 显示 M3；DCM 导入与数据集 M4；MF4 录制与离线重开 M5 | 对应能力缺失，不影响 M1 验证 |
 | `daemon` / `ui` | 没有 UI 就没有常驻进程的消费者 | M2 的 Web 最小曲线页 | CLI 已证明引擎可用，但产品形态缺失 |
+| `ui-tauri` 桌面壳 | 界面与 Web UI 完全同源，壳只解决"双击启动"这一件事 | 用户明确要单机双击形态（MVP 之后），见 [decisions.md](decisions.md#d-21-native-gui-决策逆转) | 本地使用须先起 daemon，体验差但功能不缺 |
+| 前置网关与自研 `gateway` | nginx / Caddy 已覆盖反代、认证与 TLS，daemon 侧零代码 | 车载盒子放不下静态二进制，或需 ACL 直接读工程配置，见 [13-deployment.md](13-deployment.md#自研精简网关的触发条件) | 只能用现成网关，部署门槛落在运维能力上 |
 | `bus-zlg` / `bus-socketcand` / `bus-replay` / `bus-vector` | vcan 已能覆盖 M1 的全部验证需求 | ZLG 真机 M5；socketcand 与回放按用户请求；Vector 按实际硬件到手 | 真机验证缺位——M1 建抽验清单正是为了提前暴露这一点 |
 | `sim-ecu` 的怪癖注入 | 协议层刚自研完，怪癖需真实样本才能定义 | 同 `cal-core` 的 quirk 扩展点 | 模拟器只能覆盖标准行为 |
 | `diag` 的黑匣子与指标 | M1 只有日志与最小故障码集，尚无高频 DAQ 可测 | M2 DAQ 上流后 | 偶发问题在现场无法复现 |
@@ -145,6 +147,8 @@ L1 的 `proto` 与 L4 的 `assembly` 当前为空档；其余 crate 与模块的
 ### 设备独占
 
 CAN 硬件通常不允许两个进程同时打开同一通道。`session` 打开设备时按（后端、通道）加进程级锁，冲突时返回明确故障而非底层错误；`cli` 另提供经本地 gRPC 转发的执行路径（`--via-daemon`），避免为了看一眼现象先停掉正在作业的 daemon。
+
+daemon 的对外边界只四条：明文 HTTP/1.1、默认仅绑 `127.0.0.1`、静态页与 gRPC 同端口、提供 `/healthz`。认证、远程接入与方法级权限不在 daemon 内实现，全部交给前置网关（[decisions.md](decisions.md#d-22-远程接入由前置网关承担)），部署形态与配置示例见 [13-deployment.md](13-deployment.md)。
 
 ## 可观测层
 
