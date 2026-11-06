@@ -30,8 +30,8 @@
 [x] M2-05 feat(format-a2l)：IR → A2L 生成 + 与 M0-5 golden 往返一致 → 验收：往返后再解析零语义 diff（为 M3 导出打底）
 [x] M2-06 feat(diag)：补黑匣子环形缓冲与五项指标（11 号后置项表到期：DAQ 上流前落地）→ 验收：故障触发落盘含最近窗口，指标可快照
 [x] M2-07 feat(xcp-proto)：DAQ 命令码 + ODT/DTO 帧与绝对 ODT 编号 → 验收：与 spike 的 DAQ 样本对照一致
-[ ] M2-08 feat(xcp)：DAQ 列表配置（FREE_DAQ/ALLOC_DAQ/ALLOC_ODT/WRITE_DAQ）+ START_STOP → 验收：多 ODT 配置后首帧时间戳单调
-[ ] M2-09 feat(sim-ecu)：DAQ 从站侧（ODT 解析 + 周期发送 + 可注入抖动）→ 验收：上报丢帧数与注入抖动一致
+[x] M2-08 feat(xcp)：DAQ 列表配置（FREE_DAQ/ALLOC_DAQ/ALLOC_ODT/WRITE_DAQ）+ START_STOP → 验收：多 ODT 配置后首帧时间戳单调
+[x] M2-09 feat(sim-ecu)：DAQ 从站侧（ODT 解析 + 周期发送 + 可注入抖动）→ 验收：上报丢帧数与注入抖动一致
 [ ] M2-10 feat(session)：DAQ 环形缓冲 + 事件流出口 + 丢帧/背压计数 → 验收：慢消费者不拖垮采集，背压可观测
 [ ] M2-11 feat(proto)：proto crate 成立（gRPC schema + build.rs，含 DTC 扩展位占位）+ CLI 输出结构迁入、本地结构下线 → 验收：CLI --json 与 gRPC 共用同一类型
 [ ] M2-12 feat(daemon)：axum 单端口同时托管静态页与 grpc-web（D-05 三约束：GrpcWebLayer、accept_http1、Body 双向转换）→ 验收：浏览器 server-streaming 20 帧回归通过
