@@ -446,6 +446,49 @@ mod tests {
     }
 
     #[test]
+    fn next_delay_spans_the_whole_jitter_band() {
+        let config = SimEcuConfig {
+            event_period: Duration::from_millis(20),
+            jitter: Duration::from_millis(5),
+            jitter_seed: 7,
+            ..SimEcuConfig::default_ids()
+        };
+        let mut rng = Lcg::new(config.jitter_seed);
+        let mut low = u128::MAX;
+        let mut high = 0u128;
+        for _ in 0..64 {
+            let delay = next_delay(&config, &mut rng).as_nanos();
+            low = low.min(delay);
+            high = high.max(delay);
+        }
+        assert!(
+            low >= Duration::from_millis(15).as_nanos(),
+            "下界是 period - jitter"
+        );
+        assert!(
+            high > Duration::from_millis(22).as_nanos(),
+            "上界要摸到 period + jitter 附近"
+        );
+        assert!(
+            high <= Duration::from_millis(25).as_nanos(),
+            "不该越过 period + jitter"
+        );
+    }
+
+    #[test]
+    fn next_delay_without_jitter_is_constant() {
+        let config = SimEcuConfig {
+            event_period: Duration::from_millis(12),
+            jitter: Duration::ZERO,
+            ..SimEcuConfig::default_ids()
+        };
+        let mut rng = Lcg::new(1);
+        for _ in 0..4 {
+            assert_eq!(next_delay(&config, &mut rng), Duration::from_millis(12));
+        }
+    }
+
+    #[test]
     fn connect_reports_resources_and_frame_limits() {
         let mut ecu = ecu();
         let payload = expect_ok(

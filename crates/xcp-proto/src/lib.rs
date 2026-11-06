@@ -364,6 +364,14 @@ mod tests {
     }
 
     #[test]
+    fn response_payload_starts_right_after_the_pid() {
+        match Response::decode(&[0xFF, 0x07, 0x08]).expect("可解码") {
+            Response::Ok { payload } => assert_eq!(payload, vec![0x07, 0x08]),
+            other => panic!("应为正响应，实际 {other:?}"),
+        }
+    }
+
+    #[test]
     fn empty_frame_is_reported_as_truncated() {
         assert_eq!(
             Response::decode(&[]),
