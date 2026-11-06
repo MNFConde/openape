@@ -380,6 +380,15 @@ mod tests {
     }
 
     #[test]
+    fn error_response_without_a_code_is_truncated() {
+        // 只有 PID 没有错误码：帧长 1，第二字节缺席
+        assert_eq!(
+            Response::decode(&[PID_ERR]),
+            Err(DecodeError::Truncated { need: 2, got: 1 })
+        );
+    }
+
+    #[test]
     fn error_code_table_covers_every_known_value() {
         let table = [
             (0x00, ErrorCode::CmdSynch),
