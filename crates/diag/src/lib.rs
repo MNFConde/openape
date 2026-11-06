@@ -5,8 +5,12 @@
 
 #![forbid(unsafe_code)]
 
+pub mod blackbox;
 pub mod fault;
 pub mod log;
+pub mod metrics;
 
+pub use blackbox::{BlackBox, Entry, EntryBody};
 pub use fault::{Domain, Fault, FaultCode, Severity};
 pub use log::{Direction, Verbosity};
+pub use metrics::{Metrics, Snapshot};
