@@ -12,7 +12,8 @@ use openape_xcp_proto::{Command, DecodeError, ErrorCode, MAX_CTO, Response};
 use crate::connection::{self, ConnectInfo, SessionStatus, XcpConnection, seq};
 
 /// SHORT_UPLOAD 单次可读的最大字节数：响应帧 `PID + 命令码 + 数据` 共 8 字节。
-pub const MAX_SHORT_UPLOAD_LEN: u16 = (MAX_CTO - 2) as u16;
+/// 单帧能带回的最大字节数：整帧减掉响应 PID，再没有别的开销。
+pub const MAX_SHORT_UPLOAD_LEN: u16 = (MAX_CTO - 1) as u16;
 
 /// 会话参数。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,25 +132,13 @@ impl CanXcpMaster {
 }
 
 /// 解析一帧响应。返回 `Ok(None)` 表示这帧不是命令响应，应当跳过。
-fn decode_answer(frame: &CanFrame, code: u8) -> Result<Option<Vec<u8>>, Fault> {
+fn decode_answer(frame: &CanFrame, _code: u8) -> Result<Option<Vec<u8>>, Fault> {
     let pid = frame.data.first().copied().unwrap_or(0);
     if pid != openape_xcp_proto::PID_CMD_RES && pid != openape_xcp_proto::PID_ERR {
         return Ok(None);
     }
     match Response::decode(&frame.data) {
-        Ok(Response::Ok {
-            command: echoed,
-            payload,
-        }) => {
-            if echoed != code {
-                return Err(connection::fault(
-                    seq::PROTOCOL,
-                    Severity::Error,
-                    format!("响应回显命令码 {echoed:#04x}，与请求 {code:#04x} 不符"),
-                ));
-            }
-            Ok(Some(payload))
-        }
+        Ok(Response::Ok { payload }) => Ok(Some(payload)),
         Ok(Response::Err { code }) => Err(slave_error(code)),
         Err(err) => Err(decode_fault(err)),
     }
@@ -158,7 +147,7 @@ fn decode_answer(frame: &CanFrame, code: u8) -> Result<Option<Vec<u8>>, Fault> {
 fn decode_fault(err: DecodeError) -> Fault {
     let message = err.to_string();
     connection::fault(seq::CODEC, Severity::Error, message)
-        .with_hint("检查两侧 maxCto 与命令响应格式是否一致（标准要求回显命令码）")
+        .with_hint("检查两侧 maxCto 是否一致：响应是 PID 加数据，不回显命令码")
 }
 
 fn slave_error(code: u8) -> Fault {

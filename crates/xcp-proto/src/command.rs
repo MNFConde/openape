@@ -29,6 +29,30 @@ pub enum CommandCode {
     GetCalPage = 0xEA,
     /// 切标定页。
     SetCalPage = 0xEB,
+    /// 查从站 DAQ 能力。
+    GetDaqProcessorInfo = 0xDA,
+    /// 查从站 DAQ 分辨率。
+    GetDaqResolutionInfo = 0xD9,
+    /// 释放全部 DAQ 配置。
+    FreeDaq = 0xD6,
+    /// 分配 DAQ list。
+    AllocDaq = 0xD5,
+    /// 给 DAQ list 分配 ODT。
+    AllocOdt = 0xD4,
+    /// 给 ODT 分配条目。
+    AllocOdtEntry = 0xD3,
+    /// 设置写 ODT 的游标。
+    SetDaqPtr = 0xE2,
+    /// 按游标写一条 ODT 条目。
+    WriteDaq = 0xE1,
+    /// 设置 DAQ list 的模式。
+    SetDaqListMode = 0xE0,
+    /// 启停单个 DAQ list。
+    StartStopDaqList = 0xDE,
+    /// 同步启停全部 DAQ list。
+    StartStopSynch = 0xDD,
+    /// 清空 DAQ list 的条目。
+    ClearDaqList = 0xE3,
 }
 
 impl CommandCode {
@@ -46,6 +70,18 @@ impl CommandCode {
             0xF0 => Self::Download,
             0xEA => Self::GetCalPage,
             0xEB => Self::SetCalPage,
+            0xDA => Self::GetDaqProcessorInfo,
+            0xD9 => Self::GetDaqResolutionInfo,
+            0xD6 => Self::FreeDaq,
+            0xD5 => Self::AllocDaq,
+            0xD4 => Self::AllocOdt,
+            0xD3 => Self::AllocOdtEntry,
+            0xE2 => Self::SetDaqPtr,
+            0xE1 => Self::WriteDaq,
+            0xE0 => Self::SetDaqListMode,
+            0xDE => Self::StartStopDaqList,
+            0xDD => Self::StartStopSynch,
+            0xE3 => Self::ClearDaqList,
             _ => return None,
         })
     }
@@ -109,7 +145,84 @@ pub enum Command {
         /// 逻辑段号。
         segment: u8,
         /// 页号。
-        page: u16,
+        page: u8,
+    },
+    /// 查从站 DAQ 能力。
+    GetDaqProcessorInfo,
+    /// 查从站 DAQ 分辨率。
+    GetDaqResolutionInfo,
+    /// 释放全部 DAQ 配置。
+    FreeDaq,
+    /// 分配 `count` 个 DAQ list。
+    AllocDaq {
+        /// DAQ list 个数。
+        count: u16,
+    },
+    /// 给 DAQ list 分配 `odt_count` 个 ODT。
+    AllocOdt {
+        /// DAQ list 编号。
+        daq_list: u16,
+        /// ODT 个数。
+        odt_count: u8,
+    },
+    /// 给某个 ODT 分配 `entries` 个条目。
+    AllocOdtEntry {
+        /// DAQ list 编号。
+        daq_list: u16,
+        /// ODT 编号（list 内相对）。
+        odt: u8,
+        /// 条目数。
+        entries: u8,
+    },
+    /// 设置写 ODT 的游标。`WRITE_DAQ` 不带宽高参数，靠这个游标定位。
+    SetDaqPtr {
+        /// DAQ list 编号。
+        daq_list: u16,
+        /// ODT 编号。
+        odt: u8,
+        /// 条目序号。
+        entry: u8,
+    },
+    /// 在游标处写一条 ODT 条目。
+    WriteDaq {
+        /// 位偏移。
+        bit_offset: u8,
+        /// 条目字节数；0 表示整字节粒度下的 1。
+        size: u8,
+        /// 地址扩展。
+        address_extension: u8,
+        /// 源地址。
+        address: u32,
+    },
+    /// 设置 DAQ list 的模式。
+    SetDaqListMode {
+        /// 模式位。
+        mode: u8,
+        /// DAQ list 编号。
+        daq_list: u16,
+        /// 事件通道号。
+        event: u16,
+        /// 采样预分频。
+        prescaler: u8,
+        /// 优先级。
+        priority: u8,
+    },
+    /// 启停单个 DAQ list；响应带回该 list 的首个 PID。
+    StartStopDaqList {
+        /// 模式：0 停、1 启、2 只选中不发。
+        mode: u8,
+        /// DAQ list 编号。
+        daq_list: u16,
+    },
+    /// 同步启停全部 DAQ list。
+    StartStopSynch {
+        /// 模式：0 停、1 启。
+        mode: u8,
+    },
+    /// 清空 DAQ list 的条目。
+    ClearDaqList {
+        /// DAQ list 编号。
+        daq_list: u16,
     },
 }
 
@@ -129,6 +242,18 @@ impl Command {
             Self::Download { .. } => CommandCode::Download,
             Self::GetCalPage { .. } => CommandCode::GetCalPage,
             Self::SetCalPage { .. } => CommandCode::SetCalPage,
+            Self::GetDaqProcessorInfo => CommandCode::GetDaqProcessorInfo,
+            Self::GetDaqResolutionInfo => CommandCode::GetDaqResolutionInfo,
+            Self::FreeDaq => CommandCode::FreeDaq,
+            Self::AllocDaq { .. } => CommandCode::AllocDaq,
+            Self::AllocOdt { .. } => CommandCode::AllocOdt,
+            Self::AllocOdtEntry { .. } => CommandCode::AllocOdtEntry,
+            Self::SetDaqPtr { .. } => CommandCode::SetDaqPtr,
+            Self::WriteDaq { .. } => CommandCode::WriteDaq,
+            Self::SetDaqListMode { .. } => CommandCode::SetDaqListMode,
+            Self::StartStopDaqList { .. } => CommandCode::StartStopDaqList,
+            Self::StartStopSynch { .. } => CommandCode::StartStopSynch,
+            Self::ClearDaqList { .. } => CommandCode::ClearDaqList,
         }
     }
 
@@ -140,24 +265,24 @@ impl Command {
         // 命令码只有 `code()` 一处来源；这里不再逐个硬编码，否则改一处漏一处。
         let code = self.code() as u8;
         let bytes = match self {
-            Self::Connect { mode } => Encoder::with_frame(code).u8(*mode).finish(),
-            Self::Disconnect => Encoder::with_frame(code).finish(),
-            Self::GetStatus => Encoder::with_frame(code).finish(),
-            Self::Synch => Encoder::with_frame(code).finish(),
-            Self::GetCommModeInfo => Encoder::with_frame(code).finish(),
+            Self::Connect { mode } => Encoder::with_command(code).u8(*mode).finish(),
+            Self::Disconnect => Encoder::with_command(code).finish(),
+            Self::GetStatus => Encoder::with_command(code).finish(),
+            Self::Synch => Encoder::with_command(code).finish(),
+            Self::GetCommModeInfo => Encoder::with_command(code).finish(),
             Self::SetMta {
                 address_extension,
                 address,
-            } => Encoder::with_frame(code)
+            } => Encoder::with_command(code)
                 .u8(*address_extension)
                 .u32(*address)
                 .finish(),
-            Self::Upload { len } => Encoder::with_frame(code).u8(*len).finish(),
+            Self::Upload { len } => Encoder::with_command(code).u8(*len).finish(),
             Self::ShortUpload {
                 len,
                 address_extension,
                 address,
-            } => Encoder::with_frame(code)
+            } => Encoder::with_command(code)
                 .u8(*len)
                 .u8(*address_extension)
                 .u32(*address)
@@ -169,20 +294,79 @@ impl Command {
                         actual: data.len(),
                     });
                 }
-                Encoder::with_frame(code).u8(*len).bytes(data).finish()
+                Encoder::with_command(code).u8(*len).bytes(data).finish()
             }
             Self::GetCalPage { mode, segment } => {
-                Encoder::with_frame(code).u8(*mode).u8(*segment).finish()
+                Encoder::with_command(code).u8(*mode).u8(*segment).finish()
             }
             Self::SetCalPage {
                 mode,
                 segment,
                 page,
-            } => Encoder::with_frame(code)
+            } => Encoder::with_command(code)
                 .u8(*mode)
                 .u8(*segment)
-                .u16(*page)
+                .u8(*page)
                 .finish(),
+            Self::GetDaqProcessorInfo => Encoder::with_command(code).finish(),
+            Self::GetDaqResolutionInfo => Encoder::with_command(code).finish(),
+            Self::FreeDaq => Encoder::with_command(code).finish(),
+            Self::AllocDaq { count } => Encoder::with_command(code).u16(*count).finish(),
+            Self::AllocOdt {
+                daq_list,
+                odt_count,
+            } => Encoder::with_command(code)
+                .u16(*daq_list)
+                .u8(*odt_count)
+                .finish(),
+            Self::AllocOdtEntry {
+                daq_list,
+                odt,
+                entries,
+            } => Encoder::with_command(code)
+                .u16(*daq_list)
+                .u8(*odt)
+                .u8(*entries)
+                .finish(),
+            Self::SetDaqPtr {
+                daq_list,
+                odt,
+                entry,
+            } => Encoder::with_command(code)
+                .u16(*daq_list)
+                .u8(*odt)
+                .u8(*entry)
+                .finish(),
+            Self::WriteDaq {
+                bit_offset,
+                size,
+                address_extension,
+                address,
+            } => Encoder::with_command(code)
+                .u8(*bit_offset)
+                .u8(*size)
+                .u8(*address_extension)
+                .u32(*address)
+                .finish(),
+            Self::SetDaqListMode {
+                mode,
+                daq_list,
+                event,
+                prescaler,
+                priority,
+            } => Encoder::with_command(code)
+                .u8(*mode)
+                .u16(*daq_list)
+                .u16(*event)
+                .u8(*prescaler)
+                .u8(*priority)
+                .finish(),
+            Self::StartStopDaqList { mode, daq_list } => Encoder::with_command(code)
+                .u8(*mode)
+                .u16(*daq_list)
+                .finish(),
+            Self::StartStopSynch { mode } => Encoder::with_command(code).u8(*mode).finish(),
+            Self::ClearDaqList { daq_list } => Encoder::with_command(code).u16(*daq_list).finish(),
         };
         if bytes.len() > MAX_CTO {
             return Err(EncodeError::TooLong {
@@ -193,14 +377,12 @@ impl Command {
         Ok(bytes)
     }
 
-    /// 从整帧解码（校验 PID，然后从命令码开始读）。
+    /// 从整帧解码。byte0 就是命令码，CRO 没有 PID 前缀。
     pub fn decode(frame: &[u8]) -> Result<Self, DecodeError> {
-        match frame.first() {
-            Some(&crate::PID_CMD_RES) => {}
-            Some(&other) => return Err(DecodeError::UnknownCommand { code: other }),
-            None => return Err(DecodeError::Truncated { need: 1, got: 0 }),
+        if frame.is_empty() {
+            return Err(DecodeError::Truncated { need: 1, got: 0 });
         }
-        let mut decoder = Decoder::at(frame, 1);
+        let mut decoder = Decoder::at(frame, 0);
         let raw = decoder.u8()?;
         let code = CommandCode::from_u8(raw).ok_or(DecodeError::UnknownCommand { code: raw })?;
         Self::decode_command(code, &mut decoder)
@@ -224,7 +406,57 @@ impl Command {
             CommandCode::Download => Self::decode_download(decoder),
             CommandCode::GetCalPage => Self::decode_get_cal_page(decoder),
             CommandCode::SetCalPage => Self::decode_set_cal_page(decoder),
+            CommandCode::GetDaqProcessorInfo => Ok(Self::GetDaqProcessorInfo),
+            CommandCode::GetDaqResolutionInfo => Ok(Self::GetDaqResolutionInfo),
+            CommandCode::FreeDaq => Ok(Self::FreeDaq),
+            CommandCode::AllocDaq => Ok(Self::AllocDaq {
+                count: decoder.u16()?,
+            }),
+            CommandCode::AllocOdt => Ok(Self::AllocOdt {
+                daq_list: decoder.u16()?,
+                odt_count: decoder.u8()?,
+            }),
+            CommandCode::AllocOdtEntry => Ok(Self::AllocOdtEntry {
+                daq_list: decoder.u16()?,
+                odt: decoder.u8()?,
+                entries: decoder.u8()?,
+            }),
+            CommandCode::SetDaqPtr => Ok(Self::SetDaqPtr {
+                daq_list: decoder.u16()?,
+                odt: decoder.u8()?,
+                entry: decoder.u8()?,
+            }),
+            CommandCode::WriteDaq => Self::decode_write_daq(decoder),
+            CommandCode::SetDaqListMode => Ok(Self::SetDaqListMode {
+                mode: decoder.u8()?,
+                daq_list: decoder.u16()?,
+                event: decoder.u16()?,
+                prescaler: decoder.u8()?,
+                priority: decoder.u8()?,
+            }),
+            CommandCode::StartStopDaqList => Ok(Self::StartStopDaqList {
+                mode: decoder.u8()?,
+                daq_list: decoder.u16()?,
+            }),
+            CommandCode::StartStopSynch => Ok(Self::StartStopSynch {
+                mode: decoder.u8()?,
+            }),
+            CommandCode::ClearDaqList => Ok(Self::ClearDaqList {
+                daq_list: decoder.u16()?,
+            }),
         }
+    }
+
+    fn decode_write_daq(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
+        let bit_offset = decoder.u8()?;
+        let size = decoder.u8()?;
+        let address_extension = decoder.u8()?;
+        Ok(Self::WriteDaq {
+            bit_offset,
+            size,
+            address_extension,
+            address: decoder.u32()?,
+        })
     }
 
     fn decode_connect(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
@@ -274,7 +506,7 @@ impl Command {
         Ok(Self::SetCalPage {
             mode,
             segment,
-            page: decoder.u16()?,
+            page: decoder.u8()?,
         })
     }
 }
@@ -293,7 +525,7 @@ mod tests {
             }
             .encode()
             .expect("一帧放得下"),
-            vec![0xFF, 0xF6, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00]
+            vec![0xF6, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00]
         );
         assert_eq!(
             Command::ShortUpload {
@@ -303,11 +535,11 @@ mod tests {
             }
             .encode()
             .expect("一帧放得下"),
-            vec![0xFF, 0xF4, 0x02, 0x00, 0x02, 0x10, 0x00, 0x00]
+            vec![0xF4, 0x02, 0x00, 0x00, 0x02, 0x10, 0x00, 0x00]
         );
         assert_eq!(
             Command::Upload { len: 4 }.encode().expect("一帧放得下"),
-            vec![0xFF, 0xF5, 0x04]
+            vec![0xF5, 0x04]
         );
         assert_eq!(
             Command::Download {
@@ -316,7 +548,7 @@ mod tests {
             }
             .encode()
             .expect("一帧放得下"),
-            vec![0xFF, 0xF0, 0x03, 0xAA, 0xBB, 0xCC]
+            vec![0xF0, 0x03, 0xAA, 0xBB, 0xCC]
         );
         assert_eq!(
             Command::SetCalPage {
@@ -326,8 +558,116 @@ mod tests {
             }
             .encode()
             .expect("一帧放得下"),
-            vec![0xFF, 0xEB, 0x00, 0x00, 0x01, 0x00]
+            vec![0xEB, 0x00, 0x00, 0x01]
         );
+    }
+
+    #[test]
+    fn daq_commands_match_the_spike_frames() {
+        // 实测抓帧（tmp/spike-m0-2/can.log）：命令码在 byte0，参数按整帧偏移对齐。
+        let cases = [
+            (Command::AllocDaq { count: 1 }, vec![0xD5, 0x00, 0x01, 0x00]),
+            (
+                Command::AllocOdt {
+                    daq_list: 0,
+                    odt_count: 1,
+                },
+                vec![0xD4, 0x00, 0x00, 0x00, 0x01],
+            ),
+            (
+                Command::AllocOdtEntry {
+                    daq_list: 0,
+                    odt: 0,
+                    entries: 2,
+                },
+                vec![0xD3, 0x00, 0x00, 0x00, 0x00, 0x02],
+            ),
+            (
+                Command::SetDaqPtr {
+                    daq_list: 0,
+                    odt: 0,
+                    entry: 0,
+                },
+                vec![0xE2, 0x00, 0x00, 0x00, 0x00, 0x00],
+            ),
+            (
+                Command::WriteDaq {
+                    bit_offset: 0,
+                    size: 2,
+                    address_extension: 0,
+                    address: 0x1000,
+                },
+                vec![0xE1, 0x00, 0x02, 0x00, 0x00, 0x10, 0x00, 0x00],
+            ),
+            (
+                Command::SetDaqListMode {
+                    mode: 0,
+                    daq_list: 0,
+                    event: 0,
+                    prescaler: 1,
+                    priority: 0,
+                },
+                vec![0xE0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00],
+            ),
+        ];
+        for (command, expected) in cases {
+            assert_eq!(
+                command.encode().expect("一帧放得下"),
+                expected,
+                "{command:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn daq_commands_round_trip() {
+        let commands = [
+            Command::GetDaqProcessorInfo,
+            Command::GetDaqResolutionInfo,
+            Command::FreeDaq,
+            Command::AllocDaq { count: 3 },
+            Command::AllocOdt {
+                daq_list: 2,
+                odt_count: 4,
+            },
+            Command::AllocOdtEntry {
+                daq_list: 1,
+                odt: 2,
+                entries: 3,
+            },
+            Command::SetDaqPtr {
+                daq_list: 1,
+                odt: 2,
+                entry: 3,
+            },
+            Command::WriteDaq {
+                bit_offset: 8,
+                size: 4,
+                address_extension: 1,
+                address: 0x2000,
+            },
+            Command::SetDaqListMode {
+                mode: 1,
+                daq_list: 2,
+                event: 3,
+                prescaler: 4,
+                priority: 5,
+            },
+            Command::StartStopDaqList {
+                mode: 1,
+                daq_list: 2,
+            },
+            Command::StartStopSynch { mode: 1 },
+            Command::ClearDaqList { daq_list: 2 },
+        ];
+        for command in commands {
+            let encoded = command.encode().expect("DAQ 命令都放得下一帧");
+            assert_eq!(
+                Command::decode(&encoded),
+                Ok(command.clone()),
+                "{command:?}"
+            );
+        }
     }
 
     #[test]
@@ -423,7 +763,7 @@ mod tests {
         for (command, expected) in pairs {
             assert_eq!(command.code(), expected, "{command:?}");
             assert_eq!(
-                command.encode().expect("一帧放得下")[1],
+                command.encode().expect("一帧放得下")[0],
                 expected as u8,
                 "编码出来的命令码必须与 code() 一致"
             );
@@ -500,17 +840,17 @@ mod tests {
 
     #[test]
     fn download_wider_than_a_frame_is_refused() {
-        // 整帧 = PID + 命令码 + len + 数据；7 字节数据要 10 字节帧。
+        // 整帧 = 命令码 + len + 数据；7 字节数据要 9 字节帧。
         let err = Command::Download {
             len: 7,
             data: vec![0; 7],
         }
         .encode()
-        .expect_err("2 + 7 > 8");
+        .expect_err("1 + 1 + 7 > 8");
         assert_eq!(
             err,
             EncodeError::TooLong {
-                len: 10,
+                len: 9,
                 max: MAX_CTO
             }
         );
@@ -518,8 +858,7 @@ mod tests {
 
     #[test]
     fn truncated_download_payload_is_reported() {
-        let err =
-            Command::decode(&[0xFF, 0xF0, 0x04, 0x01, 0x02]).expect_err("声明 4 字节只给了 2");
-        assert_eq!(err, DecodeError::Truncated { need: 7, got: 5 });
+        let err = Command::decode(&[0xF0, 0x04, 0x01, 0x02]).expect_err("声明 4 字节只给了 2");
+        assert_eq!(err, DecodeError::Truncated { need: 6, got: 4 });
     }
 }

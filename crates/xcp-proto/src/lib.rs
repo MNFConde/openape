@@ -6,9 +6,9 @@
 //!
 //! 与 M0-2 spike 的两处偏差是**刻意的**，不是遗留：
 //!
-//! 1. spike 的命令响应是 `[PID, 数据]`，省掉了命令码回显；标准是
-//!    `[PID, 命令码, 参数]`。本 crate 按标准，让真 ECU 与第三方 master
-//!    都能对上。
+//! 1. 响应是 `[PID, 数据]`，**不回显命令码**。早期实现以为标准要求回显，
+//!    给响应加了命令码字节，实测抓帧证明那是错的：`FF 11 11` 就是两字节
+//!    数据响应。
 //! 2. spike 把 `ERR_CMD_UNKNOWN` 记成 `0x22`，标准是 `0x10`（`0x22` 是
 //!    `ERR_ACCESS_LOCKED`）。本 crate 按标准表。
 
@@ -35,6 +35,76 @@ pub const PID_EVENT: u8 = 0xFD;
 pub const PID_SERV: u8 = 0xFC;
 /// DAQ DTO 的 PID 上限（含）。
 pub const PID_DAQ_MAX: u8 = 0xFB;
+
+/// 一条 DAQ DTO。
+///
+/// DAQ 帧没有命令码：byte0 是**绝对 ODT 编号**，从 0 起跨 DAQ list 连续分配
+/// （M0-2 实测：spike 里 list 0 的首个 PID 为 0）。因此 `0x00..=0xFB` 全部
+/// 被 DTO 占用，命令与响应用 `0xFC..=0xFF`——这也是 master 能在一堆 DAQ 帧里
+/// 认出响应的依据。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DaqFrame<'a> {
+    /// 绝对 ODT 编号，等于帧的字节 0。
+    pub odt: u8,
+    /// 该 ODT 承载的数据，已剥掉 ODT 编号。
+    pub payload: &'a [u8],
+}
+
+impl<'a> DaqFrame<'a> {
+    /// 解析一帧。首字节 > [`PID_DAQ_MAX`] 说明这是命令或响应，不是 DAQ 帧。
+    pub fn parse(frame: &'a [u8]) -> Option<Self> {
+        let odt = *frame.first()?;
+        (odt <= PID_DAQ_MAX).then_some(Self {
+            odt,
+            payload: &frame[1..],
+        })
+    }
+}
+
+/// 绝对 ODT 编号分配器。
+///
+/// 编号跨 DAQ list 连续：第一个 list 的首个 ODT 拿 0，第二个 list 接着上一个
+/// list 的编号往下排。从站按这张表发 DTO，master 按同一张表把 PID 还原成
+/// (list, odt)——两侧共用这一份算术，错一处就整体错位。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OdtIds {
+    next: u16,
+}
+
+impl Default for OdtIds {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl OdtIds {
+    /// 从 0 开始分配。
+    pub const fn new() -> Self {
+        Self { next: 0 }
+    }
+
+    /// 为下一个 DAQ list 的 `odt_count` 个 ODT 分配编号，返回该 list 的首个
+    /// 编号。编号用尽（超过 [`PID_DAQ_MAX`]）返回 `None`。
+    pub fn allocate(&mut self, odt_count: u8) -> Option<u8> {
+        let first = u8::try_from(self.next)
+            .ok()
+            .filter(|pid| *pid <= PID_DAQ_MAX)?;
+        if odt_count == 0 {
+            return Some(first);
+        }
+        let last = self.next + u16::from(odt_count) - 1;
+        if last > u16::from(PID_DAQ_MAX) {
+            return None;
+        }
+        self.next = last + 1;
+        Some(first)
+    }
+
+    /// 下一个待分配的编号。
+    pub const fn next_pid(self) -> u16 {
+        self.next
+    }
+}
 
 /// 协议版本（主版本, 次版本）。
 pub const PROTOCOL_VERSION: (u8, u8) = (1, 1);
@@ -148,12 +218,14 @@ impl std::fmt::Display for EncodeError {
 impl std::error::Error for EncodeError {}
 
 /// 一条响应。
+///
+/// 响应帧是 `PID + 数据`：**不回显命令码**（M0-2 实测，`FF 05 00 08 08 00
+/// 01 01` 是 CONNECT 的六字节响应）。master 靠"一次一条命令"的串行约定把
+/// 响应对回请求，不靠回显。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Response {
-    /// 正响应，`payload` 已剥掉 PID 与命令码。
+    /// 正响应，`payload` 已剥掉 PID。
     Ok {
-        /// 回显的命令码。
-        command: u8,
         /// 响应参数。
         payload: Vec<u8>,
     },
@@ -173,9 +245,8 @@ impl Response {
     pub fn encode(&self) -> Vec<u8> {
         let mut frame = Vec::with_capacity(MAX_CTO);
         match self {
-            Self::Ok { command, payload } => {
+            Self::Ok { payload } => {
                 frame.push(PID_CMD_RES);
-                frame.push(*command);
                 frame.extend_from_slice(payload);
             }
             Self::Err { code } => {
@@ -192,15 +263,9 @@ impl Response {
             .first()
             .ok_or(DecodeError::Truncated { need: 1, got: 0 })?;
         match pid {
-            PID_CMD_RES => {
-                let command = *frame
-                    .get(1)
-                    .ok_or(DecodeError::Truncated { need: 2, got: 1 })?;
-                Ok(Self::Ok {
-                    command,
-                    payload: frame[2..].to_vec(),
-                })
-            }
+            PID_CMD_RES => Ok(Self::Ok {
+                payload: frame[1..].to_vec(),
+            }),
             PID_ERR => {
                 let code = *frame
                     .get(1)
@@ -217,15 +282,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ok_response_echoes_command_and_keeps_real_length() {
+    fn ok_response_is_pid_plus_payload_without_echo() {
+        // 实测：SHORT_UPLOAD 两字节响应是 FF 11 11，没有命令码回显
         let frame = Response::Ok {
-            command: CommandCode::Upload as u8,
-            payload: vec![0xAA],
+            payload: vec![0x11, 0x11],
         }
         .encode();
         assert_eq!(
             frame,
-            vec![0xFF, 0xF5, 0xAA],
+            vec![0xFF, 0x11, 0x11],
             "保留真实长度，长度本身是信息"
         );
     }
@@ -240,20 +305,59 @@ mod tests {
     }
 
     #[test]
-    fn response_round_trips_ignoring_padding() {
+    fn connect_response_matches_the_spike_frame() {
+        // 实测：601 [8] FF 05 00 08 08 00 01 01
         let response = Response::Ok {
-            command: CommandCode::Connect as u8,
-            payload: vec![0x04, 0x00, 8, 8, 1, 1],
+            payload: vec![0x05, 0x00, 8, 8, 0, 1, 1],
         };
         let frame = response.encode();
-        let decoded = Response::decode(&frame).expect("可解码");
-        match decoded {
-            Response::Ok { command, payload } => {
-                assert_eq!(command, 0xFF, "CONNECT 回显自己的命令码");
-                assert_eq!(payload[..6], [0x04, 0x00, 8, 8, 1, 1]);
-            }
+        assert_eq!(frame, vec![0xFF, 0x05, 0x00, 0x08, 0x08, 0x00, 0x01, 0x01]);
+        match Response::decode(&frame).expect("可解码") {
+            Response::Ok { payload } => assert_eq!(payload, vec![0x05, 0x00, 8, 8, 0, 1, 1]),
             other => panic!("应为正响应，实际 {other:?}"),
         }
+    }
+
+    #[test]
+    fn daq_frame_takes_every_pid_below_fc() {
+        // 实测：601 [5] 00 A0 00 C8 00 —— PID 0 的 DTO 带 4 字节数据
+        let frame = [0x00, 0xA0, 0x00, 0xC8, 0x00];
+        let dto = DaqFrame::parse(&frame).expect("PID 0 是 DTO");
+        assert_eq!(dto.odt, 0);
+        assert_eq!(dto.payload, &[0xA0, 0x00, 0xC8, 0x00]);
+
+        assert!(DaqFrame::parse(&[PID_DAQ_MAX]).is_some(), "0xFB 仍是 DTO");
+        for pid in [PID_SERV, PID_EVENT, PID_ERR, PID_CMD_RES] {
+            assert!(
+                DaqFrame::parse(&[pid, 0x00]).is_none(),
+                "{pid:#04x} 不是 DTO"
+            );
+        }
+        assert!(DaqFrame::parse(&[]).is_none(), "空帧没有 PID");
+    }
+
+    #[test]
+    fn odt_ids_run_continuously_across_lists() {
+        let mut ids = OdtIds::new();
+        assert_eq!(ids.allocate(2), Some(0), "第一个 list 从 0 起");
+        assert_eq!(ids.allocate(1), Some(2), "跨 list 接着编号");
+        assert_eq!(ids.allocate(0), Some(3), "零 ODT 不占号，也不出错");
+        assert_eq!(ids.next_pid(), 3);
+    }
+
+    #[test]
+    fn odt_ids_from_zero_handle_an_empty_list() {
+        let mut ids = OdtIds::new();
+        assert_eq!(ids.allocate(0), Some(0), "空 list 也报出自己的首个编号");
+        assert_eq!(ids.next_pid(), 0, "没分配就不推进");
+    }
+
+    #[test]
+    fn odt_ids_refuse_to_overrun_the_daq_pid_range() {
+        let mut ids = OdtIds::new();
+        assert_eq!(ids.allocate(252), Some(0), "0x00 到 0xFB 共 252 个号");
+        assert_eq!(ids.next_pid(), 252);
+        assert_eq!(ids.allocate(1), None, "0xFC 起被命令与响应占用");
     }
 
     #[test]

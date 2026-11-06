@@ -30,9 +30,8 @@ async fn slave_answers_connect_and_short_upload_on_the_bus() {
 
     let client = SocketCanBus::open(vcan.name()).expect("客户端总线");
 
-    // CONNECT：整帧 PID + 命令码 + 6 字节参数。
-    let connect =
-        CanFrame::new(command_id(), vec![0xFF, 0xFF, 0x00, 0, 0, 0, 0, 0]).expect("8 字节");
+    // CONNECT：byte0 就是命令码，没有 PID 前缀。
+    let connect = CanFrame::new(command_id(), vec![0xFF, 0x00, 0, 0, 0, 0, 0, 0]).expect("8 字节");
     client.send(connect).await.expect("发 CONNECT");
     let reply = client
         .recv(Duration::from_secs(2))
@@ -41,14 +40,14 @@ async fn slave_answers_connect_and_short_upload_on_the_bus() {
     assert_eq!(reply.id, response_id());
     assert_eq!(
         reply.data,
-        vec![0xFF, 0xFF, 0x05, 0x00, 0x08, 0x00, 0x08, 0x00],
-        "响应回显命令码，参数为 resource/maxCto/maxDto"
+        vec![0xFF, 0x05, 0x00, 0x08, 0x00, 0x08, 0x00],
+        "响应是 PID 加数据，不回显命令码"
     );
 
-    // SHORT_UPLOAD：地址落在整帧 offset 4。
+    // SHORT_UPLOAD：命令码在 offset 0，地址对齐到 offset 4。
     let upload = CanFrame::new(
         command_id(),
-        vec![0xFF, 0xF4, 0x04, 0x00, 0x00, 0x10, 0x00, 0x00],
+        vec![0xF4, 0x04, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00],
     )
     .expect("8 字节");
     client.send(upload).await.expect("发 SHORT_UPLOAD");
@@ -56,7 +55,7 @@ async fn slave_answers_connect_and_short_upload_on_the_bus() {
         .recv(Duration::from_secs(2))
         .await
         .expect("应收到数据");
-    assert_eq!(reply.data, vec![0xFF, 0xF4, 0xDE, 0xAD, 0xBE, 0xEF]);
+    assert_eq!(reply.data, vec![0xFF, 0xDE, 0xAD, 0xBE, 0xEF]);
 
     slave.abort();
 }
@@ -74,11 +73,12 @@ async fn slave_ignores_frames_that_are_not_commands() {
     ));
     let client = SocketCanBus::open(vcan.name()).expect("客户端总线");
 
-    // 别人的标识符 + 命令标识符上的 DAQ DTO（PID 0x00），两种都不该应答。
+    // 别人的标识符，以及从站自己的响应标识符上的 DAQ DTO（PID < 0xFC），
+    // 两种都不该应答——应答 DTO 会形成回环自激。
     let foreign =
         CanFrame::new(CanId::standard(0x123).expect("合法"), vec![0xFF, 0xFF]).expect("2 字节");
     client.send(foreign).await.expect("发外来帧");
-    let dto = CanFrame::new(command_id(), vec![0x00, 0x11, 0x22, 0, 0, 0, 0, 0]).expect("8 字节");
+    let dto = CanFrame::new(response_id(), vec![0x00, 0x11, 0x22, 0, 0, 0, 0, 0]).expect("8 字节");
     client.send(dto).await.expect("发 DTO");
 
     let silence = client.recv(Duration::from_millis(300)).await;

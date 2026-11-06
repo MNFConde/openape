@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use openape_bus::{Bus, CanFrame, CanId};
 use openape_diag::{Domain, Fault, FaultCode, Severity};
-use openape_xcp_proto::{Command, ErrorCode, PID_CMD_RES, Response, resource};
+use openape_xcp_proto::{Command, ErrorCode, Response, resource};
 
 /// 虚拟内存大小（64 KiB），够放标定页与观测量。
 pub const MEM_SIZE: usize = 0x10000;
@@ -41,7 +41,7 @@ pub struct SimEcu {
     config: SimEcuConfig,
     memory: Vec<u8>,
     mta: u32,
-    page: u16,
+    page: u8,
     running: bool,
 }
 
@@ -77,7 +77,7 @@ impl SimEcu {
         &self.memory[start..start + len]
     }
 
-    /// 处理一整帧（含 PID 与命令码），默认按标准回显命令码。
+    /// 处理一整帧。byte0 就是命令码——CRO 没有 PID 前缀。
     pub fn handle(&mut self, frame: &[u8]) -> Response {
         match Command::decode(frame) {
             Err(_) => err(ErrorCode::CmdSyntax),
@@ -148,7 +148,8 @@ impl SimEcu {
                 self.mta = self.mta.saturating_add(data.len() as u32);
                 ok(code, vec![])
             }
-            Command::GetCalPage { .. } => ok(code, self.page.to_le_bytes().to_vec()),
+            // pyXCP 取 response[2]（PID 与保留位之后），单字节标准响应它读不到第 3 字节
+            Command::GetCalPage { .. } => ok(code, vec![0x00, 0x00, self.page]),
             Command::SetCalPage { page, segment, .. } => {
                 if segment != 0 || page > 1 {
                     return err(ErrorCode::PageNotValid);
@@ -156,6 +157,9 @@ impl SimEcu {
                 self.page = page;
                 ok(code, vec![])
             }
+            // DAQ 从站侧在 M2-09 落地；在此之前如实回报"不认识这条命令"，
+            // 而不是假装配置成功——那会让 master 以为采集已经跑起来了。
+            _ => err(ErrorCode::CmdUnknown),
         }
     }
 
@@ -166,8 +170,9 @@ impl SimEcu {
     }
 }
 
-fn ok(command: u8, payload: Vec<u8>) -> Response {
-    Response::Ok { command, payload }
+fn ok(_code: u8, payload: Vec<u8>) -> Response {
+    // 响应不回显命令码，PID 之后直接是数据
+    Response::Ok { payload }
 }
 
 fn err(code: ErrorCode) -> Response {
@@ -209,7 +214,7 @@ fn respond(ecu: &mut SimEcu, config: &SimEcuConfig, frame: &CanFrame) -> Option<
     if frame.id != config.command_id {
         return None;
     }
-    if frame.data.first().copied() != Some(PID_CMD_RES) {
+    if frame.data.is_empty() {
         return None;
     }
     let response = ecu.handle(&frame.data);
@@ -236,15 +241,11 @@ mod tests {
         ecu.handle(&frame)
     }
 
-    fn expect_ok(response: Response, command: CommandCode) -> Vec<u8> {
+    /// 期望正响应。`_command` 留作调用处可读性的标签：响应不再回显命令码，
+    /// 这里无法校验"这是哪条命令的答复"。
+    fn expect_ok(response: Response, _command: CommandCode) -> Vec<u8> {
         match response {
-            Response::Ok {
-                command: echoed,
-                payload,
-            } => {
-                assert_eq!(echoed, command as u8, "响应必须回显命令码");
-                payload
-            }
+            Response::Ok { payload } => payload,
             other => panic!("期望正响应，实际 {other:?}"),
         }
     }
@@ -386,7 +387,11 @@ mod tests {
             ),
             CommandCode::GetCalPage,
         );
-        assert_eq!(u16::from_le_bytes([payload[0], payload[1]]), 1);
+        assert_eq!(
+            payload,
+            vec![0x00, 0x00, 1],
+            "GET_CAL_PAGE 回 [保留, 保留, 页号]：pyXCP 取 response[2]"
+        );
 
         let response = send(
             &mut ecu,

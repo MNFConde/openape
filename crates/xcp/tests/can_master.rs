@@ -10,7 +10,7 @@ use openape_bus::{Bus, BusCapabilities, BusError, CanFrame, CanId};
 use openape_cal_core::{Address, ByteLen};
 use openape_diag::Domain;
 use openape_xcp::{CanXcpMaster, XcpConfig, XcpConnection};
-use openape_xcp_proto::{CommandCode, ErrorCode, MAX_CTO, Response};
+use openape_xcp_proto::{ErrorCode, MAX_CTO, Response};
 
 /// 按剧本回帧的总线：发送计数，接收按队列顺序给。
 #[derive(Debug)]
@@ -94,7 +94,6 @@ fn connect_ok_payload() -> Vec<u8> {
 async fn connect_parses_slave_capabilities() {
     let bus = Arc::new(ScriptedBus::new());
     bus.queue_response(Response::Ok {
-        command: CommandCode::Connect as u8,
         payload: connect_ok_payload(),
     });
 
@@ -110,8 +109,8 @@ async fn connect_parses_slave_capabilities() {
     );
     assert_eq!(
         bus.sent_frames()[0].data,
-        vec![0xFF, 0xFF, 0x00, 0, 0, 0, 0, 0],
-        "CRO 帧应为 PID + 命令码 + 参数，补零到 8"
+        vec![0xFF, 0x00, 0, 0, 0, 0, 0, 0],
+        "CRO 帧应以命令码开头、补零到 8，没有 PID 前缀"
     );
 }
 
@@ -127,16 +126,18 @@ async fn missing_slave_times_out_and_reports_retry_count() {
 }
 
 #[tokio::test]
-async fn response_echoing_wrong_command_is_a_protocol_error() {
+async fn event_frames_are_skipped_until_the_answer_arrives() {
+    // 真机上事件帧与响应混在同一标识符：不能因为来了数据就判命令失败，
+    // 也不能拿事件帧当答复。
     let bus = Arc::new(ScriptedBus::new());
+    bus.queue_frame(CanId::Standard(0x601), vec![0xFD, 0x01]);
     bus.queue_response(Response::Ok {
-        command: CommandCode::GetStatus as u8,
         payload: connect_ok_payload(),
     });
     let mut master = master_with(&bus, 0);
 
-    let fault = master.connect(0).await.expect_err("回显不符");
-    assert!(fault.message().contains("回显"), "实际: {fault}");
+    let info = master.connect(0).await.expect("跳过事件帧后应拿到答复");
+    assert_eq!(info.resource, 0x05);
 }
 
 #[tokio::test]
@@ -160,7 +161,6 @@ async fn data_frames_from_other_ids_do_not_break_the_command() {
         vec![0x00, 0x11, 0x22, 0, 0, 0, 0, 0],
     );
     bus.queue_response(Response::Ok {
-        command: CommandCode::Connect as u8,
         payload: connect_ok_payload(),
     });
 
@@ -186,11 +186,9 @@ async fn read_before_connect_is_refused_without_touching_the_bus() {
 async fn read_returns_exactly_the_requested_bytes() {
     let bus = Arc::new(ScriptedBus::new());
     bus.queue_response(Response::Ok {
-        command: CommandCode::Connect as u8,
         payload: connect_ok_payload(),
     });
     bus.queue_response(Response::Ok {
-        command: CommandCode::ShortUpload as u8,
         payload: vec![0xAA, 0xBB, 0xCC, 0xDD],
     });
 
@@ -206,8 +204,8 @@ async fn read_returns_exactly_the_requested_bytes() {
     assert_eq!(sent[1].id, CanId::Standard(0x600));
     assert_eq!(
         sent[1].data,
-        vec![0xFF, 0xF4, 0x02, 0x00, 0x02, 0x10, 0x00, 0x00],
-        "SHORT_UPLOAD 帧：PID + 命令码 + len + ext + 地址（地址落在整帧 offset 4）"
+        vec![0xF4, 0x02, 0x00, 0x00, 0x02, 0x10, 0x00, 0x00],
+        "SHORT_UPLOAD 帧：命令码 + len + ext + 地址（地址落在整帧 offset 4）"
     );
 }
 
@@ -215,20 +213,14 @@ async fn read_returns_exactly_the_requested_bytes() {
 async fn read_longer_than_one_frame_goes_through_set_mta_then_upload() {
     let bus = Arc::new(ScriptedBus::new());
     bus.queue_response(Response::Ok {
-        command: CommandCode::Connect as u8,
         payload: connect_ok_payload(),
     });
+    bus.queue_response(Response::Ok { payload: vec![] });
     bus.queue_response(Response::Ok {
-        command: CommandCode::SetMta as u8,
-        payload: vec![],
+        payload: vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07],
     });
     bus.queue_response(Response::Ok {
-        command: CommandCode::Upload as u8,
-        payload: vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06],
-    });
-    bus.queue_response(Response::Ok {
-        command: CommandCode::Upload as u8,
-        payload: vec![0x07, 0x08],
+        payload: vec![0x08],
     });
 
     let mut master = master_with(&bus, 0);
@@ -240,21 +232,19 @@ async fn read_longer_than_one_frame_goes_through_set_mta_then_upload() {
 
     assert_eq!(data, vec![1, 2, 3, 4, 5, 6, 7, 8]);
     let sent = bus.sent_frames();
-    assert_eq!(sent[1].data[..2], [0xFF, 0xF6], "先 SET_MTA");
-    assert_eq!(sent[2].data[..2], [0xFF, 0xF5], "再 UPLOAD");
-    assert_eq!(sent[2].data[2], 6, "每帧最多搬 6 字节");
-    assert_eq!(sent[3].data[2], 2, "最后一帧搬剩余 2 字节");
+    assert_eq!(sent[1].data[0], 0xF6, "先 SET_MTA");
+    assert_eq!(sent[2].data[0], 0xF5, "再 UPLOAD");
+    assert_eq!(sent[2].data[1], 7, "每帧最多搬 7 字节（整帧减去响应 PID）");
+    assert_eq!(sent[3].data[1], 1, "最后一帧搬剩余 1 字节");
 }
 
 #[tokio::test]
 async fn upload_shorter_than_requested_is_a_protocol_error() {
     let bus = Arc::new(ScriptedBus::new());
     bus.queue_response(Response::Ok {
-        command: CommandCode::Connect as u8,
         payload: connect_ok_payload(),
     });
     bus.queue_response(Response::Ok {
-        command: CommandCode::ShortUpload as u8,
         payload: vec![0xAA],
     });
 
@@ -271,13 +261,9 @@ async fn upload_shorter_than_requested_is_a_protocol_error() {
 async fn disconnect_marks_session_closed() {
     let bus = Arc::new(ScriptedBus::new());
     bus.queue_response(Response::Ok {
-        command: CommandCode::Connect as u8,
         payload: connect_ok_payload(),
     });
-    bus.queue_response(Response::Ok {
-        command: CommandCode::Disconnect as u8,
-        payload: vec![],
-    });
+    bus.queue_response(Response::Ok { payload: vec![] });
 
     let mut master = master_with(&bus, 0);
     master.connect(0).await.expect("建链成功");
@@ -295,7 +281,6 @@ async fn connect_response_with_zero_max_cto_is_rejected() {
     // 帧定长 8 字节，缺的参数会被补零；maxCto 为 0 是"响应不完整"的可靠判据。
     let bus = Arc::new(ScriptedBus::new());
     bus.queue_response(Response::Ok {
-        command: CommandCode::Connect as u8,
         // 长度够 6 字节，但 maxCto 与 maxDto 都是 0——从站不可能这么报。
         payload: vec![0x05, 0x00, 0x00, 0x00, 0x00, 0x00],
     });
@@ -308,5 +293,5 @@ async fn connect_response_with_zero_max_cto_is_rejected() {
 
 #[test]
 fn max_short_upload_len_matches_frame_budget() {
-    assert_eq!(openape_xcp::MAX_SHORT_UPLOAD_LEN as usize, MAX_CTO - 2);
+    assert_eq!(openape_xcp::MAX_SHORT_UPLOAD_LEN as usize, MAX_CTO - 1);
 }
