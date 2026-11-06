@@ -85,6 +85,8 @@ impl SimEcu {
         }
     }
 
+    /// 按命令分派到各自的处理。圈复杂度等于从站支持的命令条数，与 master
+    /// 侧的编解码同属刻意保留的协议分派，不再拆分。
     fn dispatch(&mut self, command: Command) -> Response {
         let code = command.code() as u8;
         match command {

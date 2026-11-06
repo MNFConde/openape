@@ -32,7 +32,7 @@ pub enum CommandCode {
 }
 
 impl CommandCode {
-    /// 从字节还原命令码。
+    /// 从字节还原命令码。分支数同样等于命令表条数，刻意保留。
     pub const fn from_u8(byte: u8) -> Option<Self> {
         Some(match byte {
             0xFF => Self::Connect,
@@ -133,6 +133,9 @@ impl Command {
     }
 
     /// 编码成整帧（PID + 命令码 + 参数）。超过 `MAX_CTO` 返回错误。
+    ///
+    /// 圈复杂度等于命令表条数，与 [`Command::decode_command`] 同属刻意保留的
+    /// 协议分派，不再拆分。
     pub fn encode(&self) -> Result<Vec<u8>, EncodeError> {
         // 命令码只有 `code()` 一处来源；这里不再逐个硬编码，否则改一处漏一处。
         let code = self.code() as u8;

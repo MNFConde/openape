@@ -22,8 +22,9 @@ impl VcanGuard {
         let name = format!("v{}{}", std::process::id() % 10_000, tag);
         let mut last_error = String::new();
 
-        // 并发建链路时 netlink 会短暂 EBUSY，重试几次即可，不必让测试跳过。
-        for _ in 0..5 {
+        // 并发建链路时 netlink 会短暂 EBUSY，且覆盖率工具并行跑多个 crate
+        // 时竞争更激烈，退避到 500 ms 仍失败才算真跳过。
+        for _ in 0..10 {
             let add = Command::new("ip")
                 .args(["link", "add", &name, "type", "vcan"])
                 .output()
@@ -41,7 +42,7 @@ impl VcanGuard {
             } else {
                 last_error = String::from_utf8_lossy(&add.stderr).trim().to_owned();
             }
-            std::thread::sleep(Duration::from_millis(20));
+            std::thread::sleep(Duration::from_millis(50));
         }
 
         eprintln!("跳过：建 vcan {name} 失败（{last_error}）");

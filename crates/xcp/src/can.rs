@@ -67,82 +67,91 @@ impl CanXcpMaster {
     /// 命令在同一条总线上并存，不能因为来了数据帧就判命令失败。
     async fn transact(&self, command: &Command) -> Result<Vec<u8>, Fault> {
         let code = command.code() as u8;
-        let payload = command
-            .encode()
-            .map_err(|err| connection::fault(seq::CODEC, Severity::Error, err.to_string()))?;
-
-        // 命令已编码成整帧（PID + 命令码 + 参数），补齐到 8 字节发出去：
-        // 真 ECU 期望满帧。
-        let mut data = payload;
-        data.resize(MAX_CTO, 0);
-        let frame = CanFrame::new(self.config.command_id, data).ok_or_else(|| {
-            connection::fault(seq::CODEC, Severity::Error, "命令帧长超过 CAN 上限")
-        })?;
-
-        for attempt in 0..=self.config.retries {
+        let frame = self.command_frame(command)?;
+        for _ in 0..=self.config.retries {
             self.bus
                 .send(frame.clone())
                 .await
                 .map_err(|err| bus_fault(&err))?;
-
-            let deadline = Instant::now() + self.config.timeout;
-            loop {
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                if remaining.is_zero() {
-                    break;
-                }
-                match self.bus.recv(remaining).await {
-                    Ok(received) if received.id == self.config.response_id => {
-                        // 同一标识符上可能混着 DAQ 的 DTO 与事件帧，它们不是
-                        // 命令响应，跳过继续等——不能因为来了数据就判命令失败。
-                        let pid = received.data.first().copied().unwrap_or(0);
-                        if pid != openape_xcp_proto::PID_CMD_RES
-                            && pid != openape_xcp_proto::PID_ERR
-                        {
-                            continue;
-                        }
-                        return match Response::decode(&received.data) {
-                            Ok(Response::Ok {
-                                command: echoed,
-                                payload,
-                            }) => {
-                                if echoed != code {
-                                    Err(connection::fault(
-                                        seq::PROTOCOL,
-                                        Severity::Error,
-                                        format!(
-                                            "响应回显命令码 {echoed:#04x}，与请求 {code:#04x} 不符"
-                                        ),
-                                    ))
-                                } else {
-                                    Ok(payload)
-                                }
-                            }
-                            Ok(Response::Err { code }) => Err(slave_error(code)),
-                            Err(err) => Err(decode_fault(err)),
-                        };
-                    }
-                    Ok(_) => continue,
-                    Err(BusError::Timeout { .. }) => break,
-                    Err(err) => return Err(bus_fault(&err)),
-                }
-            }
-
-            if attempt == self.config.retries {
-                return Err(connection::fault(
-                    seq::TIMEOUT,
-                    Severity::Error,
-                    format!(
-                        "等待从站响应超时（{} ms × {} 次重发）",
-                        self.config.timeout.as_millis(),
-                        self.config.retries
-                    ),
-                )
-                .with_context("command", format!("{code:#04x}"))
-                .with_hint("确认从站已启动、通道与两侧标识符一致"));
+            if let Some(payload) = self.await_answer(code).await? {
+                return Ok(payload);
             }
         }
-        Err(connection::fault(seq::TIMEOUT, Severity::Error, "重试耗尽"))
+        Err(self.timeout_fault(code))
+    }
+
+    /// 把命令编成要发出去的满帧。真 ECU 期望 8 字节填充。
+    fn command_frame(&self, command: &Command) -> Result<CanFrame, Fault> {
+        let mut data = command
+            .encode()
+            .map_err(|err| connection::fault(seq::CODEC, Severity::Error, err.to_string()))?;
+        data.resize(MAX_CTO, 0);
+        CanFrame::new(self.config.command_id, data)
+            .ok_or_else(|| connection::fault(seq::CODEC, Severity::Error, "命令帧长超过 CAN 上限"))
+    }
+
+    /// 等到一条属于本命令的响应。`None` 表示等到期限仍未收到（可重发）。
+    ///
+    /// 同一标识符上可能混着 DAQ 的 DTO 与事件帧，它们不是命令响应，跳过继续
+    /// 等——不能因为来了数据就判命令失败。
+    async fn await_answer(&self, code: u8) -> Result<Option<Vec<u8>>, Fault> {
+        let deadline = Instant::now() + self.config.timeout;
+        loop {
+            // 剩余时间为 0 时 recv(0) 立即超时，会走下面的 Timeout 分支；
+            // 不必单独判一次，少一个测不到的分支。
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let received = match self.bus.recv(remaining).await {
+                Ok(frame) => frame,
+                Err(BusError::Timeout { .. }) => return Ok(None),
+                Err(err) => return Err(bus_fault(&err)),
+            };
+            if received.id != self.config.response_id {
+                continue;
+            }
+            match decode_answer(&received, code)? {
+                Some(payload) => return Ok(Some(payload)),
+                None => continue,
+            }
+        }
+    }
+
+    fn timeout_fault(&self, code: u8) -> Fault {
+        connection::fault(
+            seq::TIMEOUT,
+            Severity::Error,
+            format!(
+                "等待从站响应超时（{} ms × {} 次重发）",
+                self.config.timeout.as_millis(),
+                self.config.retries
+            ),
+        )
+        .with_context("command", format!("{code:#04x}"))
+        .with_hint("确认从站已启动、通道与两侧标识符一致")
+    }
+}
+
+/// 解析一帧响应。返回 `Ok(None)` 表示这帧不是命令响应，应当跳过。
+fn decode_answer(frame: &CanFrame, code: u8) -> Result<Option<Vec<u8>>, Fault> {
+    let pid = frame.data.first().copied().unwrap_or(0);
+    if pid != openape_xcp_proto::PID_CMD_RES && pid != openape_xcp_proto::PID_ERR {
+        return Ok(None);
+    }
+    match Response::decode(&frame.data) {
+        Ok(Response::Ok {
+            command: echoed,
+            payload,
+        }) => {
+            if echoed != code {
+                return Err(connection::fault(
+                    seq::PROTOCOL,
+                    Severity::Error,
+                    format!("响应回显命令码 {echoed:#04x}，与请求 {code:#04x} 不符"),
+                ));
+            }
+            Ok(Some(payload))
+        }
+        Ok(Response::Err { code }) => Err(slave_error(code)),
+        Err(err) => Err(decode_fault(err)),
     }
 }
 
