@@ -16,6 +16,7 @@ mod convert;
 mod error;
 mod layout;
 mod notice;
+mod writer;
 
 pub use error::Error;
 pub use notice::{Notice, Severity};
@@ -53,6 +54,14 @@ impl A2lSource {
     pub fn notes(&self) -> &[Notice] {
         &self.notes
     }
+}
+
+/// 把变量树与轴绑定导出成 A2L 文本。
+///
+/// 只有带角色的变量能导出：A2L 的每个对象都必须声明是观测量还是标定量，
+/// 仅 ELF 档由用户先指定角色。
+pub fn write_a2l(tree: &VariableTree, binding: &AxisBinding) -> Result<String, Error> {
+    writer::write(tree, binding)
 }
 
 /// 解析 A2L 文本。
@@ -322,6 +331,34 @@ ASAP2_VERSION 1 71
     }
 
     #[test]
+    fn val_blk_enters_tree_without_binding() {
+        let text = r#"
+ASAP2_VERSION 1 71
+/begin PROJECT P ""
+  /begin MODULE ECU ""
+    /begin RECORD_LAYOUT RL
+      FNC_VALUES 1 UWORD ROW_DIR DIRECT
+    /end RECORD_LAYOUT
+    /begin CHARACTERISTIC table "" VAL_BLK 0x2400 RL 0 NO_COMPU_METHOD 0 65535
+      MATRIX_DIM 2 8
+    /end CHARACTERISTIC
+  /end MODULE
+/end PROJECT
+"#;
+        let source = load_str(text, None).expect("要能读");
+        assert!(
+            source.binding().values().is_empty(),
+            "没有轴的值数组不该进绑定表"
+        );
+        let variable = source
+            .tree()
+            .get(&cal_core::Symbol::new("table").expect("合法"))
+            .expect("要进变量树");
+        assert_eq!(variable.dims(), &[8, 2], "MATRIX_DIM 逆序");
+        assert_eq!(variable.elem(), cal_core::ElemType::U16);
+    }
+
+    #[test]
     fn duplicate_symbol_is_rejected() {
         let text = r#"
 ASAP2_VERSION 1 71
@@ -338,6 +375,80 @@ ASAP2_VERSION 1 71
         let err = load_str(text, None).expect_err("同名观测与标定必须报");
         assert!(matches!(err, Error::DuplicateSymbol { .. }), "{err:?}");
         assert!(err.to_string().contains("same"), "{err}");
+    }
+
+    #[test]
+    fn roundtrip_preserves_ir() {
+        // 验收（M2-05）：导出再解析，语义零 diff
+        let first = load_str(&golden(), None).expect("golden 必须能读");
+        let text = write_a2l(first.tree(), first.binding()).expect("要能导出");
+        let second = load_str(&text, None).expect("导出件必须能读回");
+
+        assert_eq!(second.tree(), first.tree(), "变量树必须一致");
+        assert_eq!(second.binding(), first.binding(), "轴绑定必须一致");
+        assert!(
+            second.notes().is_empty(),
+            "导出件不该带告警：{:?}",
+            second.notes()
+        );
+    }
+
+    #[test]
+    fn exported_a2l_passes_strict_parse() {
+        let first = load_str(&golden(), None).expect("golden 必须能读");
+        let text = write_a2l(first.tree(), first.binding()).expect("要能导出");
+        let (_, messages) =
+            a2lfile::load_from_string(&text, None, true).expect("严格模式必须接受导出件");
+        assert!(messages.is_empty(), "严格模式下零警告：{messages:?}");
+    }
+
+    #[test]
+    fn roundtrip_keeps_measurements_and_conversions() {
+        let text = r#"
+ASAP2_VERSION 1 71
+/begin PROJECT P ""
+  /begin MODULE ECU ""
+    /begin MOD_COMMON ""
+      BYTE_ORDER MSB_FIRST
+    /end MOD_COMMON
+    /begin RECORD_LAYOUT RL
+      FNC_VALUES 1 SWORD ROW_DIR DIRECT
+    /end RECORD_LAYOUT
+    /begin COMPU_METHOD CM_LINEAR "" LINEAR "%6.2" "rpm"
+      COEFFS_LINEAR 0.25 -100.0
+    /end COMPU_METHOD
+    /begin COMPU_METHOD CM_IDENT "" IDENTICAL "%d" "degC"
+    /end COMPU_METHOD
+    /begin MEASUREMENT n_engine "" UWORD CM_LINEAR 1 0.0 0.0 8000.0
+      ECU_ADDRESS 0x3000
+    /end MEASUREMENT
+    /begin MEASUREMENT t_water "" UBYTE CM_IDENT 1 0.0 -40.0 150.0
+      ECU_ADDRESS 0x3002
+    /end MEASUREMENT
+    /begin CHARACTERISTIC kp "" VALUE 0x3010 RL 0 NO_COMPU_METHOD -1000.0 1000.0
+    /end CHARACTERISTIC
+  /end MODULE
+/end PROJECT
+"#;
+        let first = load_str(text, None).expect("要能读");
+        let exported = write_a2l(first.tree(), first.binding()).expect("要能导出");
+        let second = load_str(&exported, None).expect("导出件必须能读回");
+        assert_eq!(second.tree(), first.tree(), "观测量、换算与字节序都要保住");
+    }
+
+    #[test]
+    fn variables_without_role_cannot_be_exported() {
+        use openape_cal_core::{Address, ElemType, Symbol, Variable, VariableTree};
+        let tree = VariableTree::new(vec![Variable::new(
+            Symbol::new("raw").expect("合法"),
+            Address::new(0x1000),
+            ElemType::F32,
+        )])
+        .expect("无重复");
+        let err = write_a2l(&tree, &AxisBinding::from_parts(Vec::new(), Vec::new()))
+            .expect_err("没角色不能导出");
+        assert!(err.to_string().contains("raw"), "{err}");
+        assert!(err.to_string().contains("角色"), "{err}");
     }
 
     #[test]

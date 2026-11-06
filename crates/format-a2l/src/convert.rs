@@ -183,10 +183,16 @@ impl Builder<'_> {
         let elem = elem_of_deposit(self.module, &declared.deposit, &name, &mut self.notes)
             .ok_or_else(|| "元素类型不受支持".to_owned())?;
         let dims = self.dims_of_characteristic(declared)?;
-        let axes = if dims.is_empty() {
-            Vec::new()
-        } else {
+        // 只有 CURVE 与 MAP 有"值加轴"的关系；VALUE 是标量，VAL_BLK 是没有
+        // 轴的值数组，两者都只进变量树。
+        let bound = matches!(
+            declared.characteristic_type,
+            CharacteristicType::Curve | CharacteristicType::Map
+        );
+        let axes = if bound {
             self.axes_of(declared, &name, elem)?
+        } else {
+            Vec::new()
         };
         let address = Address::new(declared.address);
         let semantics = semantics_of(
@@ -210,7 +216,7 @@ impl Builder<'_> {
             ))
             .with_semantics(semantics);
 
-        if dims.is_empty() {
+        if !bound {
             return Ok((None, variable));
         }
         let axis_ids: Vec<Id> = axes.iter().map(|axis| axis.id().clone()).collect();
@@ -236,7 +242,7 @@ impl Builder<'_> {
                 Ok(vec![u32::from(axis.max_axis_points)])
             }
             CharacteristicType::Map | CharacteristicType::ValBlk => {
-                self.dims_from_matrix(declared, "Map")
+                self.dims_from_matrix(declared, "矩阵")
             }
             other => Err(format!(
                 "{other:?} 不在 MVP 支持范围内（只支持 VALUE、CURVE、MAP、VAL_BLK）"

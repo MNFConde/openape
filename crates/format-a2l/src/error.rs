@@ -38,6 +38,14 @@ pub enum Error {
         /// 后出现的对象类。
         second: &'static str,
     },
+    /// 该变量导不出 A2L。
+    #[error("{symbol} 导不出 A2L：{reason}")]
+    NotExportable {
+        /// 变量符号。
+        symbol: String,
+        /// 原因。
+        reason: String,
+    },
     /// 某个对象无法表达：没有数值类型或维度信息。
     #[error("{kind} {name} 无法表达：{reason}")]
     Unrepresentable {
