@@ -61,6 +61,7 @@ python3 script/check-markers.py
 - 版本约束只钉一处（workspace 根 Cargo.toml 的 workspace.dependencies）；升级后必须跑全量测试 + `cargo audit`，勿随手升级。
 - **批量机械改写后跑未使用符号扫描**：perl/sed/脚本批量改写会静默丢测试属性/函数——`cargo clippy --all-targets` 的 dead_code 警告即探测器，改写后该类警告必须清零。
 - 提交信息门禁 = commit-msg 钩子（安装与活性证明见「钩子安装」节）。
+- **前端构建检查不进本流水线、也不挂提交钩子**：`npm ci && tsc --noEmit && vite build` 耗时长且依赖本地 node 环境，挂 pre-commit 只会逼人用 `--no-verify`，连带绕过 commit-msg 校验。以独立脚本提供，有 CI 后挂 CI（口径见 [docs/13-deployment.md](../../docs/13-deployment.md#前端构建与产物)）。
 
 ## 六、提交前自检清单
 

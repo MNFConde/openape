@@ -82,6 +82,16 @@ crate 只能 `use` 自己 Cargo.toml 里声明过的依赖，反向引用在**�
 
 `toml` 归入"基础库"一侧（M2-03 起 `cal-core` 依赖它）：工程配置的格式是需求的既有约定（[10-axis-binding-rfc](10-axis-binding-rfc.md) 第 4 节），换掉它等于换配置格式；它不依赖本项目任何 crate，不会把 L1 拖进重实现链。
 
+**代码生成器不受轻依赖约束**：`prost` / `tonic` 的产物就是契约本身，不是"被重实现的轮子"。判据是生成的类型是否出现在 crate 的公开签名里——是，则它的依赖同样是契约的一部分。这条防止 `proto` 一落地就与 L1 约束字面冲突，同时不放开"L1 不得依赖 L2 及以上"。
+
+### proto 契约约定
+
+`proto` 同时是 CLI `--json` 与 gRPC 的唯一类型源（[00-overview.md](00-overview.md#workspace-拓扑规划)），因此定三条：
+
+1. **同一份类型兼作 serde 载体**。`build.rs` 用 prost-build 的 `type_attribute` 给生成类型挂 `#[derive(Serialize, Deserialize)]` 与 `#[serde(rename_all = "snake_case")]`，字段名保持 snake_case。不引 pbjson（它按 proto3 JSON 映射把字段转 camelCase、int64 转字符串，等于为符合协议改动对外 JSON 形状），也不手写 `impl Serialize`（同一事实两处表达，漂移即产生错误数据）。
+2. **数值类型按 JS 安全范围选**。地址用 `string` 而非 `uint64`——JS 的 number 只精确到 2⁵³，标定地址超限就静默错位；`MAX_CTO`/`MAX_DTO` 这类窄整数放宽到 `uint32`，不为"proto 没有 uint16"在两侧反复转换。
+3. **域类型不直接暴露 wire 类型**。IR、会话状态等带不变量的类型留在 `cal-core`，用 `From` 转换；proto 类型只承担对外输出与请求。L1 全公开针对的是契约本身，不意味内部模型要长成 proto 的形状（[D-20](decisions.md#d-20-公开面分层承诺)）。
+
 ### 后置项
 
 文档先记结论、实现按触发条件推进——"后置"必须写明原因与到期条件，否则会变成隐性偷懒。下表的全部行都按上面四条判据得出：没有消费者、或依赖重量差不足、或不满足裁剪需求。

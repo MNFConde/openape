@@ -83,6 +83,14 @@ Caddy 的 `flush_interval` 默认即为 `-1`（每次写出立即刷），此处
 
 两者的取舍：nginx 打包更小（静态 3–10MB）、生态更熟；Caddy 是静态单文件（~40MB）、配置更短、离线 TLS 免手工。资源极紧的盒子选前者，其余选后者。
 
+## 前端构建与产物
+
+- **包管理器用 npm**，不引 pnpm/yarn：Vite 在 npm 下已够用，少一个要装、要进 CI 的工具。
+- **产物不入库、也不编进二进制**。`ui/dist` 由 daemon 启动时从可配目录读取。若用 `include_dir!` 打进二进制，cargo 构建就依赖 npm 产物，`cargo test` 在干净环境必然失败。
+- **静态文件缺失时降级而非失败**：API 照常提供，静态路由返回明确提示（未构建前端），不 panic、不静默 404。
+- **前端检查不进提交钩子**。以独立脚本 `script/frontend-check.sh` 提供（M2-13 建，内容为 `npm ci && tsc --noEmit && vite build`），有 CI 后挂 CI。理由是耗时长且依赖本地 node 环境，挂 pre-commit 只会逼人用 `--no-verify`，连带绕过 `commit-msg` 校验。
+- **TypeScript 侧代码生成用 protobuf-ts**：纯 node，不需要 protoc 与 protoc-gen-grpc-web 插件，原生支持 grpc-web transport。
+
 ## 认证与多用户不在 daemon 内实现
 
 gRPC 的方法名就在 URL 路径里（`/openape.Session/Write`、`/openape.Session/Observe`），所以**方法级 ACL 可以由网关的路径规则完成**——只读用户放行观测类路径、拒绝写入类。daemon 侧不需要预留任何认证接口。

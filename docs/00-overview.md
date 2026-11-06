@@ -34,6 +34,8 @@ OpenAPE 是一个 Rust 开发的**开放汽车标定工具**（对标 CANape/INC
 | `cli` | L5 | 单次探测外壳：一条命令一次事务，输出人类可读或 JSON | — |
 | `ui` | L5 | Web 前端：曲线（uPlot）、标定量表格、dataset 对比、故障面板 | TypeScript + uPlot |
 
+依赖版本只钉在 workspace 根 `Cargo.toml` 一处。服务端与前端构建链以 M0-3 spike 实测通过的一组为基线（该组同时满足 grpc-web 流式与单端口托管）：`tonic` 0.14 + `tonic-prost` 0.14 + `tonic-web` 0.14 + `prost` 0.14、`axum` 0.8、`tower` 0.5、`tower-http` 0.6；服务端代码生成走 `tonic-prost-build`——0.14 起 prost 集成已从 `tonic-build` 拆出，用旧路径生成不出期望的 trait。升级这组依赖前必须重跑 grpc-web 流式回归。
+
 ## 仓库顶层结构
 
 | 目录 | 职责 | git 归属 |
