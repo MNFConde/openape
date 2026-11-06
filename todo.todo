@@ -23,13 +23,13 @@
 [x] M1-14 docs：真机抽验检查点矩阵（周立功 CAN-FD + 目标 ECU）+ 状态回写 AGENTS.md 与 requirements 的 M1 起建清单 → 验收：抽验项可逐条打勾
 
 [ ] M2 cal-core IR + A2L 前端 + DAQ 流 + gRPC 推流 + Web 最小曲线页（15 项）
-[ ] M2-01 feat(cal-core)：IR 变量树与观测/标定量模型（语义字段一律 Option，缺失显 raw）→ 验收：仅 ELF 档能无填充地表达
-[ ] M2-02 feat(cal-core)：Curve/Map/轴模型（轴为独立实体、支持 N:1 共享）+ 10 号 RFC 的 R1–R7 校验 → 验收：golden 反例逐条被拒
-[ ] M2-03 feat(cal-core)：工程配置格式（轴值绑定；带版本字段、容忍未知字段、轴长与值维度不匹配即拒绝）→ 验收：旧版配置可读，坏配置给可操作提示
-[ ] M2-04 feat(format-a2l)：A2L → IR（a2lfile）+ Curve/Map/轴与数据集落地 → 验收：M0-5 golden A2L 解析结果与期望一致
-[ ] M2-05 feat(format-a2l)：IR → A2L 生成 + 与 M0-5 golden 往返一致 → 验收：往返后再解析零语义 diff（为 M3 导出打底）
-[ ] M2-06 feat(diag)：补黑匣子环形缓冲与五项指标（11 号后置项表到期：DAQ 上流前落地）→ 验收：故障触发落盘含最近窗口，指标可快照
-[ ] M2-07 feat(xcp-proto)：DAQ 命令码 + ODT/DTO 帧与绝对 ODT 编号 → 验收：与 spike 的 DAQ 样本对照一致
+[x] M2-01 feat(cal-core)：IR 变量树与观测/标定量模型（语义字段一律 Option，缺失显 raw）→ 验收：仅 ELF 档能无填充地表达
+[x] M2-02 feat(cal-core)：Curve/Map/轴模型（轴为独立实体、支持 N:1 共享）+ 10 号 RFC 的 R1–R7 校验 → 验收：golden 反例逐条被拒
+[x] M2-03 feat(cal-core)：工程配置格式（轴值绑定；带版本字段、容忍未知字段、轴长与值维度不匹配即拒绝）→ 验收：旧版配置可读，坏配置给可操作提示
+[x] M2-04 feat(format-a2l)：A2L → IR（a2lfile）+ Curve/Map/轴与数据集落地 → 验收：M0-5 golden A2L 解析结果与期望一致
+[x] M2-05 feat(format-a2l)：IR → A2L 生成 + 与 M0-5 golden 往返一致 → 验收：往返后再解析零语义 diff（为 M3 导出打底）
+[x] M2-06 feat(diag)：补黑匣子环形缓冲与五项指标（11 号后置项表到期：DAQ 上流前落地）→ 验收：故障触发落盘含最近窗口，指标可快照
+[x] M2-07 feat(xcp-proto)：DAQ 命令码 + ODT/DTO 帧与绝对 ODT 编号 → 验收：与 spike 的 DAQ 样本对照一致
 [ ] M2-08 feat(xcp)：DAQ 列表配置（FREE_DAQ/ALLOC_DAQ/ALLOC_ODT/WRITE_DAQ）+ START_STOP → 验收：多 ODT 配置后首帧时间戳单调
 [ ] M2-09 feat(sim-ecu)：DAQ 从站侧（ODT 解析 + 周期发送 + 可注入抖动）→ 验收：上报丢帧数与注入抖动一致
 [ ] M2-10 feat(session)：DAQ 环形缓冲 + 事件流出口 + 丢帧/背压计数 → 验收：慢消费者不拖垮采集，背压可观测
