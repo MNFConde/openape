@@ -45,6 +45,16 @@ pub trait XcpConnection: Send + Sync {
 
     /// 读一段内存。按地址短读，不动传输地址。
     async fn read(&mut self, address: Address, len: ByteLen) -> Result<Vec<u8>, Fault>;
+
+    /// 配置并启动 DAQ，返回把 DTO 切回信号的布局。
+    ///
+    /// 走完 FREE_DAQ → 分配 → 写条目 → 设模式 → 启停，成功后从站开始按事件
+    /// 通道周期发帧。失败时从站可能停在半配置状态，调用方应重新配置而不是
+    /// 接着用。
+    async fn configure_daq(
+        &mut self,
+        lists: &[crate::daq::DaqListSpec],
+    ) -> Result<crate::daq::DaqLayout, Fault>;
 }
 
 /// XCP 域的故障序号。集中在此，避免各处散落魔法数字。
@@ -63,6 +73,8 @@ pub mod seq {
     pub const BUS: u32 = 6;
     /// 读长度超出单帧能力。
     pub const TOO_LONG: u32 = 7;
+    /// DAQ 配置被拒或从站不支持。
+    pub const DAQ: u32 = 8;
 }
 
 /// 构造一条 XCP 域故障。序号固定在 [`seq`] 的常量里，构造不会失败。

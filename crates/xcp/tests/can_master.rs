@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use openape_bus::{Bus, BusCapabilities, BusError, CanFrame, CanId};
 use openape_cal_core::{Address, ByteLen};
 use openape_diag::Domain;
-use openape_xcp::{CanXcpMaster, XcpConfig, XcpConnection};
+use openape_xcp::{CanXcpMaster, DaqListSpec, DaqSignal, XcpConfig, XcpConnection};
 use openape_xcp_proto::{ErrorCode, MAX_CTO, Response};
 
 /// 按剧本回帧的总线：发送计数，接收按队列顺序给。
@@ -178,7 +178,11 @@ async fn read_before_connect_is_refused_without_touching_the_bus() {
         .read(Address::new(0x1000), ByteLen::new(2).expect("2 合法"))
         .await
         .expect_err("未连接");
-    assert!(fault.message().contains("connect"), "实际: {fault}");
+    assert!(fault.message().contains("会话未建立"), "实际: {fault}");
+    assert!(
+        fault.hint().is_some_and(|hint| hint.contains("connect")),
+        "提示要说清下一步：{fault}"
+    );
     assert_eq!(bus.send_count(), 0, "不该往总线上发任何东西");
 }
 
@@ -273,7 +277,7 @@ async fn disconnect_marks_session_closed() {
         .read(Address::new(0x1000), ByteLen::new(1).expect("1 合法"))
         .await
         .expect_err("断链后不能再读");
-    assert!(fault.message().contains("connect"));
+    assert!(fault.message().contains("会话未建立"), "{fault}");
 }
 
 #[tokio::test]
@@ -289,6 +293,136 @@ async fn connect_response_with_zero_max_cto_is_rejected() {
     let fault = master.connect(0).await.expect_err("响应不完整");
     assert!(fault.message().contains("maxCto"), "实际: {fault}");
     assert!(fault.hint().is_some());
+}
+
+/// 把一组信号配成一条 list 所需的应答：CONNECT 之后每条命令一个空响应，
+/// 最后 `START_STOP_DAQ_LIST` 回 firstPid。
+fn queue_daq_dialog(bus: &ScriptedBus, command_count: usize, first_pid: u8) {
+    bus.queue_response(Response::Ok {
+        payload: connect_ok_payload(),
+    });
+    for _ in 1..command_count {
+        bus.queue_response(Response::Ok { payload: vec![] });
+    }
+    bus.queue_response(Response::Ok {
+        payload: vec![first_pid, 0x00],
+    });
+}
+
+fn signal(address: u32, len: u16) -> DaqSignal {
+    DaqSignal {
+        address: Address::new(address),
+        len: ByteLen::new(len).expect("测试长度非零"),
+    }
+}
+
+#[tokio::test]
+async fn configure_daq_emits_the_expected_command_sequence() {
+    let bus = Arc::new(ScriptedBus::new());
+    // 13 条 DAQ 命令：FREE、ALLOC_DAQ、ALLOC_ODT、ALLOC_ODT_ENTRY×2、
+    // SET_DAQ_PTR×2、WRITE_DAQ×4、SET_DAQ_LIST_MODE、START_STOP_DAQ_LIST
+    queue_daq_dialog(&bus, 13, 0);
+
+    let mut master = master_with(&bus, 0);
+    master.connect(0).await.expect("建链成功");
+    let list = DaqListSpec::new(
+        0,
+        1,
+        vec![
+            signal(0x1000, 2),
+            signal(0x1002, 4),
+            signal(0x1006, 2),
+            signal(0x1008, 2),
+        ],
+    )
+    .expect("配置合法");
+    let layout = master.configure_daq(&[list]).await.expect("配置应成功");
+
+    let codes: Vec<u8> = bus
+        .sent_frames()
+        .iter()
+        .map(|frame| frame.data[0])
+        .collect();
+    assert_eq!(
+        codes,
+        vec![
+            0xFF, // CONNECT
+            0xD6, // FREE_DAQ
+            0xD5, // ALLOC_DAQ
+            0xD4, // ALLOC_ODT
+            0xD3, // ALLOC_ODT_ENTRY（odt 0）
+            0xD3, // ALLOC_ODT_ENTRY（odt 1）
+            0xE2, // SET_DAQ_PTR（odt 0）
+            0xE1, // WRITE_DAQ 0x1000
+            0xE1, // WRITE_DAQ 0x1002
+            0xE2, // SET_DAQ_PTR（odt 1）
+            0xE1, // WRITE_DAQ 0x1006
+            0xE1, // WRITE_DAQ 0x1008
+            0xE0, // SET_DAQ_LIST_MODE
+            0xDE, // START_STOP_DAQ_LIST
+        ]
+    );
+    assert_eq!(layout.len(), 2, "8 字节切成两个 ODT");
+    assert_eq!(
+        layout.decode(0, &[1, 2, 3, 4, 5, 6]),
+        Some(vec![&[1u8, 2][..], &[3, 4, 5, 6][..]])
+    );
+    assert_eq!(
+        layout.decode(1, &[7, 8, 9, 10]),
+        Some(vec![&[7u8, 8][..], &[9, 10][..]])
+    );
+}
+
+#[tokio::test]
+async fn configure_daq_rejects_slave_pid_mismatch() {
+    let bus = Arc::new(ScriptedBus::new());
+    // 单 ODT、两个信号：FREE、ALLOC_DAQ、ALLOC_ODT、ALLOC_ODT_ENTRY、
+    // SET_DAQ_PTR、WRITE_DAQ×2、SET_DAQ_LIST_MODE、START_STOP = 9 条
+    queue_daq_dialog(&bus, 9, 5);
+
+    let mut master = master_with(&bus, 0);
+    master.connect(0).await.expect("建链成功");
+    let list = DaqListSpec::new(0, 1, vec![signal(0x1000, 2), signal(0x1002, 2)]).expect("合法");
+    let fault = master
+        .configure_daq(&[list])
+        .await
+        .expect_err("编号对不上要报");
+    assert!(fault.message().contains("首个 ODT"), "{fault}");
+}
+
+#[tokio::test]
+async fn configure_daq_refuses_slave_without_daq_resource() {
+    let bus = Arc::new(ScriptedBus::new());
+    bus.queue_response(Response::Ok {
+        // resource = 0x01：只有标定页切换，没有 DAQ 位
+        payload: vec![0x01, 0x00, 8, 0x00, 8, 0x00],
+    });
+
+    let mut master = master_with(&bus, 0);
+    master.connect(0).await.expect("建链成功");
+    let list = DaqListSpec::new(0, 1, vec![signal(0x1000, 2)]).expect("合法");
+    let fault = master
+        .configure_daq(&[list])
+        .await
+        .expect_err("没有 DAQ 能力要报");
+    assert!(fault.message().contains("DAQ"), "{fault}");
+    assert_eq!(bus.send_count(), 1, "只在 CONNECT 上发过帧，不该动从站配置");
+}
+
+#[tokio::test]
+async fn configure_daq_rejects_oversized_signal_before_touching_the_slave() {
+    let bus = Arc::new(ScriptedBus::new());
+    bus.queue_response(Response::Ok {
+        payload: connect_ok_payload(),
+    });
+
+    let mut master = master_with(&bus, 0);
+    master.connect(0).await.expect("建链成功");
+    // maxDto = 8 → 一个 DTO 只能装 7 字节载荷，8 字节信号放不下
+    let list = DaqListSpec::new(0, 1, vec![signal(0x1000, 8)]).expect("配置本身合法");
+    let fault = master.configure_daq(&[list]).await.expect_err("要提前拒绝");
+    assert!(fault.message().contains("超过单个 ODT"), "{fault}");
+    assert_eq!(bus.send_count(), 1, "分组算不通就不要动从站");
 }
 
 #[test]

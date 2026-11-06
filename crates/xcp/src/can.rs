@@ -7,9 +7,10 @@ use async_trait::async_trait;
 use openape_bus::{Bus, BusError, CanFrame, CanId};
 use openape_cal_core::{Address, ByteLen};
 use openape_diag::{Fault, Severity};
-use openape_xcp_proto::{Command, DecodeError, ErrorCode, MAX_CTO, Response};
+use openape_xcp_proto::{Command, DecodeError, ErrorCode, MAX_CTO, OdtIds, Response};
 
 use crate::connection::{self, ConnectInfo, SessionStatus, XcpConnection, seq};
+use crate::daq::{self, DaqLayout, DaqListSpec};
 
 /// SHORT_UPLOAD 单次可读的最大字节数：响应帧 `PID + 命令码 + 数据` 共 8 字节。
 /// 单帧能带回的最大字节数：整帧减掉响应 PID，再没有别的开销。
@@ -44,7 +45,9 @@ impl XcpConfig {
 pub struct CanXcpMaster {
     bus: Arc<dyn Bus>,
     config: XcpConfig,
-    connected: bool,
+    /// 建链后从站报的会话参数。存下来是因为 DAQ 的 ODT 容量要读 `max_dto`，
+    /// 而它只在 CONNECT 响应里出现一次。
+    session: Option<ConnectInfo>,
 }
 
 impl CanXcpMaster {
@@ -53,13 +56,25 @@ impl CanXcpMaster {
         Self {
             bus,
             config,
-            connected: false,
+            session: None,
         }
     }
 
     /// 当前配置。
     pub fn config(&self) -> &XcpConfig {
         &self.config
+    }
+
+    /// 已建立的会话；没有就报错。
+    fn require_session(&self) -> Result<&ConnectInfo, Fault> {
+        self.session.as_ref().ok_or_else(|| {
+            connection::fault(
+                seq::NOT_CONNECTED,
+                Severity::Error,
+                "会话未建立，从站不会响应命令",
+            )
+            .with_hint("先 connect 再发命令")
+        })
     }
 
     /// 发一条命令、等一条响应，返回响应参数（已剥 PID 与命令码）。
@@ -168,13 +183,14 @@ fn bus_fault(err: &BusError) -> Fault {
 impl XcpConnection for CanXcpMaster {
     async fn connect(&mut self, mode: u8) -> Result<ConnectInfo, Fault> {
         let payload = self.transact(&Command::Connect { mode }).await?;
-        self.connected = true;
-        parse_connect_info(&payload)
+        let info = parse_connect_info(&payload)?;
+        self.session = Some(info.clone());
+        Ok(info)
     }
 
     async fn disconnect(&mut self) -> Result<(), Fault> {
         self.transact(&Command::Disconnect).await?;
-        self.connected = false;
+        self.session = None;
         Ok(())
     }
 
@@ -189,14 +205,7 @@ impl XcpConnection for CanXcpMaster {
     }
 
     async fn read(&mut self, address: Address, len: ByteLen) -> Result<Vec<u8>, Fault> {
-        if !self.connected {
-            return Err(connection::fault(
-                seq::NOT_CONNECTED,
-                Severity::Error,
-                "读之前必须先 connect",
-            )
-            .with_hint("会话未建立，从站不会响应内存类命令"));
-        }
+        self.require_session()?;
 
         let total = len.get() as usize;
         // 一帧装得下就用 SHORT_UPLOAD：一条命令、不动传输地址。
@@ -227,6 +236,161 @@ impl XcpConnection for CanXcpMaster {
         }
         Ok(out)
     }
+
+    async fn configure_daq(&mut self, lists: &[DaqListSpec]) -> Result<DaqLayout, Fault> {
+        let session = self.require_session()?;
+        if session.resource & openape_xcp_proto::resource::DAQ == 0 {
+            return Err(connection::fault(
+                seq::DAQ,
+                Severity::Error,
+                "从站 CONNECT 响应里没有声明 DAQ 能力",
+            )
+            .with_hint("该 ECU 只支持标定读写；换用 resource 位含 DAQ 的从站"));
+        }
+        let limit = u8::try_from(session.max_dto.saturating_sub(1)).unwrap_or(0);
+
+        // 先把分组算完：任何一条放不下都在动从站之前报出来，不留半配置状态。
+        let odts_per_list = lists
+            .iter()
+            .map(|spec| daq::plan_odts(&spec.signals, limit))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        self.transact(&Command::FreeDaq).await?;
+        self.transact(&Command::AllocDaq {
+            count: lists.len() as u16,
+        })
+        .await?;
+        self.allocate_odts(&odts_per_list).await?;
+        self.write_entries(lists, &odts_per_list).await?;
+        self.start_and_map(&odts_per_list).await
+    }
+}
+
+impl CanXcpMaster {
+    /// 按 list 逐个分配 ODT 与条目。
+    async fn allocate_odts(
+        &mut self,
+        odts_per_list: &[Vec<Vec<daq::DaqSignal>>],
+    ) -> Result<(), Fault> {
+        for (index, groups) in odts_per_list.iter().enumerate() {
+            let daq_list = index as u16;
+            self.transact(&Command::AllocOdt {
+                daq_list,
+                odt_count: groups.len() as u8,
+            })
+            .await?;
+            for (odt, group) in groups.iter().enumerate() {
+                self.transact(&Command::AllocOdtEntry {
+                    daq_list,
+                    odt: odt as u8,
+                    entries: group.len() as u8,
+                })
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// 写条目并设模式。每个 ODT 只发一次 SET_DAQ_PTR：从站写后自增指针，
+    /// 这是 pyXCP 依赖的行为，标准也这么规定。
+    async fn write_entries(
+        &mut self,
+        lists: &[DaqListSpec],
+        odts_per_list: &[Vec<Vec<daq::DaqSignal>>],
+    ) -> Result<(), Fault> {
+        for (index, (spec, groups)) in lists.iter().zip(odts_per_list).enumerate() {
+            let daq_list = index as u16;
+            for (odt, group) in groups.iter().enumerate() {
+                self.transact(&Command::SetDaqPtr {
+                    daq_list,
+                    odt: odt as u8,
+                    entry: 0,
+                })
+                .await?;
+                for signal in group {
+                    self.transact(&Command::WriteDaq {
+                        bit_offset: 0,
+                        size: signal.len.get() as u8,
+                        address_extension: 0,
+                        address: signal.address.get(),
+                    })
+                    .await?;
+                }
+            }
+            self.transact(&Command::SetDaqListMode {
+                mode: 0,
+                daq_list,
+                event: spec.event,
+                prescaler: spec.prescaler,
+                priority: 0,
+            })
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// 逐条启动 DAQ list，并用从站报的首个 PID 建布局。
+    ///
+    /// 从站的编号是权威：master 按"跨 list 连续"算一遍，两者不一致说明对
+    /// 绝对 ODT 编号的理解有分歧，此时收到的 DTO 必然切错，宁可现在就失败。
+    async fn start_and_map(
+        &mut self,
+        odts_per_list: &[Vec<Vec<daq::DaqSignal>>],
+    ) -> Result<DaqLayout, Fault> {
+        let mut layout = DaqLayout::default();
+        let mut next_pids = OdtIds::new();
+        for (index, groups) in odts_per_list.iter().enumerate() {
+            let expected = next_pids.allocate(groups.len() as u8).ok_or_else(|| {
+                connection::fault(
+                    seq::DAQ,
+                    Severity::Error,
+                    "DAQ list 多到绝对 ODT 编号用尽（上限 0xFB）",
+                )
+            })?;
+            let reported = self.start_list(index as u16).await?;
+            if reported != expected {
+                return Err(connection::fault(
+                    seq::DAQ,
+                    Severity::Error,
+                    format!(
+                        "从站把 list {index} 的首个 ODT 编成 {reported}，master 按连续分配算是 {expected}"
+                    ),
+                )
+                .with_hint("两侧对绝对 ODT 编号的约定不一致，DAQ 帧无法还原成信号"));
+            }
+            for (odt, group) in groups.iter().enumerate() {
+                layout.insert(expected + odt as u8, group);
+            }
+        }
+        Ok(layout)
+    }
+
+    /// 启动一条 list，返回从站报的首个绝对 ODT 编号。
+    async fn start_list(&mut self, daq_list: u16) -> Result<u8, Fault> {
+        let payload = self
+            .transact(&Command::StartStopDaqList { mode: 1, daq_list })
+            .await?;
+        first_pid(&payload)
+    }
+}
+
+/// 解析 `START_STOP_DAQ_LIST` 响应里的首个 PID（u16 小端，只用低字节）。
+fn first_pid(payload: &[u8]) -> Result<u8, Fault> {
+    let low = payload.first().copied().ok_or_else(|| {
+        connection::fault(
+            seq::DAQ,
+            Severity::Error,
+            "START_STOP_DAQ_LIST 响应为空，取不到 firstPid",
+        )
+    })?;
+    if low > openape_xcp_proto::PID_DAQ_MAX {
+        return Err(connection::fault(
+            seq::DAQ,
+            Severity::Error,
+            format!("从站报的 firstPid {low:#04x} 落在命令 PID 区间"),
+        ));
+    }
+    Ok(low)
 }
 
 /// 取前 `wanted` 字节；不足即报协议错，不拿填充字节冒充数据。
