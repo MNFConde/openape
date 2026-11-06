@@ -5,6 +5,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod testing;
+
 use std::time::Duration;
 
 use async_trait::async_trait;
