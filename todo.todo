@@ -99,6 +99,7 @@
 [ ] M5-12 feat(xcp)：XCP-on-Ethernet 传输（经 XcpConnection，UDP 先行）→ 验收：与 xcp-lite 从站互通，CONNECT 与 DAQ 跑通
 [ ] M5-13 feat(ui-tauri)：桌面壳与 daemon sidecar（仅 Windows，D-21）→ 验收：双击启动可用，sidecar 生命周期与崩溃重启正确
 [ ] M5-14 chore(ci)：GitHub Actions（cargo 四门 + 前端检查 + 文档三检查 + golden）→ 验收：PR 上全绿且与本机结论一致
-[ ] M5-15 test/docs：契约 crate 的 examples/（D-20 完成标准）+ cargo semver-checks 门 → 验收：每个契约 crate 有只用公开 API 的流程，semver 检查可跑
+[x] M5-15 test/docs：契约 crate 的 examples/（D-20 完成标准）+ cargo semver-checks 门 → 验收：每个契约 crate 有只用公开 API 的流程，semver 检查可跑
+    完成说明（2026-11-08）：三个 L1 契约 crate 各一个 examples——cal-core「读配置→取声明→换算一个值」（value::decode 是 Option 口径）、xcp-proto「编 SET_MTA CRO→解响应」、proto「报告 serde 往返锁 snake_case 与宽地址字符串」。三例全部 cargo run 跑通且只用公开 API。cargo-semver-checks 0.51 落地，全 workspace 202 checks 全过；登记进 commit.md 门禁流水线（第七条，L1 契约公开面改动后必跑）。
 [ ] M5-16 feat(cli)：doctor 自检，与分阶段探测共用判定实现 → 验收：各故障类别的判定条件可一次跑完
 [ ] M5-17 feat(ui)：性能面板 + CLI 实时视图（五项一等指标）→ 验收：指标出口的数据在界面与终端都可见

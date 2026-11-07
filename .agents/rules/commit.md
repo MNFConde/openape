@@ -54,9 +54,11 @@ cargo audit
 python3 script/check-links.py
 python3 script/check-frontmatter.py
 python3 script/check-markers.py
+cargo semver-checks
 ```
 
 - cargo 四条自 workspace 脚手架落地（todo M1）起生效；此前文档三检查即门禁。
+- `cargo semver-checks` 自 M5-15 起生效：守公开面 semver（D-17/D-20），改动 L1 契约 crate（cal-core / xcp-proto / proto）公开面后必跑。网络失败/离线时与 cargo audit 同口径用 `--offline`。
 - 触发细则（python3 / python / py -3 / uv run 四级探测，Windows 商店占位 stub 问题）单一源见 [script/scripts.md](../../script/scripts.md) 台账——本开发机实际执行 `uv run --no-project python script/{name}.py`。
 - 版本约束只钉一处（workspace 根 Cargo.toml 的 workspace.dependencies）；升级后必须跑全量测试 + `cargo audit`，勿随手升级。
 - **批量机械改写后跑未使用符号扫描**：perl/sed/脚本批量改写会静默丢测试属性/函数——`cargo clippy --all-targets` 的 dead_code 警告即探测器，改写后该类警告必须清零。
