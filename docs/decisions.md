@@ -138,6 +138,11 @@ updated: 2026-11-05
 - 依据：（1）上游无 CAN 传输层，补层即自研加维护 fork，成本高于自己写；（2）怪癖注入本就需要掌握协议层细节，自研不额外增加知识负担；（3）spike 用第三方 master（pyXCP）对照，CONNECT / 内存读写 / 页切换 / 静态 DAQ 共 13 项断言连跑 3 次全过，最小环已通；（4）CAN 帧对齐填充、DAQ 绝对 ODT 编号、命令码等细节已在 spike 落地，可直接复用。
 - 影响：sim-ecu 增加自研传输层工作量（收在 M1 内）；xcp-lite 退出 sim-ecu 依赖，仅留作以太网 XCP 的对照参考（可选）；pyXCP 的两处非标准行为（GET_CAL_PAGE 响应补齐、WRITE_DAQ 指针自增）待与 ASAM 标准复核，M2 实现完整 DAQ 前完成。
 
+- 复核结论（2026-11-05，M2-15）：前述"两处非标准行为"的表述**不成立**，二者都是标准行为，项目实现无需改动。
+  - **GET_CAL_PAGE 响应三字节**：正响应载荷是 `reserved_1`、`reserved_2`、`logical_data_page_number` 各一字节。依据是两份互不相关的实现——scapy 的 `CalPagePositiveResponse(reserved_1, reserved_2, logical_data_page_number)`（`scapy.contrib.automotive.xcp.cto_commands_slave`），以及 pyXCP 的 `getCalPage` 取 `response[2]` 配其测试帧 `FF 00 00 55`。sim-ecu 现返回 `[0x00, 0x00, page]`，位置与之一致。
+  - **WRITE_DAQ 后条目指针自增**：XCP 规定写条目后 ODT 条目指针自增，master 连续写同一 ODT 的多个条目时只发一次 `SET_DAQ_PTR`。pyXCP 的 `writeDaq` 每次调用只发一条 `WRITE_DAQ`（命令码 `0xE1` + 7 字节参数），不自带重设指针，正是依赖这条自增；我们的 master 同样只在每个 ODT 起始处发一次指针命令。
+  - 口径说明：ASAM 标准正文为付费文档，未能取得条款原文，因此结论建立在两份独立开源实现与自研从站的互通实测上，而非标准引用。若日后取得条款原文，应回填到本段。
+
 ## D-13 信息源两档输入与写入安全
 
 - 状态：已决策

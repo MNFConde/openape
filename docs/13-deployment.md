@@ -83,6 +83,13 @@ Caddy 的 `flush_interval` 默认即为 `-1`（每次写出立即刷），此处
 
 两者的取舍：nginx 打包更小（静态 3–10MB）、生态更熟；Caddy 是静态单文件（~40MB）、配置更短、离线 TLS 免手工。资源极紧的盒子选前者，其余选后者。
 
+## CLI 经 daemon 复用会话
+
+daemon 一旦拿到设备锁，直接开总线的 CLI 就会撞锁。`--via-daemon` 让 CLI 走 gRPC：
+`read` 由 daemon 代做（读之前它会让采集泵让开接收端，读完恢复），`probe` 由 daemon
+回答自己已知的能力与建链信息。地址必须写成等号形式 `--via-daemon=URL`，不带值用
+`http://127.0.0.1:47711`——clap 的可选值会贪婪吃掉后面的子命令名。
+
 ## 前端构建与产物
 
 - **包管理器用 npm**，不引 pnpm/yarn：Vite 在 npm 下已够用，少一个要装、要进 CI 的工具。
