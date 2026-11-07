@@ -12,17 +12,19 @@
 //! 3. **一次采集只落一次盘**。反复命中会让文件无限长，重新起一轮比继续堆
 //!    更符合"看那一瞬"的用法。
 //!
-//! 本阶段（M4）只做到「判据 + 窗口 + 导出 CSV」；接到录制器与 MF4 是 M5。
+//! 本阶段（M5-04）起，窗口导出走录制器的同一出口（[`TriggerWindow::export`]）：
+//! 同一套通道解值、MF4+CSV 双落盘、同一时间轴基准，与常时录制逐行可比。
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use openape_cal_core::{ElemType, hex};
+use openape_cal_core::ElemType;
 use openape_diag::{Domain, Fault, FaultCode, Severity};
 use openape_xcp::DaqLayout;
 
 use crate::daq_stream::{DaqSample, DaqStream, DaqStreamReader};
+use crate::recorder::{Recorder, RecorderChannel, RecorderConfig, RecorderStats};
 use crate::seq;
 
 /// 比较方式。
@@ -124,36 +126,6 @@ pub struct TriggerWindow {
     pub samples: Vec<WindowSample>,
 }
 
-impl TriggerWindow {
-    /// 导出为 CSV：一行一条样本，文件头写明判据与命中位置。
-    ///
-    /// 表头注释行以 `#` 开头，pandas/numpy 与 `grep -v '^#'` 都能直接吃。
-    pub fn to_csv(&self, condition: &Condition) -> String {
-        let mut out = String::new();
-        out.push_str("# openape trigger window\n");
-        out.push_str(&format!(
-            "# condition: pid={} entry={} {} {}\n",
-            condition.pid,
-            condition.entry,
-            condition.compare.label(),
-            condition.threshold
-        ));
-        out.push_str(&format!("# hit_at_us: {}\n", self.hit_timestamp_us));
-        out.push_str(&format!("# hit_index: {}\n", self.hit_index));
-        out.push_str("timestamp_us,pid,payload_hex,hit\n");
-        for (index, sample) in self.samples.iter().enumerate() {
-            out.push_str(&format!(
-                "{},{},{},{}\n",
-                sample.timestamp_us,
-                sample.pid,
-                hex::encode(&sample.payload),
-                if index == self.hit_index { 1 } else { 0 }
-            ));
-        }
-        out
-    }
-}
-
 /// 触发录制器。喂样本，命中一次就吐出窗口。
 #[derive(Debug)]
 pub struct TriggerRecorder {
@@ -184,6 +156,11 @@ impl TriggerRecorder {
             hit: None,
             fired: false,
         })
+    }
+
+    /// 判据取值用的布局。挂在流上时借它去建窗口导出，不必另传一份。
+    pub fn layout(&self) -> &DaqLayout {
+        &self.layout
     }
 
     /// 喂一条样本。首次命中且命中后样本已收齐时返回窗口。
@@ -233,31 +210,78 @@ impl TriggerRecorder {
     }
 }
 
-/// 把窗口写到目录下，返回文件路径。
-///
-/// 文件名带命中时刻：同一目录里放多次触发的导出不会互相覆盖。
-pub fn write_window(
-    dir: &Path,
-    window: &TriggerWindow,
-    condition: &Condition,
-) -> Result<PathBuf, Fault> {
-    std::fs::create_dir_all(dir)
-        .map_err(|err| config_fault(format!("触发窗口目录 {} 建不出来：{err}", dir.display())))?;
-    let path = dir.join(format!("trigger-{}.csv", window.hit_timestamp_us));
-    std::fs::write(&path, window.to_csv(condition))
-        .map_err(|err| config_fault(format!("{} 写不进去：{err}", path.display())))?;
-    Ok(path)
+/// 一次命中经统一出口落盘的产物。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowExport {
+    /// MF4 路径（离线重开读这份）。
+    pub mf4: PathBuf,
+    /// CSV 路径（同一批行的文本视图，注释头带判据与命中位置）。
+    pub csv: PathBuf,
+    /// 录制统计——行数守恒恒等式同样约束窗口导出。
+    pub stats: RecorderStats,
+}
+
+impl TriggerWindow {
+    /// 窗口经录制器的同一出口落盘：同一套通道解值、MF4+CSV 双落盘、
+    /// 同一时间轴基准（样本的 `timestamp_us` 原样进两份文件，与常时
+    /// 录制逐行可比）。判据与命中位置进 CSV 注释头；没命中就不会调
+    /// 到这里，目录里零文件。
+    ///
+    /// 文件名带命中时刻，同目录多次触发互不覆盖。
+    pub fn export(
+        &self,
+        dir: &Path,
+        condition: &Condition,
+        channels: &[RecorderChannel],
+        layout: &DaqLayout,
+    ) -> Result<WindowExport, Fault> {
+        let mf4 = dir.join(format!("trigger-{}.mf4", self.hit_timestamp_us));
+        let csv = dir.join(format!("trigger-{}.csv", self.hit_timestamp_us));
+        std::fs::create_dir_all(dir).map_err(|err| {
+            config_fault(format!("触发窗口目录 {} 建不出来：{err}", dir.display()))
+        })?;
+        let config = RecorderConfig {
+            channels: channels.to_vec(),
+            mf4: mf4.clone(),
+            csv: csv.clone(),
+            queue_capacity: 0,
+            notes: vec![
+                format!(
+                    "condition: pid={} entry={} {} {}",
+                    condition.pid,
+                    condition.entry,
+                    condition.compare.label(),
+                    condition.threshold
+                ),
+                format!("hit_at_us: {}", self.hit_timestamp_us),
+                format!("hit_index: {}", self.hit_index),
+            ],
+        };
+        let recorder = Recorder::start(config, layout)?;
+        for sample in &self.samples {
+            recorder.feed_sample(
+                layout,
+                &DaqSample {
+                    pid: sample.pid,
+                    timestamp_us: sample.timestamp_us,
+                    payload: sample.payload.clone(),
+                },
+            );
+        }
+        let stats = recorder.finish()?;
+        Ok(WindowExport { mf4, csv, stats })
+    }
 }
 
 /// 挂在采集流上的触发任务。
 #[derive(Debug)]
 pub struct TriggerHandle {
-    task: tokio::task::JoinHandle<Result<PathBuf, Fault>>,
+    task: tokio::task::JoinHandle<Result<WindowExport, Fault>>,
 }
 
 impl TriggerHandle {
-    /// 等窗口落盘。没命中时按超时返回故障——`Ok` 只代表真的写出了文件。
-    pub async fn wait(self) -> Result<PathBuf, Fault> {
+    /// 等窗口落盘。没命中时按超时返回故障——`Ok` 只代表真的写出了两份文件。
+    pub async fn wait(self) -> Result<WindowExport, Fault> {
         match self.task.await {
             Ok(result) => result,
             Err(err) => Err(config_fault(format!("触发任务被中断：{err}"))),
@@ -270,15 +294,17 @@ impl TriggerHandle {
     }
 }
 
-/// 在采集流上挂一个触发器：命中即导出窗口到 `dir`。
+/// 在采集流上挂一个触发器：命中即经录制器出口把窗口落成 MF4+CSV。
 pub fn spawn_trigger(
     stream: &DaqStream,
-    mut recorder: TriggerRecorder,
+    mut trigger: TriggerRecorder,
+    channels: Vec<RecorderChannel>,
     dir: PathBuf,
     timeout: Duration,
 ) -> TriggerHandle {
     let mut reader: DaqStreamReader = stream.subscribe();
-    let condition = recorder.config.condition.clone();
+    let condition = trigger.config.condition.clone();
+    let layout = trigger.layout().clone();
     let task = tokio::spawn(async move {
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
@@ -298,8 +324,8 @@ pub fn spawn_trigger(
                 }
                 Err(_) => continue,
             };
-            if let Some(window) = recorder.push(&sample) {
-                return write_window(&dir, &window, &condition);
+            if let Some(window) = trigger.push(&sample) {
+                return window.export(&dir, &condition, &channels, &layout);
             }
         }
     });
@@ -424,8 +450,8 @@ mod tests {
     }
 
     #[test]
-    fn csv_carries_the_condition_and_marks_the_hit() {
-        let mut recorder = TriggerRecorder::new(
+    fn the_export_writes_decoded_values_through_the_recorder_exit() {
+        let mut trigger_recorder = TriggerRecorder::new(
             layout(),
             TriggerConfig {
                 condition: condition(),
@@ -434,20 +460,42 @@ mod tests {
             },
         )
         .expect("配置合法");
-        let _ = recorder.push(&sample(0, 10));
-        let window = recorder.push(&sample(1, 99)).expect("命中即导出");
+        let _ = trigger_recorder.push(&sample(0, 10));
+        let window = trigger_recorder.push(&sample(1, 99)).expect("命中即导出");
         let dir = tempdir();
-        let path = write_window(&dir, &window, &condition()).expect("能落盘");
-        let text = std::fs::read_to_string(&path).expect("能读");
-        assert!(text.contains("# condition: pid=0 entry=0 > 50"), "{text}");
-        assert!(text.contains("timestamp_us,pid,payload_hex,hit"), "{text}");
-        assert!(text.contains(",0,0063,1"), "命中行标 1: {text}");
-        assert!(text.contains(",0,000a,0"), "命中前的样本标 0: {text}");
+        let channels = vec![RecorderChannel::new(
+            0,
+            0,
+            "speed",
+            ElemType::U16,
+            ByteOrder::Big,
+        )];
+        let export = window
+            .export(&dir, &condition(), &channels, trigger_recorder.layout())
+            .expect("能落盘");
+        assert_eq!(export.stats.received, 2, "窗口两条都解出值");
+        assert_eq!(export.stats.written, 2);
+        assert_eq!(export.stats.decode_errors, 0);
         assert_eq!(
-            path.file_name().and_then(|name| name.to_str()),
-            Some("trigger-1000.csv"),
+            export.mf4.file_name().and_then(|name| name.to_str()),
+            Some("trigger-1000.mf4"),
             "文件名带命中时刻"
         );
+        let csv = std::fs::read_to_string(&export.csv).expect("能读");
+        assert!(csv.contains("# condition: pid=0 entry=0 > 50"), "{csv}");
+        assert!(csv.contains("# hit_at_us: 1000"), "{csv}");
+        assert!(csv.contains("# hit_index: 1"), "{csv}");
+        assert!(csv.contains("timestamp_us,speed"), "{csv}");
+        assert!(csv.lines().any(|line| line == "1000,99"), "{csv}");
+
+        let mdf = mf4_rs::api::mdf::MDF::from_file(export.mf4.to_str().expect("路径是 UTF-8"))
+            .expect("MF4 必须能被读回");
+        let values = mdf
+            .channel("speed")
+            .expect("通道按名可查")
+            .values_as_f64()
+            .expect("取值必须可读");
+        assert_eq!(values, vec![10.0, 99.0], "窗口值按通道定义解出");
     }
 
     #[test]
@@ -490,17 +538,41 @@ mod tests {
     async fn a_live_stream_that_never_hits_writes_nothing() {
         let stream = DaqStream::new(8);
         let dir = tempdir();
-        let handle = spawn_trigger(&stream, recorder(), dir.clone(), Duration::from_millis(50));
+        let channels = vec![RecorderChannel::new(
+            0,
+            0,
+            "speed",
+            ElemType::U16,
+            ByteOrder::Big,
+        )];
+        let handle = spawn_trigger(
+            &stream,
+            recorder(),
+            channels,
+            dir.clone(),
+            Duration::from_millis(50),
+        );
         stream.push(0, 10u16.to_be_bytes().to_vec());
         let err = handle.wait().await.expect_err("没命中就该报超时");
         assert!(err.message().contains("未落盘"), "{err}");
-        assert_eq!(std::fs::read_dir(&dir).expect("目录可读").count(), 0);
+        assert_eq!(
+            std::fs::read_dir(&dir).expect("目录可读").count(),
+            0,
+            "未命中零落盘"
+        );
     }
 
     #[tokio::test]
     async fn a_live_stream_hit_lands_on_disk() {
         let stream = DaqStream::new(8);
         let dir = tempdir();
+        let channels = vec![RecorderChannel::new(
+            0,
+            0,
+            "speed",
+            ElemType::U16,
+            ByteOrder::Big,
+        )];
         let handle = spawn_trigger(
             &stream,
             TriggerRecorder::new(
@@ -512,15 +584,109 @@ mod tests {
                 },
             )
             .expect("配置合法"),
+            channels,
             dir.clone(),
             Duration::from_secs(2),
         );
         stream.push(0, 10u16.to_be_bytes().to_vec());
         stream.push(0, 99u16.to_be_bytes().to_vec());
-        let path = handle.wait().await.expect("命中即导出");
-        assert!(path.exists());
-        let text = std::fs::read_to_string(path).expect("能读");
-        assert!(text.contains(",0,0063,1"), "{text}");
+        let export = handle.wait().await.expect("命中即导出");
+        assert!(export.mf4.exists(), "MF4 要落盘");
+        assert!(export.csv.exists(), "CSV 要落盘");
+        assert_eq!(export.stats.written, 2);
+    }
+
+    /// 验收线：命中窗口与常时录制的时间轴逐行可比——窗口的 4 行必须是
+    /// 常时文件里按时间戳定位到的连续子序列，值也逐条相等。
+    #[tokio::test]
+    async fn the_window_time_axis_aligns_with_the_continuous_recording() {
+        let stream = DaqStream::new(64);
+        let mut reader = stream.subscribe();
+        let layout = layout();
+        let rec_dir = tempdir();
+        let continuous = Recorder::start(
+            RecorderConfig {
+                channels: vec![RecorderChannel::new(
+                    0,
+                    0,
+                    "speed",
+                    ElemType::U16,
+                    ByteOrder::Big,
+                )],
+                mf4: rec_dir.join("cont.mf4"),
+                csv: rec_dir.join("cont.csv"),
+                queue_capacity: 0,
+                notes: Vec::new(),
+            },
+            &layout,
+        )
+        .expect("常时录制必须能起");
+        let trig_dir = tempdir();
+        let channels = vec![RecorderChannel::new(
+            0,
+            0,
+            "speed",
+            ElemType::U16,
+            ByteOrder::Big,
+        )];
+        let handle = spawn_trigger(
+            &stream,
+            TriggerRecorder::new(
+                layout.clone(),
+                TriggerConfig {
+                    condition: condition(),
+                    pre_samples: 2,
+                    post_samples: 1,
+                },
+            )
+            .expect("配置合法"),
+            channels,
+            trig_dir.clone(),
+            Duration::from_secs(2),
+        );
+        for value in [10u16, 20, 30, 99, 40, 50] {
+            stream.push(0, value.to_be_bytes().to_vec());
+        }
+        drop(stream); // 排空缓冲后 recv 返回 None，两条消费路径都有终点
+        let mut fed = 0;
+        while let Some(sample) = reader.recv().await {
+            continuous.feed_sample(&layout, &sample);
+            fed += 1;
+        }
+        assert_eq!(fed, 6, "推 6 条两条消费路径都要见全");
+        assert_eq!(
+            continuous.finish().expect("收尾必须成功").written,
+            6,
+            "常时录制整场留底"
+        );
+        let export = handle.wait().await.expect("命中即导出");
+        assert_eq!(export.stats.written, 4, "窗口 = 命中前 2 + 命中 + 命中后 1");
+
+        let open = |path: &std::path::Path| {
+            mf4_rs::api::mdf::MDF::from_file(path.to_str().expect("路径是 UTF-8"))
+                .expect("MF4 必须能被读回")
+        };
+        let continuous_mdf = open(&rec_dir.join("cont.mf4"));
+        let window_mdf = open(&export.mf4);
+        let channel_values = |mdf: &mf4_rs::api::mdf::MDF, name: &str| {
+            mdf.channel(name)
+                .unwrap_or_else(|| panic!("通道 {name} 必须可查"))
+                .values_as_f64()
+                .expect("取值必须可读")
+        };
+        let cont_time = channel_values(&continuous_mdf, "time");
+        let win_time = channel_values(&window_mdf, "time");
+        let cont_speed = channel_values(&continuous_mdf, "speed");
+        let win_speed = channel_values(&window_mdf, "speed");
+        let pos = cont_time
+            .windows(4)
+            .position(|span| span == win_time.as_slice())
+            .expect("窗口时间戳必须是常时录制的连续子序列");
+        assert_eq!(
+            &cont_speed[pos..pos + 4],
+            win_speed.as_slice(),
+            "定位到的时间段里值也要逐条相等"
+        );
     }
 
     fn tempdir() -> PathBuf {

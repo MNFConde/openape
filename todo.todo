@@ -83,7 +83,8 @@
     完成说明（2026-11-08）：实现层用 mf4-rs 3.8.0 的 writer（块布局不手写），本 crate 管语义层（时间主通道、f64 物理值直存、行边界校验、收尾落盘）；单位文本未落盘（writer 无便捷路径，需要时补 ##TX + unit_addr），起始时间固定 0 保 golden 稳定。验收双证：mf4-rs api 读回逐条一致；script/verify-mf4.py 用 asammdf 读 fixtures/mf4/golden.minimal.mf4 逐条一致。已知缺口：mf4-rs 传递依赖 meval→nom 1.2.4 有 future-incompatible 编译警告（非漏洞），升级 mf4-rs 时盯住。
 [x] M5-03 feat(session)：录制器（样本流 → MF4 + CSV，含背压与丢帧记账）→ 验收：一次采集落 MF4 与 CSV，样本数与指标一致
     完成说明（2026-11-08）：session::recorder——写出线程独立（mf4-rs 写出器非 Send，阻塞 IO 不占 tokio worker；daemon 接入时 finish 包 spawn_blocking），喂入侧只解值 + try_send，队列满丢自己的份并计数。恒等式 written + dropped == received 由测试钉住；CSV 是同一批行的文本视图，与 MF4 行数一致。按单 ODT 设计（跨 pid 配置在 start 拒绝），多 ODT 等 M5-09/12 后另做口径。CLI/daemon 的实时录制接线不在本项（M5-17 性能面板/实时视图那轮顺路），本次以库内全链路测试为验收证据（DaqStream 推流 → 消费 → 双落盘 → 计数核对）。
-[ ] M5-04 feat(session)：条件触发录制接录制器，统一 M4-11 的窗口导出出口（前置 M5-03）→ 验收：命中窗口与录制文件时间轴对齐，未命中零落盘
+[x] M5-04 feat(session)：条件触发录制接录制器，统一 M4-11 的窗口导出出口（前置 M5-03）→ 验收：命中窗口与录制文件时间轴对齐，未命中零落盘
+    完成说明（2026-11-08）：TriggerWindow::export 走 Recorder::start/feed/finish 同一出口（MF4+CSV 双落盘，RecorderConfig 新增 notes 带判据与命中位置进 CSV 注释头）；旧 to_csv/write_window（payload-hex CSV）删除。spawn_trigger 签名加 channels，layout 从 TriggerRecorder 借（新增 layout()）。验收测试：窗口 4 行按时间戳定位为常时 MF4 的连续子序列且值逐条相等；未命中目录零文件。
 [ ] M5-05 feat(format-mf4)：MDF4 读取 + 离线重开（前置 M5-01、M5-02）→ 验收：离线曲线与实时曲线走同一条渲染路径
 [ ] M5-06 feat(cal-core)：quirk 扩展点（外部配置填 trait，D-06）→ 验收：类 ECU 差异改配置不改代码，坏配置给可操作提示
 [ ] M5-07 feat(sim-ecu)：怪癖注入，复现 M5-06 的配置（前置 M5-06）→ 验收：注入的填充与回显差异在 vcan 上可复现

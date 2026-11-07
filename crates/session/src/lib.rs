@@ -28,7 +28,7 @@ pub use recorder::{
     DEFAULT_QUEUE_CAPACITY, Recorder, RecorderChannel, RecorderConfig, RecorderStats,
 };
 pub use trigger::{
-    Compare, Condition, TriggerConfig, TriggerHandle, TriggerRecorder, TriggerWindow,
-    spawn_trigger, write_window,
+    Compare, Condition, TriggerConfig, TriggerHandle, TriggerRecorder, TriggerWindow, WindowExport,
+    spawn_trigger,
 };
 pub use write::{RangeVerdict, WriteContext, Written, persist_snapshot, read_snapshot};

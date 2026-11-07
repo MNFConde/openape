@@ -71,6 +71,10 @@ pub struct RecorderConfig {
     pub csv: PathBuf,
     /// 写出队列容量（行数），0 取 [`DEFAULT_QUEUE_CAPACITY`]。
     pub queue_capacity: usize,
+    /// 附加注释行，每行带 `# ` 前缀写进 CSV 头。触发窗口借这里带上判据
+    /// 与命中位置；常时录制留空。MF4 无对应落点（writer 无注释路径），
+    /// 元数据以 CSV 为准。
+    pub notes: Vec<String>,
 }
 
 /// 一次录制的统计。`written + dropped_backpressure == received` 恒成立。
@@ -190,7 +194,7 @@ impl Recorder {
         let csv_file = std::fs::File::create(&config.csv)
             .map_err(|err| recorder_fault(format!("{} 建不出来：{err}", config.csv.display())))?;
         let mut csv = BufWriter::new(csv_file);
-        write_csv_header(&mut csv, &config.channels)
+        write_csv_header(&mut csv, &config.channels, &config.notes)
             .map_err(|err| recorder_fault(format!("{} 写表头失败：{err}", config.csv.display())))?;
 
         let (tx, rx) = std_mpsc::sync_channel(capacity);
@@ -292,6 +296,7 @@ fn format_value(value: f64) -> String {
 fn write_csv_header(
     csv: &mut BufWriter<std::fs::File>,
     channels: &[RecorderChannel],
+    notes: &[String],
 ) -> std::io::Result<()> {
     csv.write_all(b"# openape recording\n")?;
     let names: Vec<&str> = channels
@@ -304,6 +309,9 @@ fn write_csv_header(
         write!(csv, ",{name}")?;
     }
     writeln!(csv)?;
+    for note in notes {
+        writeln!(csv, "# {note}")?;
+    }
     Ok(())
 }
 
@@ -366,6 +374,7 @@ mod tests {
             mf4: dir.join("rec.mf4"),
             csv: dir.join("rec.csv"),
             queue_capacity: capacity,
+            notes: Vec::new(),
         }
     }
 
