@@ -23,3 +23,5 @@ pub const RESTORE: u32 = 13;
 pub const PAGE: u32 = 14;
 /// 写入值超出 A2L 量程。
 pub const RANGE: u32 = 15;
+/// 触发录制未命中或未收齐。
+pub const TRIGGER: u32 = 16;
