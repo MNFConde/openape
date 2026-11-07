@@ -2,7 +2,7 @@
 type: adr
 status: accepted
 summary: "OpenAPE 决策记录（D-xx 单文件形态）"
-updated: 2026-11-05
+updated: 2026-11-07
 ---
 
 # 决策记录
@@ -228,3 +228,13 @@ updated: 2026-11-05
 - 决策：daemon 默认只绑 `127.0.0.1`，靠 `--listen` 显式开放；daemon 内不做认证、不做 TLS，只承诺 [13-deployment.md](13-deployment.md#daemon-对外契约) 的四条对外契约；远程接入、认证、方法级 ACL 全部由前置网关（nginx / Caddy / 自研）承担；未部署网关即无远程能力。
 - 依据：（1）能力按部署组合、代码零分叉，M2 因此不需要任何认证代码；（2）gRPC 方法名就在 URL 路径里，方法级 ACL 用网关的路径规则即可，无需在 daemon 预留权限接口；（3）安全模型一句话说得清——能连上 daemon 即有全部权限，所以永不直接暴露。
 - 影响：D-04 的"同时监听 localhost 与 LAN"作废；WSL2 等转发场景不再需要按源 IP 判断"是否本地"；自研精简网关的触发条件见 [13-deployment.md](13-deployment.md#自研精简网关的触发条件)。
+
+## D-23 真机抽验排期
+
+- 状态：已决策
+- 日期：2026-11-07
+- 规范位置：[requirements.md](requirements.md) 验收口径、[11-architecture-layers.md](11-architecture-layers.md#后置项)
+- 背景：档三把真机抽验定为里程碑合入前的闸门（M1 起建清单），其前置条件写的是周立功 CAN-FD 卡加目标 ECU；而 `bus-zlg` 原排在 M5。两者直接冲突——M4 是 MVP 最后一站，没有 Windows 侧后端，档三永远绿不了，而 MVP 完成定义又要求档三已执行。
+- 决策：`bus-zlg` 提前到 M4 末尾（`todo.todo` 的 M4-16），验收分两层：**代码面**（能力位如实、帧路径与 socketcan 行为对等、装配按配置选后端，不需要硬件即验）与**真机面**（12 号清单 H-01–H-17 加写入类检查点，记录表填实）。硬件或驱动不在场时，M4 可勾但记录表整段标「未验」，真机复验落 M5-08，不阻塞 MVP。
+- 依据：（1）MVP 边界本就把周立功 CAN-FD 卡算在内（见 requirements 的"预留不做"段），把它排到 M5 是排期与边界的错位，不是取舍；（2）`Bus` trait 已把硬件差异关在 L2，装配层加一个配置分支即可，`xcp` 与 `session` 不动，改动面可控；（3）ZLG 的 FFI 面只有开设备、发、收三个（[D-11](#d-11-automotive-后端外挂裁决) 已核实），风险集中在 Windows 构建链与驱动，不在协议；（4）把"硬件是否在场"与"代码是否完成"拆成两层验收，避免把 MVP 完成绑在不可控的外部条件上。
+- 影响：M4 需补 Windows 侧构建链与 `zlgcan` 库路径的环境记录（[90-env.md](90-env.md)）；`bus-zlg` 是全仓第一个必须放开 `unsafe` 的位置——现有 15 个 crate 一律 `#![forbid(unsafe_code)]`，该项只在 FFI 模块内局部放开并注明理由；M5 增加一项真机复验（M5-08）。

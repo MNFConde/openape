@@ -2,7 +2,7 @@
 type: architecture
 status: active
 summary: "分层架构：三道屏蔽墙与能力描述、crate 六档依赖方向、双前端共享引擎、可观测层、公开面承诺与代码组织"
-updated: 2026-11-05
+updated: 2026-11-07
 ---
 
 # 分层架构
@@ -107,7 +107,7 @@ crate 只能 `use` 自己 Cargo.toml 里声明过的依赖，反向引用在**�
 | `daemon` / `ui` | 没有 UI 就没有常驻进程的消费者 | M2 的 Web 最小曲线页 | CLI 已证明引擎可用，但产品形态缺失 |
 | `ui-tauri` 桌面壳 | 界面与 Web UI 完全同源，壳只解决"双击启动"这一件事 | 用户明确要单机双击形态（MVP 之后），见 [decisions.md](decisions.md#d-21-native-gui-决策逆转) | 本地使用须先起 daemon，体验差但功能不缺 |
 | 前置网关与自研 `gateway` | nginx / Caddy 已覆盖反代、认证与 TLS，daemon 侧零代码 | 车载盒子放不下静态二进制，或需 ACL 直接读工程配置，见 [13-deployment.md](13-deployment.md#自研精简网关的触发条件) | 只能用现成网关，部署门槛落在运维能力上 |
-| `bus-zlg` / `bus-socketcand` / `bus-replay` / `bus-vector` | vcan 已能覆盖 M1 的全部验证需求 | ZLG 真机 M5；socketcand 与回放按用户请求；Vector 按实际硬件到手 | 真机验证缺位——M1 建抽验清单正是为了提前暴露这一点 |
+| `bus-zlg` / `bus-socketcand` / `bus-replay` / `bus-vector` | vcan 已能覆盖 M1 的全部验证需求；`bus-zlg` 除外——档三真机抽验需要 Windows 侧后端 | ZLG 真机 M4 末尾（[decisions.md](decisions.md#d-23-真机抽验排期)）；socketcand 与回放按用户请求；Vector 按实际硬件到手 | 真机验证缺位——M1 建抽验清单正是为了提前暴露这一点 |
 | `sim-ecu` 的怪癖注入 | 协议层刚自研完，怪癖需真实样本才能定义 | 同 `cal-core` 的 quirk 扩展点 | 模拟器只能覆盖标准行为 |
 | `diag` 的黑匣子与指标 | M1 只有日志与最小故障码集，尚无高频 DAQ 可测 | M2 DAQ 上流后 | 偶发问题在现场无法复现 |
 

@@ -2,7 +2,7 @@
 type: requirements
 status: active
 summary: "OpenAPE 需求基线：能力清单、MVP 边界、非功能约束、验收口径"
-updated: 2026-11-05
+updated: 2026-11-07
 ---
 
 # 需求基线
@@ -50,12 +50,12 @@ MVP 不做的：见下"不做 / 预留不做 / 怪癖兼容"三段。
 - 复用优先：选型先查活跃开源库（调研基准日 2026-11-04，结论见 [00 总纲复用与自研边界](00-overview.md#复用与自研边界)）；自研只补缺口
 - 依赖隔离：单人维护/实验性上游统一收在 trait 边界内
 - 可扩展与可复用：外部差异（硬件、XCP 传输介质、信息源格式）只从三个 trait 进入，新增硬件或传输不改内部逻辑；公开面按层承诺，第三方能基于本项目的公开 API 与扩展点继续开发，见 [11-architecture-layers.md](11-architecture-layers.md#公开面策略)
-- 平台起步：Linux SocketCAN 系（含 vcan、socketcand、日志回放）；Windows 侧经 ZLG FFI 支持周立功 CAN-FD 卡
+- 平台起步：Linux SocketCAN 系（含 vcan、socketcand、日志回放）；Windows 侧经 ZLG FFI 支持周立功 CAN-FD 卡——`bus-zlg` 提前到 M4 末尾落地，理由与降级规则见 [decisions.md](decisions.md#d-23-真机抽验排期)
 - 远程接入边界：daemon 默认仅绑回环，进程内不做认证与 TLS；远程访问、认证与方法级权限由前置网关承担，未部署网关即无远程能力，见 [13-deployment.md](13-deployment.md)
 
 ## 验收口径
 
 - **MVP 完成定义**：todo.todo 中 M1–M4 全部勾完——即：vcan 上 sim-ecu 与 daemon 全链路采集/标定写入/页切换跑通；A2L 与 ELF 双前端 + ELF→A2L 导出出件；曲线与标定量表格在 Web UI 本地/远程可用；dataset 对比与 DCM 导入可用；CLI 分阶段探测命令与统一故障面板可用
 - **档二 golden（适用）**：ELF→A2L 导出在 M3 落地、DCM 解析在 M4 与实现同批落地——golden 不能先于被测对象存在；fixtures 入库，纯重构以零 diff 为通过线
-- **档三 人工抽验（适用，M1 起建清单）**：里程碑合入前用真机抽验——周立功 CAN-FD 卡 + 目标 ECU，检查点矩阵见 [12-hardware-checklist.md](12-hardware-checklist.md)（M1 产出）
+- **档三 人工抽验（适用，M1 起建清单）**：里程碑合入前用真机抽验——周立功 CAN-FD 卡 + 目标 ECU，检查点矩阵见 [12-hardware-checklist.md](12-hardware-checklist.md)（M1 产出）。2026-11-07 裁决：抽验的软件路径由 `bus-zlg`（Windows）在 M4 末尾提供；硬件或驱动不在场时该里程碑可勾，但抽验记录整段标「未验」，不得声明抽验通过，复验落 M5 的 M5-08，见 [decisions.md](decisions.md#d-23-真机抽验排期)
 - 门禁（代码层）见 `.agents/rules/commit.md`，与本文档验收口径（产物层）并存
