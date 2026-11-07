@@ -1,0 +1,19 @@
+# 轴绑定 golden（10-axis-binding-rfc 第 8 节）
+#
+# 与 fixtures/elf/test.elf 配套：这份配置把 cal_map[4][3] 的两维分别绑到
+# cal_axis_y（4 点）与 cal_axis_x（3 点）。axes 的顺序是「内层优先」——
+# 与 C 声明一致，与导出到 A2L 的 MATRIX_DIM 相反。
+schema_version = 1
+
+[[axis]]
+id = "x_speed"
+symbol = "cal_axis_x"
+
+[[axis]]
+id = "y_temp"
+symbol = "cal_axis_y"
+
+[[map]]
+id = "eff_map"
+symbol = "cal_map"
+axes = ["y_temp", "x_speed"]

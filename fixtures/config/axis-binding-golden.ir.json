@@ -1,0 +1,35 @@
+{
+  "axes": [
+    {
+      "id": "x_speed",
+      "symbol": "cal_axis_x",
+      "len": 3,
+      "kind": "shared",
+      "elem": "f32"
+    },
+    {
+      "id": "y_temp",
+      "symbol": "cal_axis_y",
+      "len": 4,
+      "kind": "shared",
+      "elem": "f32"
+    }
+  ],
+  "values": [
+    {
+      "id": "eff_map",
+      "symbol": "cal_map",
+      "kind": "map",
+      "dims": [
+        4,
+        3
+      ],
+      "axes": [
+        "y_temp",
+        "x_speed"
+      ],
+      "elem": "f32"
+    }
+  ],
+  "diagnostics": []
+}

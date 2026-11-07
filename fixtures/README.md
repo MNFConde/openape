@@ -5,6 +5,7 @@
 | 目录 | 内容 | 来源 |
 |---|---|---|
 | `elf/` | 覆盖标定/观测典型形态的 C 源码（常量、二维 Map、双轴、结构体、位域、枚举、指针、函数指针、跨 CU 同名 static、被优化折叠的 static const），以及编好的 `test.elf` 与 `stripped.elf` | M0-4 spike |
+| `config/` | 轴绑定 golden 的工程配置（`axis-binding-golden.toml`）与期望 IR 快照（`.ir.json`） | M3-06 |
 | `a2l/` | 轴绑定导出的 golden A2L 片段（`axis-binding-golden.a2l`）与档二 golden（`elf-export-golden.a2l`：`test.elf` 全量导出） | M0-5 RFC 第 8 节 / M3-05 |
 
 ## ELF 夹具：产物入库，源码随改随编
