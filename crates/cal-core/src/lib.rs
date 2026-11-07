@@ -15,6 +15,7 @@ mod dataset;
 pub mod hex;
 mod ir;
 mod notice;
+pub mod quirk;
 mod time;
 mod types;
 pub mod value;

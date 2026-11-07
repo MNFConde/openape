@@ -87,7 +87,8 @@
     完成说明（2026-11-08）：TriggerWindow::export 走 Recorder::start/feed/finish 同一出口（MF4+CSV 双落盘，RecorderConfig 新增 notes 带判据与命中位置进 CSV 注释头）；旧 to_csv/write_window（payload-hex CSV）删除。spawn_trigger 签名加 channels，layout 从 TriggerRecorder 借（新增 layout()）。验收测试：窗口 4 行按时间戳定位为常时 MF4 的连续子序列且值逐条相等；未命中目录零文件。
 [x] M5-05 feat(format-mf4)：MDF4 读取 + 离线重开（前置 M5-01、M5-02）→ 验收：离线曲线与实时曲线走同一条渲染路径
     完成说明（2026-11-08）：Reader 走 mf4-rs 读端（不自写解析），立「time 主通道 + f64 列」约定，时间列乘 1e6 还原微秒（写出端除法的无损逆），未知通道报错点名可用；proto 加 OpenRecording(path+channel→点流)，daemon 在 spawn_blocking 里解行、错误在流建立前交回；ui 加 GrpcRecordingSource 走 SampleSource 同一接口，?replay=<路径>&channel=<通道> 切源，渲染路径（runCurve）零改动，离线只保留总量上限不做时间窗口。验收：format-mf4 roundtrip 无损 + golden 读回，daemon 三分支测试，tsc/vite build 过。
-[ ] M5-06 feat(cal-core)：quirk 扩展点（外部配置填 trait，D-06）→ 验收：类 ECU 差异改配置不改代码，坏配置给可操作提示
+[x] M5-06 feat(cal-core)：quirk 扩展点（外部配置填 trait，D-06）→ 验收：类 ECU 差异改配置不改代码，坏配置给可操作提示
+    完成说明（2026-11-08）：cal-core::quirk——QuirkConfig（TOML，deny_unknown_fields + 字段全默认）与 Quirks trait（规范默认落在方法缺省实现），ConfiguredQuirks 把配置填进 trait。MVP 三个差异点：pad_dtos / dto_padding / page_echo（standard|short），选它们是因为 M5-07 可在 vcan 上从站侧复现。坏配置：拼错字段当场报且错误文本带原因、期望字段清单与指引。验收测试：两份 TOML 两种行为无代码改动、部分配置保留默认、错误提示三例。
 [ ] M5-07 feat(sim-ecu)：怪癖注入，复现 M5-06 的配置（前置 M5-06）→ 验收：注入的填充与回显差异在 vcan 上可复现
 [ ] M5-08 docs/test：真机复验——复测 M4 遗留的「未验」项（H-01–H-17 与写入类检查点）→ 验收：12 号记录表无「未验」残留
 [ ] M5-09 feat(bus-socketcan)：CAN-FD 收发与能力位，经典帧不回归 → 验收：H-02 能力位与驱动一致，FD 帧双向收发通
