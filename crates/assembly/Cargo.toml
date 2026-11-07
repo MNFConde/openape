@@ -1,0 +1,16 @@
+[package]
+name = "openape-assembly"
+description = "装配层：把多个信息源拼在一起，唯一允许指名具体后端的位置"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+openape-cal-core.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+openape-format-a2l.workspace = true
+openape-format-elf.workspace = true

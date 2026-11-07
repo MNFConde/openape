@@ -20,6 +20,7 @@ openape-proto = { path = "crates/proto" }
 openape-bus = { path = "crates/bus" }
 openape-bus-socketcan = { path = "crates/bus-socketcan" }
 openape-xcp = { path = "crates/xcp" }
+openape-assembly = { path = "crates/assembly" }
 openape-session = { path = "crates/session" }
 openape-sim-ecu = { path = "crates/sim-ecu" }
 openape-daemon = { path = "crates/daemon" }
