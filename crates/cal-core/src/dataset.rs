@@ -156,7 +156,7 @@ impl Dataset {
                 .map(|entry| EntryWire {
                     symbol: entry.symbol.to_string(),
                     address: entry.address.to_string(),
-                    raw: hex_encode(&entry.raw),
+                    raw: crate::hex::encode(&entry.raw),
                 })
                 .collect(),
         };
@@ -356,7 +356,7 @@ impl EntryWire {
             field: "address",
             value: self.address.clone(),
         })?;
-        let raw = hex_decode(&self.raw).ok_or_else(|| DatasetError::BadField {
+        let raw = crate::hex::decode(&self.raw).ok_or_else(|| DatasetError::BadField {
             field: "raw",
             value: self.raw.clone(),
         })?;
@@ -373,28 +373,6 @@ fn parse_address(text: &str) -> Option<Address> {
         .strip_prefix("0x")
         .or_else(|| text.strip_prefix("0X"))?;
     u32::from_str_radix(digits, 16).ok().map(Address::new)
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push_str(&format!("{byte:02x}"));
-    }
-    out
-}
-
-fn hex_decode(text: &str) -> Option<Vec<u8>> {
-    if !text.len().is_multiple_of(2) {
-        return None;
-    }
-    let digits = text.as_bytes();
-    let mut out = Vec::with_capacity(text.len() / 2);
-    for pair in digits.chunks(2) {
-        let high = char::from(pair[0]).to_digit(16)?;
-        let low = char::from(pair[1]).to_digit(16)?;
-        out.push(u8::try_from(high * 16 + low).ok()?);
-    }
-    Some(out)
 }
 
 #[cfg(test)]
@@ -563,14 +541,5 @@ mod tests {
         let one = dataset(SourceMode::WithA2l, vec![entry("ka", 0x1000, &[1])]);
         let two = dataset(SourceMode::WithA2l, vec![entry("ka", 0x1000, &[1])]);
         assert!(diff(&one, &two).expect("同档可比").is_empty());
-    }
-
-    #[test]
-    fn hex_helpers_round_trip_and_reject_odd_input() {
-        assert_eq!(hex_encode(&[0x00, 0xFF, 0x10]), "00ff10");
-        assert_eq!(hex_decode("00ff10"), Some(vec![0x00, 0xFF, 0x10]));
-        assert_eq!(hex_decode("abc"), None, "奇数长度不是合法字节串");
-        assert_eq!(hex_decode("zz"), None, "非十六进制字符");
-        assert_eq!(hex_decode(""), Some(Vec::new()));
     }
 }

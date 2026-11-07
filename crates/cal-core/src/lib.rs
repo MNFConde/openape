@@ -12,6 +12,7 @@
 
 mod config;
 mod dataset;
+pub mod hex;
 mod ir;
 mod notice;
 mod time;

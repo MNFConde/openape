@@ -32,6 +32,7 @@ openape-daemon.workspace = true
 axum.workspace = true
 openape-sim-ecu.workspace = true
 openape-xcp.workspace = true
+openape-xcp-proto.workspace = true
 tokio = { workspace = true, features = ["process"] }
 
 [lints]

@@ -97,6 +97,26 @@ impl Session {
         self.master.read(address, len).await
     }
 
+    /// 写一段内存。写后读回由 master 负责，不一致即故障。
+    pub async fn write_raw(&mut self, address: Address, value: &[u8]) -> Result<(), Fault> {
+        self.master.write(address, value).await
+    }
+
+    /// 当前标定页号。
+    pub async fn cal_page(&mut self) -> Result<u8, Fault> {
+        self.master.cal_page().await
+    }
+
+    /// 切标定页（回读确认）。
+    pub async fn set_cal_page(&mut self, page: u8) -> Result<(), Fault> {
+        self.master.set_cal_page(page).await
+    }
+
+    /// 解锁被保护的资源。
+    pub async fn unlock(&mut self) -> Result<(), Fault> {
+        self.master.unlock().await
+    }
+
     /// 配置并启动 DAQ。从站随后按事件通道周期发帧。
     pub async fn configure_daq(&mut self, lists: &[DaqListSpec]) -> Result<DaqLayout, Fault> {
         self.master.configure_daq(lists).await
