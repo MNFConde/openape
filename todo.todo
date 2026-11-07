@@ -77,8 +77,10 @@
 [x] M4-17 docs：M4 收尾（12 号清单新增写入类第五节、dataset 与 CDF 说明、状态回写，并更正 gateway 方法名与 CAN-FD 的 MVP 归属）→ 验收：文档与实现、文档之间均无矛盾
 [ ] 未排期（无里程碑挂载）：CDF/CDFX 轴引用解析——`SW-AXIS-CONTS/SW-AXIS-CONT/SW-INSTANCE-REF` 目前整个跳过（曲线与 map 只导入取值、无自带轴）。动工条件：要曲线/map 的轴在界面可编辑时才排；验收：引用式轴与内联轴两种写法都能还原成轴序列
 [ ] M5 录制与离线重开分析 + 怪癖配置层 + 真机后端（CAN-FD 与复验）+ XCP-on-Ethernet + 交付面（17 项）
-[ ] M5-01 refactor(ui)：抽出数据源接口（实时流与文件同一入口），曲线页只经接口取数——离线与实时必须共用同一接口 → 验收：换成假数据源时组件零改动
-[ ] M5-02 feat(format-mf4)：crate 成立 + MDF4 写入（录制）→ 验收：产物能被 mf4-rs 与第三方工具读回，通道与时间戳与样本一致
+[x] M5-01 refactor(ui)：抽出数据源接口（实时流与文件同一入口），曲线页只经接口取数——离线与实时必须共用同一接口 → 验收：换成假数据源时组件零改动
+    完成说明（2026-11-08）：`ui/src/sample-source.ts` 定义 `SampleSource`（points() 出异步迭代）、`GrpcSampleSource`（DTO 布局知识收口在解码一处）、`ArraySampleSource`（给定点回放，兼作离线源原型）；main.ts 曲线组件只认接口，换源只动 import 与构造两行。未引入前端测试器（M5-14 才定前端检查），验收证据：tsc 与 vite build 通过，曲线路径无 gRPC 与 DataView 残留。
+[x] M5-02 feat(format-mf4)：crate 成立 + MDF4 写入（录制）→ 验收：产物能被 mf4-rs 与第三方工具读回，通道与时间戳与样本一致
+    完成说明（2026-11-08）：实现层用 mf4-rs 3.8.0 的 writer（块布局不手写），本 crate 管语义层（时间主通道、f64 物理值直存、行边界校验、收尾落盘）；单位文本未落盘（writer 无便捷路径，需要时补 ##TX + unit_addr），起始时间固定 0 保 golden 稳定。验收双证：mf4-rs api 读回逐条一致；script/verify-mf4.py 用 asammdf 读 fixtures/mf4/golden.minimal.mf4 逐条一致。已知缺口：mf4-rs 传递依赖 meval→nom 1.2.4 有 future-incompatible 编译警告（非漏洞），升级 mf4-rs 时盯住。
 [ ] M5-03 feat(session)：录制器（样本流 → MF4 + CSV，含背压与丢帧记账）→ 验收：一次采集落 MF4 与 CSV，样本数与指标一致
 [ ] M5-04 feat(session)：条件触发录制接录制器，统一 M4-11 的窗口导出出口（前置 M5-03）→ 验收：命中窗口与录制文件时间轴对齐，未命中零落盘
 [ ] M5-05 feat(format-mf4)：MDF4 读取 + 离线重开（前置 M5-01、M5-02）→ 验收：离线曲线与实时曲线走同一条渲染路径

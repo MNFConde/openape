@@ -17,6 +17,7 @@ openape-format-a2l = { path = "crates/format-a2l" }
 openape-format-dbc = { path = "crates/format-dbc" }
 openape-format-elf = { path = "crates/format-elf" }
 openape-format-cdf = { path = "crates/format-cdf" }
+openape-format-mf4 = { path = "crates/format-mf4" }
 openape-xcp-proto = { path = "crates/xcp-proto" }
 openape-proto = { path = "crates/proto" }
 openape-bus = { path = "crates/bus" }
@@ -39,6 +40,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio-stream = "0.1"
 http-body-util = "0.1"
+mf4-rs = "3.8"
 socketcan = { version = "4", default-features = false, features = ["netlink", "tokio"] }
 thiserror = "2"
 toml = "1"
