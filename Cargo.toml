@@ -14,6 +14,7 @@ authors = ["OpenAPE contributors"]
 openape-diag = { path = "crates/diag" }
 openape-cal-core = { path = "crates/cal-core" }
 openape-format-a2l = { path = "crates/format-a2l" }
+openape-format-dbc = { path = "crates/format-dbc" }
 openape-format-elf = { path = "crates/format-elf" }
 openape-xcp-proto = { path = "crates/xcp-proto" }
 openape-proto = { path = "crates/proto" }

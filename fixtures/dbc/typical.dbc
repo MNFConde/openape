@@ -1,0 +1,17 @@
+VERSION "openape fixture"
+
+NS_ :
+
+BS_:
+
+BU_: ECU TESTER
+
+BO_ 256 EngineData: 8 ECU
+ SG_ EngineSpeed : 0|16@1+ (0.25,0) [0|16383.75] "rpm" TESTER
+ SG_ CoolantTemp : 16|8@1- (1,-40) [-40|215] "degC" TESTER
+ SG_ ThrottlePos : 24|8@1+ (0.4,0) [0|100] "%" TESTER
+ SG_ BigEndianMix : 39|12@0+ (1,0) [0|4095] "" TESTER
+
+BO_ 512 VehicleStatus: 4 ECU
+ SG_ Gear : 7|4@0+ (1,0) [0|15] "" TESTER
+ SG_ BrakeOn : 3|1@1+ (1,0) [0|1] "" TESTER
