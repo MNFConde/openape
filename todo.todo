@@ -22,7 +22,7 @@
 [x] M1-13 test：vcan 全链路集成测试（sim-ecu + session + cli 子进程）→ 验收：三命令连跑 3 次输出一致
 [x] M1-14 docs：真机抽验检查点矩阵（周立功 CAN-FD + 目标 ECU）+ 状态回写 AGENTS.md 与 requirements 的 M1 起建清单 → 验收：抽验项可逐条打勾
 
-[ ] M2 cal-core IR + A2L 前端 + DAQ 流 + gRPC 推流 + Web 最小曲线页（15 项）
+[x] M2 cal-core IR + A2L 前端 + DAQ 流 + gRPC 推流 + Web 最小曲线页（15 项）→ vcan 上全链路已验证，真机项留在 12 号清单
 [x] M2-01 feat(cal-core)：IR 变量树与观测/标定量模型（语义字段一律 Option，缺失显 raw）→ 验收：仅 ELF 档能无填充地表达
 [x] M2-02 feat(cal-core)：Curve/Map/轴模型（轴为独立实体、支持 N:1 共享）+ 10 号 RFC 的 R1–R7 校验 → 验收：golden 反例逐条被拒
 [x] M2-03 feat(cal-core)：工程配置格式（轴值绑定；带版本字段、容忍未知字段、轴长与值维度不匹配即拒绝）→ 验收：旧版配置可读，坏配置给可操作提示
