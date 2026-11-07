@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use openape_bus::{Bus, CanFrame, CanId};
 use openape_diag::{Domain, Fault, FaultCode, Metrics, Severity};
-use openape_xcp_proto::{Command, ErrorCode, Response, resource};
+use openape_xcp_proto::{Command, ErrorCode, ExampleSeedKey, Response, SeedKey, resource};
 
 pub mod daq;
 
@@ -19,6 +19,9 @@ use daq::{DaqState, OdtEntry};
 
 /// 虚拟内存大小（64 KiB），够放标定页与观测量。
 pub const MEM_SIZE: usize = 0x10000;
+
+/// 标定页数。页 0 与页 1 各有一份独立内存。
+pub const PAGE_COUNT: usize = 2;
 
 /// 从站参数。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,24 +55,46 @@ impl SimEcuConfig {
 #[derive(Debug)]
 pub struct SimEcu {
     config: SimEcuConfig,
-    memory: Vec<u8>,
+    /// 标定页内存：页 0 与页 1 各一份。分开存是页切换的唯一意义——若共用一块
+    /// 内存，切页就只是换了个号码牌，页间对比也就无从谈起。
+    pages: [Vec<u8>; PAGE_COUNT],
+    /// 当前活动页。读写与 DAQ 都走这一页。
+    page: usize,
     mta: u32,
-    page: u8,
     running: bool,
     daq: DaqState,
+    /// 资源保护算法。`None` 表示不保护，是自研从站的默认形态。
+    protection: Option<Arc<dyn SeedKey>>,
+    /// 已发出、尚未用掉的种子。`None` 表示没取过或已被用掉。
+    pending_seed: Option<Vec<u8>>,
+    /// 取过几次种子。种子随次数变化，重放上一次的密钥不会成功。
+    seed_counter: u32,
+    /// 是否已解锁。
+    unlocked: bool,
 }
 
 impl SimEcu {
-    /// 新建，内存清零。
+    /// 新建，内存清零，不启用资源保护。
     pub fn new(config: SimEcuConfig) -> Self {
         Self {
             config,
-            memory: vec![0; MEM_SIZE],
-            mta: 0,
+            pages: [vec![0; MEM_SIZE], vec![0; MEM_SIZE]],
             page: 0,
+            mta: 0,
             running: false,
             daq: DaqState::default(),
+            protection: None,
+            pending_seed: None,
+            seed_counter: 0,
+            unlocked: false,
         }
+    }
+
+    /// 启用资源保护。解锁前写入一律被拒——这是真 ECU 的常态，缓冲器等由
+    /// 调用方决定装哪个算法。
+    pub fn with_protection(mut self, algorithm: Arc<dyn SeedKey>) -> Self {
+        self.protection = Some(algorithm);
+        self
     }
 
     /// 配置。
@@ -77,19 +102,20 @@ impl SimEcu {
         &self.config
     }
 
-    /// 预置内存内容，供测试与夹具初始化。
-    pub fn poke(&mut self, address: u32, data: &[u8]) {
-        let start = address as usize;
-        let end = start + data.len();
-        if end <= self.memory.len() {
-            self.memory[start..end].copy_from_slice(data);
-        }
+    /// 当前活动页的内存。
+    fn memory(&self) -> &[u8] {
+        &self.pages[self.page]
     }
 
-    /// 读内存，测试断言用。
+    /// 预置内存内容，供测试与夹具初始化。写的是当前活动页。
+    pub fn poke(&mut self, address: u32, data: &[u8]) {
+        let _ = self.write_memory(address, data);
+    }
+
+    /// 读内存，测试断言用。读的是当前活动页。
     pub fn peek(&self, address: u32, len: usize) -> &[u8] {
         let start = address as usize;
-        &self.memory[start..start + len]
+        &self.memory()[start..start + len]
     }
 
     /// 推进一个事件 tick，返回本 tick 要发的 DTO 与丢弃数。
@@ -113,10 +139,11 @@ impl SimEcu {
     fn dto_of(&self, plan: &daq::FramePlan, id: CanId) -> Option<CanFrame> {
         let mut data = Vec::with_capacity(1 + plan.entries.len() * 4);
         data.push(plan.pid);
+        let memory = self.memory();
         for entry in &plan.entries {
             let start = entry.address as usize;
             let end = start.checked_add(usize::from(entry.size))?;
-            data.extend_from_slice(self.memory.get(start..end)?);
+            data.extend_from_slice(memory.get(start..end)?);
         }
         CanFrame::new(id, data)
     }
@@ -184,6 +211,9 @@ impl SimEcu {
                 }
             }
             Command::Download { len: _, data } => {
+                if let Err(error) = self.require_unlocked() {
+                    return err(error);
+                }
                 if !self.write_memory(self.mta, &data) {
                     return err(ErrorCode::OutOfRange);
                 }
@@ -196,6 +226,9 @@ impl SimEcu {
                 address,
                 data,
             } => {
+                if let Err(error) = self.require_unlocked() {
+                    return err(error);
+                }
                 if address_extension != 0 {
                     return err(ErrorCode::OutOfRange);
                 }
@@ -206,12 +239,12 @@ impl SimEcu {
                 }
             }
             // pyXCP 取 response[2]（PID 与保留位之后），单字节标准响应它读不到第 3 字节
-            Command::GetCalPage { .. } => ok(code, vec![0x00, 0x00, self.page]),
+            Command::GetCalPage { .. } => ok(code, vec![0x00, 0x00, self.page as u8]),
             Command::SetCalPage { page, segment, .. } => {
-                if segment != 0 || page > 1 {
+                if segment != 0 || page as usize >= PAGE_COUNT {
                     return err(ErrorCode::PageNotValid);
                 }
-                self.page = page;
+                self.page = page as usize;
                 ok(code, vec![])
             }
             Command::GetDaqProcessorInfo => ok(
@@ -276,29 +309,74 @@ impl SimEcu {
                 ok(code, vec![])
             }
             Command::ClearDaqList { daq_list } => reply(code, self.daq.clear_list(daq_list)),
-            // 资源保护是可选命令：没配置密钥算法就从站不认它，别假装成功。
-            // 默认示例算法与解锁状态机见 M4-03。
-            Command::GetSeed { .. } | Command::Unlock { .. } => err(ErrorCode::CmdUnknown),
+            Command::GetSeed { mode, resource } => self.get_seed(code, mode, resource),
+            Command::Unlock { len, key } => self.unlock(code, len, &key),
         }
+    }
+
+    /// 没配保护算法就不能解锁，所以也不许写。
+    fn require_unlocked(&self) -> Result<(), ErrorCode> {
+        match (&self.protection, self.unlocked) {
+            (Some(_), false) => Err(ErrorCode::AccessLocked),
+            _ => Ok(()),
+        }
+    }
+
+    /// 发种子。没结论保护算法时按可选命令缺席处理，不假装成功。
+    fn get_seed(&mut self, code: u8, mode: u8, resource: u8) -> Response {
+        if self.protection.is_none() {
+            return err(ErrorCode::CmdUnknown);
+        }
+        if mode > 1 || resource.count_ones() != 1 {
+            return err(ErrorCode::CmdSyntax);
+        }
+        if mode == 1 {
+            // 种子一次发得完，续接请求没有剩余字节可给。
+            return ok(code, vec![0x00]);
+        }
+        self.seed_counter = self.seed_counter.wrapping_add(1);
+        let seed = ExampleSeedKey::seed(self.seed_counter);
+        let mut payload = vec![seed.len() as u8];
+        payload.extend_from_slice(&seed);
+        self.pending_seed = Some(seed.to_vec());
+        ok(code, payload)
+    }
+
+    /// 验密钥并置解锁位。密钥错就作废这一次的种子，必须重新取——留着它等于
+    /// 给了无限次试错机会。
+    fn unlock(&mut self, code: u8, len: u8, key: &[u8]) -> Response {
+        let Some(algorithm) = self.protection.clone() else {
+            return err(ErrorCode::CmdUnknown);
+        };
+        let Some(seed) = self.pending_seed.take() else {
+            return err(ErrorCode::Sequence);
+        };
+        if len as usize != seed.len() || key != algorithm.key(&seed).as_slice() {
+            return err(ErrorCode::AccessLocked);
+        }
+        self.unlocked = true;
+        ok(code, vec![resource::CAL_PAG])
     }
 
     fn read_memory(&self, address: u32, len: u8) -> Option<Vec<u8>> {
         let start = address as usize;
         let end = start.checked_add(len as usize)?;
-        (end <= self.memory.len()).then(|| self.memory[start..end].to_vec())
+        let memory = self.memory();
+        (end <= memory.len()).then(|| memory[start..end].to_vec())
     }
 
-    /// 写内存。越界整笔拒绝，不写半截——半截写入会让 master 的写后读回
-    /// 对不上，却查不出是哪一半没写进去。
+    /// 写当前活动页。越界整笔拒绝，不写半截——半截写入会让 master 的写后
+    /// 读回对不上，却查不出是哪一半没写进去。
     fn write_memory(&mut self, address: u32, data: &[u8]) -> bool {
         let start = address as usize;
         let Some(end) = start.checked_add(data.len()) else {
             return false;
         };
-        if end > self.memory.len() {
+        let page = &mut self.pages[self.page];
+        if end > page.len() {
             return false;
         }
-        self.memory[start..end].copy_from_slice(data);
+        page[start..end].copy_from_slice(data);
         true
     }
 }
@@ -917,6 +995,217 @@ mod tests {
             other => panic!("期望越界错误，实际 {other:?}"),
         }
         assert_eq!(ecu.peek((MEM_SIZE - 1) as u32, 1), &[0x22], "越界不写半截");
+    }
+
+    #[test]
+    fn two_pages_do_not_leak_into_each_other() {
+        let mut ecu = ecu();
+        ecu.poke(0x1000, &[1, 2]);
+        expect_ok(
+            send(
+                &mut ecu,
+                Command::SetCalPage {
+                    mode: 0,
+                    segment: 0,
+                    page: 1,
+                },
+            ),
+            CommandCode::SetCalPage,
+        );
+        assert_eq!(ecu.peek(0x1000, 2), &[0, 0], "页 1 是另一份内存");
+
+        ecu.poke(0x1000, &[9, 9]);
+        expect_ok(
+            send(
+                &mut ecu,
+                Command::SetCalPage {
+                    mode: 0,
+                    segment: 0,
+                    page: 0,
+                },
+            ),
+            CommandCode::SetCalPage,
+        );
+        assert_eq!(ecu.peek(0x1000, 2), &[1, 2], "切回页 0 不串扰");
+
+        // 经总线的写入同样只落在活动页。
+        expect_ok(
+            send(
+                &mut ecu,
+                Command::SetMta {
+                    address_extension: 0,
+                    address: 0x1000,
+                },
+            ),
+            CommandCode::SetMta,
+        );
+        expect_ok(
+            send(
+                &mut ecu,
+                Command::Download {
+                    len: 1,
+                    data: vec![0x55],
+                },
+            ),
+            CommandCode::Download,
+        );
+        assert_eq!(ecu.peek(0x1000, 1), &[0x55]);
+        expect_ok(
+            send(
+                &mut ecu,
+                Command::SetCalPage {
+                    mode: 0,
+                    segment: 0,
+                    page: 1,
+                },
+            ),
+            CommandCode::SetCalPage,
+        );
+        assert_eq!(ecu.peek(0x1000, 2), &[9, 9], "页 0 的写入不影响页 1");
+    }
+
+    /// 带保护的从站。示例算法与主站侧共用，解锁才算通过。
+    fn protected_ecu() -> SimEcu {
+        SimEcu::new(SimEcuConfig::default_ids()).with_protection(Arc::new(ExampleSeedKey))
+    }
+
+    /// 取一次种子并返回它。
+    fn take_seed(ecu: &mut SimEcu) -> Vec<u8> {
+        let payload = expect_ok(
+            send(
+                ecu,
+                Command::GetSeed {
+                    mode: 0,
+                    resource: resource::CAL_PAG,
+                },
+            ),
+            CommandCode::GetSeed,
+        );
+        assert_eq!(
+            payload[0] as usize,
+            payload.len() - 1,
+            "响应首字节是种子长度"
+        );
+        payload[1..].to_vec()
+    }
+
+    fn write_probe(ecu: &mut SimEcu) -> Response {
+        send(
+            ecu,
+            Command::Download {
+                len: 2,
+                data: vec![1, 2],
+            },
+        )
+    }
+
+    #[test]
+    fn writes_are_refused_until_unlocked() {
+        let mut ecu = protected_ecu();
+        expect_ok(
+            send(
+                &mut ecu,
+                Command::SetMta {
+                    address_extension: 0,
+                    address: 0x1000,
+                },
+            ),
+            CommandCode::SetMta,
+        );
+        match write_probe(&mut ecu) {
+            Response::Err { code } => assert_eq!(code, ErrorCode::AccessLocked as u8),
+            other => panic!("未解锁的写入要被拒，实际 {other:?}"),
+        }
+        assert_eq!(ecu.peek(0x1000, 2), &[0, 0], "被拒的写入不该落字节");
+
+        let seed = take_seed(&mut ecu);
+        let key = ExampleSeedKey.key(&seed);
+        let status = expect_ok(
+            send(
+                &mut ecu,
+                Command::Unlock {
+                    len: key.len() as u8,
+                    key,
+                },
+            ),
+            CommandCode::Unlock,
+        );
+        assert_eq!(status, vec![resource::CAL_PAG], "解锁后报标定页资源位");
+
+        expect_ok(write_probe(&mut ecu), CommandCode::Download);
+        assert_eq!(ecu.peek(0x1000, 2), &[1, 2], "解锁后写入生效");
+    }
+
+    #[test]
+    fn a_wrong_key_spends_the_seed_and_keeps_the_slave_locked() {
+        let mut ecu = protected_ecu();
+        let seed = take_seed(&mut ecu);
+        let wrong = vec![0u8; seed.len()];
+        match send(
+            &mut ecu,
+            Command::Unlock {
+                len: wrong.len() as u8,
+                key: wrong,
+            },
+        ) {
+            Response::Err { code } => assert_eq!(code, ErrorCode::AccessLocked as u8),
+            other => panic!("错误密钥要被拒，实际 {other:?}"),
+        }
+
+        // 种子已作废：随后即便交上正确密钥也只是顺序错误，不能开门。
+        let key = ExampleSeedKey.key(&seed);
+        match send(
+            &mut ecu,
+            Command::Unlock {
+                len: key.len() as u8,
+                key,
+            },
+        ) {
+            Response::Err { code } => assert_eq!(code, ErrorCode::Sequence as u8),
+            other => panic!("种子作废后再交密钥属于顺序错误，实际 {other:?}"),
+        }
+
+        expect_ok(
+            send(
+                &mut ecu,
+                Command::SetMta {
+                    address_extension: 0,
+                    address: 0x1000,
+                },
+            ),
+            CommandCode::SetMta,
+        );
+        match write_probe(&mut ecu) {
+            Response::Err { code } => assert_eq!(code, ErrorCode::AccessLocked as u8),
+            other => panic!("仍在锁内，写入要被拒，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn protections_without_a_seed_are_reported_as_optional_commands() {
+        // 不保护是默认形态：这两条可选命令缺席，而不是假装成功。
+        let mut ecu = ecu();
+        for response in [
+            send(
+                &mut ecu,
+                Command::GetSeed {
+                    mode: 0,
+                    resource: resource::CAL_PAG,
+                },
+            ),
+            send(
+                &mut ecu,
+                Command::Unlock {
+                    len: 1,
+                    key: vec![0],
+                },
+            ),
+        ] {
+            match response {
+                Response::Err { code } => assert_eq!(code, ErrorCode::CmdUnknown as u8),
+                other => panic!("未启用保护时命令缺席，实际 {other:?}"),
+            }
+        }
     }
 
     #[test]
