@@ -112,3 +112,15 @@ fn a_variable_without_role_is_refused_with_a_reason() {
         "要点名是哪个变量：{text}"
     );
 }
+
+#[test]
+fn export_matches_the_golden_file_byte_for_byte() {
+    // 验收（M3-05）：档二 golden。重构只要改变导出件的任何一个字节就算
+    // 回归——A2L 是要交给 CANape/INCA 读的，写法漂移会让人以为变量变了。
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/a2l/elf-export-golden.a2l"
+    );
+    let expected = std::fs::read_to_string(path).expect("golden 必需入库");
+    assert_eq!(exported(), expected, "导出件与 golden 不一致");
+}

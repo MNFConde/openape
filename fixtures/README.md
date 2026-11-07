@@ -5,7 +5,7 @@
 | 目录 | 内容 | 来源 |
 |---|---|---|
 | `elf/` | 覆盖标定/观测典型形态的 C 源码（常量、二维 Map、双轴、结构体、位域、枚举、指针、函数指针、跨 CU 同名 static、被优化折叠的 static const），以及编好的 `test.elf` 与 `stripped.elf` | M0-4 spike |
-| `a2l/` | 轴绑定导出的 golden A2L 片段 | M0-5 RFC 第 8 节 |
+| `a2l/` | 轴绑定导出的 golden A2L 片段（`axis-binding-golden.a2l`）与档二 golden（`elf-export-golden.a2l`：`test.elf` 全量导出） | M0-5 RFC 第 8 节 / M3-05 |
 
 ## ELF 夹具：产物入库，源码随改随编
 
@@ -34,3 +34,5 @@ rm -f *.o
 ## A2L 夹具
 
 `a2l/axis-binding-golden.a2l` 是 [10-axis-binding-rfc](../docs/10-axis-binding-rfc.md) 第 8 节的期望导出结果，用 `a2lfile` 严格模式校验（`load(path, None, true)`）应为零警告。
+
+`a2l/elf-export-golden.a2l` 是 `elf/test.elf` 走完"抽 DWARF → 进 IR → 指定角色 → 空轴绑定导出"后的完整输出，由 `crates/format-a2l/tests/elf_to_a2l.rs` 做字节级比对。改了导出格式或换了夹具，这条 golden 必须一起更新，并在提交里说明是哪一种。
