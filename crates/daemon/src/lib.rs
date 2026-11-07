@@ -5,5 +5,6 @@
 
 #![forbid(unsafe_code)]
 
+pub mod boot;
 pub mod server;
 pub mod service;

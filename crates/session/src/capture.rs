@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use openape_bus::{Bus, BusError, CanId};
+use openape_diag::Metrics;
 use openape_xcp::DaqLayout;
 use tokio::task::JoinHandle;
 
@@ -57,9 +58,14 @@ pub(crate) fn spawn(
     bus: Arc<dyn Bus>,
     response_id: CanId,
     layout: DaqLayout,
-    capacity: usize,
+    config: &CaptureConfig,
 ) -> DaqCapture {
-    let stream = Arc::new(DaqStream::new(capacity));
+    let capacity = config.capacity;
+    let metrics = config.metrics.clone();
+    let stream = Arc::new(match metrics {
+        Some(metrics) => DaqStream::with_metrics(capacity, metrics),
+        None => DaqStream::new(capacity),
+    });
     let paused = Arc::new(AtomicBool::new(false));
     let worker = Arc::clone(&stream);
     let gate = Arc::clone(&paused);
@@ -111,18 +117,30 @@ async fn pump(
     }
 }
 
-/// 采集时序参数。目前只有容量，留出名目以便日后调。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// 采集参数。
+#[derive(Debug, Clone)]
 pub struct CaptureConfig {
     /// 缓冲容量（样本数）。
     pub capacity: usize,
+    /// 指标出口。给了它，`push` 才会更新 `daq_frames` 与 `queue_depth`——
+    /// 不挂的话指标恒为零，看起来像"没在采集"。
+    pub metrics: Option<Arc<Metrics>>,
 }
 
 impl Default for CaptureConfig {
     fn default() -> Self {
         Self {
             capacity: DEFAULT_CAPACITY,
+            metrics: None,
         }
+    }
+}
+
+impl CaptureConfig {
+    /// 顺带更新指标出口。
+    pub fn with_metrics(mut self, metrics: Arc<Metrics>) -> Self {
+        self.metrics = Some(metrics);
+        self
     }
 }
 
@@ -208,7 +226,7 @@ mod tests {
             bus,
             CanId::standard(0x601).expect("合法"),
             layout_with(0, 3),
-            8,
+            &CaptureConfig::default(),
         );
         let mut reader = capture.stream().subscribe();
         let sample = tokio::time::timeout(Duration::from_secs(2), reader.recv())
@@ -232,7 +250,7 @@ mod tests {
             bus,
             CanId::standard(0x601).expect("合法"),
             layout_with(0, 1),
-            8,
+            &CaptureConfig::default(),
         );
         let mut reader = capture.stream().subscribe();
         let sample = tokio::time::timeout(Duration::from_secs(2), reader.recv())

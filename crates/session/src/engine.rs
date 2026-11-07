@@ -119,7 +119,7 @@ impl Session {
             Arc::clone(&self.bus),
             self.master.config().response_id,
             layout,
-            config.capacity,
+            &config,
         )
     }
 

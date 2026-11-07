@@ -9,7 +9,7 @@ use openape_session::ChannelProbe as SessionProbe;
 use serde::Serialize;
 
 /// 把会话层的探测结果转成契约类型。
-pub(crate) fn probe_report(probe: SessionProbe) -> ChannelProbe {
+pub fn probe_report(probe: SessionProbe) -> ChannelProbe {
     ChannelProbe {
         channel: probe.channel,
         backend: probe.backend.to_owned(),
@@ -22,7 +22,7 @@ pub(crate) fn probe_report(probe: SessionProbe) -> ChannelProbe {
 }
 
 /// 把建链结果转成契约类型。协议版本缺省时留 `None`，不补 0.0。
-pub(crate) fn connect_info(
+pub fn connect_info(
     resource: u8,
     comm_mode_basic: u8,
     max_cto: u16,
@@ -48,7 +48,7 @@ fn version((major, minor): (u8, u8)) -> ProtocolVersion {
 }
 
 /// 读结果。数据以十六进制串呈现而不是 `bytes`：JSON 里的 base64 没人看得懂。
-pub(crate) fn read_report(channel: String, address: String, len: u16, data: &[u8]) -> ReadResponse {
+pub fn read_report(channel: String, address: String, len: u16, data: &[u8]) -> ReadResponse {
     ReadResponse {
         channel,
         address,
@@ -62,7 +62,7 @@ pub(crate) fn read_report(channel: String, address: String, len: u16, data: &[u8
 }
 
 /// 按 `--json` 选结构化或人类可读，两者共用同一份值，不会漂移。
-pub(crate) fn render<T: Serialize>(
+pub fn render<T: Serialize>(
     json: bool,
     value: &T,
     human: impl FnOnce() -> String,

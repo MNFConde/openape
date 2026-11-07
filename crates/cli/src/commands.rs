@@ -14,7 +14,7 @@ use crate::output::{connect_info, probe_report, read_report, render};
 use crate::usage_fault;
 
 /// `probe bus`：列通道，可选探测一条。
-pub(crate) async fn probe_bus(config_channel: Option<&str>, json: bool) -> Result<String, Fault> {
+pub async fn probe_bus(config_channel: Option<&str>, json: bool) -> Result<String, Fault> {
     let channels = list_channels();
     let probed = match config_channel {
         Some(channel) => Some(probe_report(probe_channel(channel)?)),
@@ -25,7 +25,7 @@ pub(crate) async fn probe_bus(config_channel: Option<&str>, json: bool) -> Resul
 }
 
 /// 通道报告的双模渲染，直连与经 daemon 共用。
-pub(crate) fn render_bus(json: bool, report: &BusReport) -> Result<String, Fault> {
+pub fn render_bus(json: bool, report: &BusReport) -> Result<String, Fault> {
     render(json, report, || {
         let mut out = format!("通道 {} 条", report.channels.len());
         if report.channels.is_empty() {
@@ -50,7 +50,7 @@ pub(crate) fn render_bus(json: bool, report: &BusReport) -> Result<String, Fault
 }
 
 /// `probe xcp`：建链后立刻断链，只报能力。
-pub(crate) async fn probe_xcp(
+pub async fn probe_xcp(
     channel: &str,
     tx_id: u32,
     rx_id: u32,
@@ -76,7 +76,7 @@ pub(crate) async fn probe_xcp(
 }
 
 /// `read`：读一段内存并打印。
-pub(crate) async fn read_memory(
+pub async fn read_memory(
     channel: &str,
     address: u32,
     len: u16,
@@ -102,7 +102,7 @@ pub(crate) async fn read_memory(
 }
 
 /// 把命令行参数变成会话配置，顺手校验标识符范围。
-pub(crate) fn session_config(
+pub fn session_config(
     channel: &str,
     tx_id: u32,
     rx_id: u32,
@@ -124,14 +124,10 @@ fn to_standard_id(raw: u32, flag: &str) -> Result<u16, Fault> {
 }
 
 /// `--via-daemon` 不带值时的默认地址。
-pub(crate) const DAEMON_DEFAULT: &str = "http://127.0.0.1:47711";
+pub const DAEMON_DEFAULT: &str = "http://127.0.0.1:47711";
 
 /// 经 daemon 探测通道：daemon 已经拿着设备锁，这里只是问它要答案。
-pub(crate) async fn probe_bus_via(
-    url: &str,
-    channel: Option<&str>,
-    json: bool,
-) -> Result<String, Fault> {
+pub async fn probe_bus_via(url: &str, channel: Option<&str>, json: bool) -> Result<String, Fault> {
     let mut client = connect(url).await?;
     let channels = client
         .list_channels(openape_proto::Empty {})
@@ -156,12 +152,7 @@ pub(crate) async fn probe_bus_via(
 }
 
 /// 经 daemon 读内存。读之前 daemon 会让采集泵让开接收端。
-pub(crate) async fn read_via(
-    url: &str,
-    address: u32,
-    len: u16,
-    json: bool,
-) -> Result<String, Fault> {
+pub async fn read_via(url: &str, address: u32, len: u16, json: bool) -> Result<String, Fault> {
     if len == 0 {
         return Err(usage_fault("--len 必须大于 0".into()));
     }
@@ -178,7 +169,7 @@ pub(crate) async fn read_via(
 }
 
 /// 经 daemon 看会话状态：它建好链了，就不必我们再连一次。
-pub(crate) async fn probe_xcp_via(url: &str, channel: &str, json: bool) -> Result<String, Fault> {
+pub async fn probe_xcp_via(url: &str, channel: &str, json: bool) -> Result<String, Fault> {
     let mut client = connect(url).await?;
     let status = client
         .get_session(openape_proto::Empty {})
@@ -219,7 +210,7 @@ fn daemon_fault(message: impl ToString) -> Fault {
 }
 
 /// 建链报告的双模渲染，两条路径共用，输出不会漂移。
-pub(crate) fn render_connect(json: bool, report: &ConnectReport) -> Result<String, Fault> {
+pub fn render_connect(json: bool, report: &ConnectReport) -> Result<String, Fault> {
     let channel = &report.channel;
     let info = report.info.as_ref();
     render(json, report, || {
@@ -234,10 +225,7 @@ pub(crate) fn render_connect(json: bool, report: &ConnectReport) -> Result<Strin
 }
 
 /// 读结果的双模渲染。
-pub(crate) fn render_read(
-    json: bool,
-    report: &openape_proto::ReadResponse,
-) -> Result<String, Fault> {
+pub fn render_read(json: bool, report: &openape_proto::ReadResponse) -> Result<String, Fault> {
     render(json, report, || {
         format!("{} {} = [{}]", report.address, report.len, report.data_hex)
     })

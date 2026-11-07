@@ -5,13 +5,11 @@
 
 #![forbid(unsafe_code)]
 
-mod commands;
-mod output;
-
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use openape_diag::{Fault, FaultCode, Severity, Verbosity, log};
+use openape_cli::commands;
+use openape_diag::{Fault, Verbosity, log};
 
 #[derive(Debug, Parser)]
 #[command(name = "openape", version, about = "XCP 标定与观测工具")]
@@ -113,44 +111,24 @@ fn parse_u32(text: &str) -> Result<u32, std::num::ParseIntError> {
     }
 }
 
-/// 命令行用法错误。归内部域：这不是 ECU 或总线的问题。
-pub(crate) fn usage_fault(message: String) -> Fault {
-    Fault::new(
-        FaultCode::new(openape_diag::Domain::Internal, 1).expect("序号 1 合法"),
-        Severity::Error,
-        message,
-    )
-    .with_hint("用 `openape <命令> --help` 查看参数")
-}
-
 async fn run(cli: &Cli) -> Result<String, Fault> {
     match &cli.command {
-        Command::Probe { target } => match target {
-            ProbeTarget::Bus(args) => match cli.via_daemon.as_deref() {
-                Some(url) => commands::probe_bus_via(url, args.channel.as_deref(), cli.json).await,
-                None => commands::probe_bus(args.channel.as_deref(), cli.json).await,
-            },
-            ProbeTarget::Xcp(args) => match cli.via_daemon.as_deref() {
-                Some(url) => commands::probe_xcp_via(url, &args.channel, cli.json).await,
-                None => {
-                    commands::probe_xcp(
-                        &args.channel,
-                        args.tx_id,
-                        args.rx_id,
-                        args.timeout_ms,
-                        cli.json,
-                    )
-                    .await
-                }
-            },
+        Command::Probe { target } => probe(cli, target).await,
+        Command::Read(args) => read(cli, args).await,
+    }
+}
+
+async fn probe(cli: &Cli, target: &ProbeTarget) -> Result<String, Fault> {
+    match target {
+        ProbeTarget::Bus(args) => match cli.via_daemon.as_deref() {
+            Some(url) => commands::probe_bus_via(url, args.channel.as_deref(), cli.json).await,
+            None => commands::probe_bus(args.channel.as_deref(), cli.json).await,
         },
-        Command::Read(args) => match cli.via_daemon.as_deref() {
-            Some(url) => commands::read_via(url, args.address, args.len, cli.json).await,
+        ProbeTarget::Xcp(args) => match cli.via_daemon.as_deref() {
+            Some(url) => commands::probe_xcp_via(url, &args.channel, cli.json).await,
             None => {
-                commands::read_memory(
+                commands::probe_xcp(
                     &args.channel,
-                    args.address,
-                    args.len,
                     args.tx_id,
                     args.rx_id,
                     args.timeout_ms,
@@ -159,6 +137,24 @@ async fn run(cli: &Cli) -> Result<String, Fault> {
                 .await
             }
         },
+    }
+}
+
+async fn read(cli: &Cli, args: &ReadArgs) -> Result<String, Fault> {
+    match cli.via_daemon.as_deref() {
+        Some(url) => commands::read_via(url, args.address, args.len, cli.json).await,
+        None => {
+            commands::read_memory(
+                &args.channel,
+                args.address,
+                args.len,
+                args.tx_id,
+                args.rx_id,
+                args.timeout_ms,
+                cli.json,
+            )
+            .await
+        }
     }
 }
 
