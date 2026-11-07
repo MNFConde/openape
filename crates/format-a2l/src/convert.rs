@@ -17,7 +17,7 @@ use openape_cal_core::{
 
 use crate::error::Error;
 use crate::layout::{byte_order, elem_of_deposit, object_byte_order};
-use crate::notice::Notice;
+use openape_cal_core::Notice;
 
 /// 转换过程中的累积状态。
 struct Builder<'a> {

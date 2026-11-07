@@ -15,11 +15,10 @@
 mod convert;
 mod error;
 mod layout;
-mod notice;
 mod writer;
 
 pub use error::Error;
-pub use notice::{Notice, Severity};
+pub use openape_cal_core::{Notice, NoticeSeverity as Severity};
 
 use openape_cal_core::{AxisBinding, VariableTree};
 

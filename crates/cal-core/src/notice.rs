@@ -1,4 +1,4 @@
-//! 读入期提示：不阻断加载，但用户该知道的事。
+//! 读入期提示：不阻断加载，但用户该知道的事。两个信息源前端（A2L / ELF）共用。
 //!
 //! 与错误分开是刻意的——真实 ECU 的 A2L 常带几百条警告，把它们当错误会
 //! 让软件对着一份能用的文件罢工；但静默丢掉又会让用户以为语义完整。
@@ -8,7 +8,7 @@ use serde::Serialize;
 /// 提示的严重度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Severity {
+pub enum NoticeSeverity {
     /// 信息：读到了但做了降级处理。
     Info,
     /// 警告：语义或对象被跳过，结果能用但不完整。
@@ -18,7 +18,7 @@ pub enum Severity {
 /// 一条读入期提示。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Notice {
-    severity: Severity,
+    severity: NoticeSeverity,
     /// 来源：`a2lfile` 或具体对象名。
     subject: String,
     message: String,
@@ -27,15 +27,19 @@ pub struct Notice {
 impl Notice {
     /// 信息级提示。
     pub fn info(subject: impl Into<String>, message: impl Into<String>) -> Self {
-        Self::new(Severity::Info, subject, message)
+        Self::new(NoticeSeverity::Info, subject, message)
     }
 
     /// 警告级提示。
     pub fn warning(subject: impl Into<String>, message: impl Into<String>) -> Self {
-        Self::new(Severity::Warning, subject, message)
+        Self::new(NoticeSeverity::Warning, subject, message)
     }
 
-    fn new(severity: Severity, subject: impl Into<String>, message: impl Into<String>) -> Self {
+    fn new(
+        severity: NoticeSeverity,
+        subject: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
         Self {
             severity,
             subject: subject.into(),
@@ -44,7 +48,7 @@ impl Notice {
     }
 
     /// 严重度。
-    pub fn severity(&self) -> Severity {
+    pub fn severity(&self) -> NoticeSeverity {
         self.severity
     }
 
@@ -65,8 +69,8 @@ impl std::fmt::Display for Notice {
             f,
             "{} [{}] {}",
             match self.severity {
-                Severity::Info => "信息",
-                Severity::Warning => "警告",
+                NoticeSeverity::Info => "信息",
+                NoticeSeverity::Warning => "警告",
             },
             self.subject,
             self.message

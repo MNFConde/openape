@@ -8,7 +8,7 @@
 use a2lfile::{A2lObjectName, ByteOrderEnum, DataType, Module};
 use openape_cal_core::{ByteOrder, ElemType};
 
-use crate::notice::Notice;
+use openape_cal_core::Notice;
 
 /// 模块级字节序。缺省是 `MSB_LAST`，即大端。
 pub(crate) fn byte_order(module: &Module) -> ByteOrder {

@@ -12,6 +12,7 @@
 
 mod config;
 mod ir;
+mod notice;
 mod types;
 
 pub use config::{ConfigError, ProjectConfig, SCHEMA_VERSION};
@@ -21,4 +22,5 @@ pub use ir::{
     BoundValue, ByteOrder, Diagnostic, DuplicateSymbol, ElemType, EmptyUnit, Id, Range, Role, Rule,
     Scale, Semantics, Severity, Symbol, Unit, ValueKind, ValueSpec, Variable, VariableTree,
 };
+pub use notice::{Notice, NoticeSeverity};
 pub use types::{Address, ByteLen, Handle, ZeroLen};
