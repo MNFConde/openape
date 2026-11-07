@@ -103,7 +103,7 @@ crate 只能 `use` 自己 Cargo.toml 里声明过的依赖，反向引用在**�
 | `proto` crate | M2 前没有第二个消费者 | UI 与 CLI 同时需要同一套 schema（M2 落 gRPC） | 两处各自定义结构，开始漂移 |
 | 独立 `assembly` crate | 只有一个总线后端，一个 `match` 放 `session` 里就够 | 出现第二种重后端，且确有裁剪编译的需求；**M3 已提前落地**（交叉校验需要同时指名两个 format 后端） | 无硬伤，`session` 先变臃肿 |
 | `format-elf` / `format-a2l` | M1 的读写按裸地址进行，没有信息源消费者 | 分别随 M3 / M2 引入变量模型时（**均已落地**） | 变量只能手填地址，无自动建立 |
-| `format-dbc` / `format-cdf` / `format-mf4` | 各自能力的里程碑未到 | DBC 显示 M3（**已落地**）；dataset 模型 M4（**已落地**，在 `cal-core`）；CDF 导入 M4 **待落地**（原 DCM 改判，[D-24](decisions.md#d-24-数据集对接格式改判-cdf)）；MF4 录制与离线重开 M5 | 对应能力缺失：外部标定值暂时只能经 JSON dataset 进出 |
+| `format-dbc` / `format-cdf` / `format-mf4` | 各自能力的里程碑未到 | DBC 显示 M3（**已落地**）；dataset 模型 M4（**已落地**，在 `cal-core`）；CDF 导入 M4 **已落地**（按 2.0.0 口径，原 DCM 改判，[D-24](decisions.md#d-24-数据集对接格式改判-cdf)）；MF4 录制与离线重开 M5 | 对应能力缺失：外部标定值暂时只能经 JSON dataset 进出 |
 | `daemon` / `ui` | 没有 UI 就没有常驻进程的消费者 | M2 的 Web 最小曲线页 | CLI 已证明引擎可用，但产品形态缺失 |
 | `ui-tauri` 桌面壳 | 界面与 Web UI 完全同源，壳只解决"双击启动"这一件事 | 用户明确要单机双击形态（MVP 之后），见 [decisions.md](decisions.md#d-21-native-gui-决策逆转) | 本地使用须先起 daemon，体验差但功能不缺 |
 | 前置网关与自研 `gateway` | nginx / Caddy 已覆盖反代、认证与 TLS，daemon 侧零代码 | 车载盒子放不下静态二进制，或需 ACL 直接读工程配置，见 [13-deployment.md](13-deployment.md#自研精简网关的触发条件) | 只能用现成网关，部署门槛落在运维能力上 |

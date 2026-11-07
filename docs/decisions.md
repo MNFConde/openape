@@ -248,3 +248,9 @@ updated: 2026-11-07
 - 决策：MVP 的 dataset 对外互通格式由 DCM 改为 **ASAM CDF**（当前 2.x，Base Standard，XML + schema）；crate 名随之改为 `format-cdf`，范围仍是只读导入，内部 dataset 仍是 JSON（[D-08](#d-08-数据集格式) 的其余三条不变）。M4-06/M4-07 按 CDF 重写，仍未落地。
 - 依据：（1）CDF 是在册、在维护的 ASAM 标准，规范与配套文档可从官网取得，不像退役的 DCM 那样只剩购买渠道；（2）CDF 是 XML + XSD，能接上档一（权威校验器）与档二（golden 字节基线），DCM 的文本格式给不了这个条件；（3）CDF 覆盖标量、字符串、数组、曲线、map 与结构体，并带单位与质量/版次元信息，正对上我们的标定量模型；（4）工具链支持真实存在（MathWorks 与主流 MC 工具链都读写 CDF），属"事实可用"而非纸面标准。
 - 影响：`format-dcm` 不在本期建 crate；requirements 的"MVP 完成定义"与档二 golden 口径一并改为 CDF；[credits.md](credits.md#格式与规范) 的规范表随之替换。DCM 只保留"拿到真实样本后再议"的可能，不写进任何里程碑。**未验证项**：CDF 规范正文与 XSD 的下载方式与许可尚未实测（本会话只确认标准在册与其公开定位），动工前需先取到规范与 schema，并入库一份真实 `.cdf` 样本作 fixtures。
+
+- 复核结论（2026-11-07，M4-06 动工前实测，取上段"未验证项"）：
+  - **下载方式**：官网现行版本 2.1.0 的下载按钮走登录弹窗、标注 "Free of charge for members"，需 ASAM 账号；免登录只给 Release Presentation、两份 TOC 与 LOKI 四个 PDF。按常见命名探 `/fileadmin/Standards/CDF/` 的 zip 均 404；历史版本页的 2.0.0 同样标注会员。
+  - **XSD 可得性**：公开可得的是 **CDF 2.0.0** 的 XSD/DTD（第三方仓库 `christoph2/asamint` 内，与 pyXCP 同作者），文件头写 "Copyright 2006 ASAM e.V / All rights reserved"。
+  - **许可结论**：XSD 属 ASAM 版权物，不随本仓入库（本项目 MIT OR Apache-2.0），也不拷入 fixtures；"越出 schema 即拒绝"改由 `format-cdf` 自带的元素集校验承担（只校验元素、属性一律忽略）。样本不入第三方数据，改为自造并入库（`crates/format-cdf/fixtures/minimal.cdf`）。
+  - **口径落定**：M4-06 按 2.0.0 实现；2.0.0 与 2.1.0 的差异**未验证**。日后取得 2.1.0 规范正文与其 XSD，再按条款补差并回填本段。

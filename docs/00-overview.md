@@ -22,7 +22,7 @@ OpenAPE 是一个 Rust 开发的**开放汽车标定工具**（对标 CANape/INC
 | `format-elf` | L2 | ELF+DWARF → IR（维度取自 DWARF，轴归属归工程配置） | object、gimli，vendor 自 a2ltool 的 debuginfo（见 `vendor/a2ltool-dwarf/README.md`） |
 | `format-a2l` | L2 | A2L → IR；IR → A2L 生成 | a2lfile |
 | `format-dbc` | L2 | DBC → 报文/信号模型；信号 pack/unpack（自研，与 can-dbc 逐条对照） | 自研 |
-| `format-cdf` | L2 | CDF 标定数据集只读导入（XML + schema 校验） | 自研解析，见 [D-24](decisions.md#d-24-数据集对接格式改判-cdf) |
+| `format-cdf` | L2 | CDF 标定数据集只读导入：取值扁平化 + 按名映射 + 元素集校验（按 CDF 2.0.0，schema 不入库） | roxmltree、自研解析，见 [D-24](decisions.md#d-24-数据集对接格式改判-cdf) |
 | `format-mf4` | L2 | 测量数据录制/导出 | mf4-rs、CSV |
 | `bus` | L2 | async Bus trait 与 `BusCapabilities`：帧类型位（经典/FD）、硬件时间戳、通道能力 | — |
 | `bus-socketcan` / `bus-socketcand` / `bus-zlg` / `bus-vector` / `bus-replay` | L2 | 各后端 | socketcan-rs 4.0、自研 socketcand 客户端、ZLG 官方库 FFI、Vector XL API（后补）、blf_asc |
