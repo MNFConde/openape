@@ -31,6 +31,7 @@ updated: 2026-11-05
 - 依据：统一 IR 后 A2L 逻辑全复用且可导出给 CANape/INCA 互操作；section+DWARF+旁车是商业 ELF 转 A2L 工具的成熟路数；纯命名前缀表达不了 Curve/Map 轴点与单位。
 - 影响：`format-elf` 需设计 section 名与旁车 schema；轴点注记语法是最大设计风险，开工前出 RFC 与 golden 样例（todo M0-5）。
 - 更正说明（2026-11-05）：**旁车 YAML 不再作为语义来源**——单位/量程等展示属性只在带 A2L 时提供，仅 ELF 档一律显示 raw；标记约定只保留自定义 section + DWARF struct 轴关联，用户手动轴值绑定归本软件工程配置。取舍理由与替代口径见 [D-13](#d-13-信息源两档输入与写入安全)。
+- 更正说明（2026-11-05，M3 开工前）：**自定义 section 标记与用户显示属性一并撤销**，ELF 档只做基本功能，完整语义必须由 A2L 提供。理由：D-13 已把角色判定交给用户、把语义层收归 A2L 档，section 标记失去承载对象，只剩「来源注记」用途，用 `MOD_PAR` 的 `COMMENT` 即可，不必发明新关键字（自定义 block 在 `a2lfile` 严格模式下要么被拒要么静默丢失）；用户显示属性是被否掉的旁车 YAML 的显示子集，维护成本同 A2L 却想省掉 A2L，且与 A2L 的 `COMPU_METHOD` 形成双源。随之澄清第三项：**DWARF 只给维度（事实），轴归属是猜测**——`float cal_map[4][3]` 的 4×3 可信，哪维用哪个符号当轴不可信，故轴归属一律由工程配置给出（10 号 RFC）。
 - 验证结论（2026-11-05，M0-4 spike）：**ELF 前端不自研 DWARF 解析，复用 a2ltool 的 `debuginfo` 逻辑**。上游该模块全为 `pub(crate)`（lib 目标存在但只导出 `fuzz`），fork 后把 `debuginfo`/`symbol` 提为 `pub`、模块内 `pub(crate)` 改 `pub` 即可当库用——4 文件 52 行、纯可见性调整、无逻辑变更。实测能取到名/地址/大小、数组维度与 stride、结构体成员偏移、位域、枚举值与成员自动展开，同名 static 以 `is_unique=false` 标出。A2L 侧同样可行：`a2lfile` 走"模板 → 改 → 写 → 读回"，`AXIS_DESCR COM_AXIS` + `AXIS_PTS_REF` 的轴归属写读回完整保留，新增对象用 clone 模板条目 + `set_name` 即可（构造函数多为 `pub(crate)`）。注意三点：迭代器给叶子级（需自行分层顶层与成员）、`-O2` 折叠掉的变量静默缺失、无 `.debug_info` 时的报错文案可直接复用为加载体检提示。细节见 `tmp/spike-m0-4/REPORT.md`。
 
 ## D-03 平台与硬件

@@ -19,7 +19,7 @@ OpenAPE 是一个 Rust 开发的**开放汽车标定工具**（对标 CANape/INC
 | `cal-core` | L1 | 内部 IR：变量树、观测量/标定量模型、Curve/Map/轴、转换规则、dataset 模型、quirk/trait 扩展点 | — |
 | `xcp-proto` | L1 | XCP 帧编解码：CTO/DTO、DAQ、页切换；master 与从站共享 | 自研，参考 automotive |
 | `proto` | L1 | gRPC 契约与消息类型；同时是 CLI 结构化输出 schema 的源 | tonic、prost |
-| `format-elf` | L2 | ELF+DWARF → IR；自定义 section 标记约定；ELF → A2L 导出 | object、gimli，借 a2ltool 的 DWARF 逻辑 |
+| `format-elf` | L2 | ELF+DWARF → IR（维度取自 DWARF，轴归属归工程配置）；ELF → A2L 导出 | object、gimli，借 a2ltool 的 DWARF 逻辑 |
 | `format-a2l` | L2 | A2L → IR；IR → A2L 生成 | a2lfile |
 | `format-dbc` | L2 | DBC → 报文/信号模型；信号 pack/unpack（自研） | can-dbc |
 | `format-dcm` | L2 | DCM 标定数据集只读导入 | 自研解析 |
