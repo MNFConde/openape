@@ -18,44 +18,20 @@ use std::path::Path;
 
 use a2ltool_dwarf::debuginfo::{DbgDataType, DebugData, TypeInfo, VarInfo, make_simple_unit_name};
 use indexmap::IndexMap;
+pub use openape_cal_core::ElemType;
+use openape_cal_core::{Address, ByteOrder, Symbol, Variable, VariableTree};
 
 pub use openape_cal_core::{Notice, NoticeSeverity};
-
-/// 标量元素类型。与 `cal-core` 的 [`openape_cal_core::ElemType`] 同形，
-/// 但不在此处耦合 IR——映射发生在 ELF → IR 那一步。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Scalar {
-    /// 无符号 8 位。
-    U8,
-    /// 有符号 8 位。
-    I8,
-    /// 无符号 16 位。
-    U16,
-    /// 有符号 16 位。
-    I16,
-    /// 无符号 32 位。
-    U32,
-    /// 有符号 32 位。
-    I32,
-    /// 无符号 64 位。
-    U64,
-    /// 有符号 64 位。
-    I64,
-    /// 32 位浮点。
-    F32,
-    /// 64 位浮点。
-    F64,
-}
 
 /// 一个变量的形状。
 #[derive(Debug, Clone, PartialEq)]
 pub enum Shape {
     /// 标量。
-    Scalar(Scalar),
+    Scalar(ElemType),
     /// 数组，维度按 C 声明顺序（`[4][3]` 即 `[4, 3]`）。
     Array {
         /// 最内层元素类型。
-        elem: Scalar,
+        elem: ElemType,
         /// 各维长度。
         dims: Vec<u32>,
     },
@@ -79,7 +55,7 @@ pub enum Shape {
     /// 位域。
     Bits {
         /// 底层标量类型。
-        base: Scalar,
+        base: ElemType,
         /// 起始位偏移，自底层类型首字节起。
         bit_offset: u16,
         /// 位宽。
@@ -182,12 +158,40 @@ impl RawVar {
 pub struct ElfSource {
     vars: Vec<RawVar>,
     notes: Vec<Notice>,
+    byte_order: ByteOrder,
 }
 
 impl ElfSource {
     /// 全部变量，按符号名排序。
     pub fn vars(&self) -> &[RawVar] {
         &self.vars
+    }
+
+    /// 转成 `cal-core` 的变量树，供上层只认 IR 的部分使用。
+    ///
+    /// 只填 ELF 说得出的事实：符号、地址、元素类型、维度、字节序。单位、量程、
+    /// 换算、角色一律留空（[D-13]）——这一档的完整性靠用户指定角色与轴绑定，
+    /// 不靠猜。
+    ///
+    /// 结构体成员摊平成独立变量（`cal_gains.kp`）：A2L 的对象都是扁平的，
+    /// 结构体本身既不是 MEASUREMENT 也不是 CHARACTERISTIC。摊平要改地址，
+    /// 因此只有成员全落在首地址之后的才摊，其余如实报出来。
+    ///
+    /// [D-13]: ../../docs/decisions.md
+    pub fn to_ir(&self) -> Result<(VariableTree, Vec<Notice>), IrError> {
+        let mut notes = self.notes.clone();
+        let mut variables = Vec::new();
+        for var in &self.vars {
+            flatten(
+                var,
+                var.address(),
+                self.byte_order,
+                &mut variables,
+                &mut notes,
+            );
+        }
+        let tree = VariableTree::new(variables).map_err(IrError::Duplicate)?;
+        Ok((tree, notes))
     }
 
     /// 按符号名查。
@@ -199,6 +203,107 @@ impl ElfSource {
     pub fn notes(&self) -> &[Notice] {
         &self.notes
     }
+}
+
+/// 转 IR 时唯一会失败的情形：两个变量的符号撞在一起。地址越界、形状说不清
+/// 都只降级成提示——用户至少还能看到其余变量。
+#[derive(Debug, thiserror::Error)]
+pub enum IrError {
+    /// 符号重复。
+    #[error("{0}")]
+    Duplicate(#[from] openape_cal_core::DuplicateSymbol),
+}
+
+/// 把一个变量摊平进 IR。结构体递归展开，其余形状自己成一条。
+fn flatten(
+    var: &RawVar,
+    base: u64,
+    byte_order: ByteOrder,
+    out: &mut Vec<Variable>,
+    notes: &mut Vec<Notice>,
+) {
+    match var.shape() {
+        Shape::Struct { members } => {
+            for member in members {
+                let shape = member.shape().clone();
+                let nested = RawVar {
+                    name: format!("{}.{}", var.name(), member.name()),
+                    address: base.saturating_add(member.offset()),
+                    size: var.size,
+                    unit: var.unit.clone(),
+                    unique: var.unique,
+                    shape,
+                };
+                flatten(&nested, nested.address, byte_order, out, notes);
+            }
+        }
+        shape => match into_variable(var, base, byte_order, shape) {
+            Ok(variable) => out.push(variable),
+            Err(Skip::Unspeakable(what)) => notes.push(Notice::warning(
+                var.name(),
+                format!("{what}在变量 IR 里没有对应形状，已跳过"),
+            )),
+            Err(Skip::AddressTooHigh(address)) => notes.push(Notice::warning(
+                var.name(),
+                format!("地址 {address:#x} 超出 32 位寻址范围，已跳过"),
+            )),
+        },
+    }
+}
+
+enum Skip {
+    Unspeakable(&'static str),
+    AddressTooHigh(u64),
+}
+
+fn into_variable(
+    var: &RawVar,
+    base: u64,
+    byte_order: ByteOrder,
+    shape: &Shape,
+) -> Result<Variable, Skip> {
+    let address = u32::try_from(base).map_err(|_| Skip::AddressTooHigh(base))?;
+    let symbol = Symbol::new(var.name()).ok_or(Skip::Unspeakable("名字不可用的变量"))?;
+    let (elem, dims) = elem_and_dims(var, shape)?;
+    let variable = Variable::new(symbol, Address::new(address), elem).with_byte_order(byte_order);
+    // 维度含 0 时 `with_dims` 返回 None；那说明 DWARF 里写着 0 长度数组，
+    // 按"说不清"处理，不硬塞一个维度。
+    match variable.with_dims(dims) {
+        Some(variable) => Ok(variable),
+        None => Err(Skip::Unspeakable("零长度数组")),
+    }
+}
+
+fn elem_and_dims(var: &RawVar, shape: &Shape) -> Result<(ElemType, Vec<u32>), Skip> {
+    match shape {
+        Shape::Scalar(scalar) => Ok((*scalar, Vec::new())),
+        Shape::Array { elem, dims } => Ok((*elem, dims.clone())),
+        // 枚举在 IR 里就是它的底层整数：类型宽度与有无符号都已知，取值表
+        // 留给导出 A2L 时用（那是 Shape::Enum 的事，不是 IR 的事）。
+        Shape::Enum { signed, .. } => Ok((integer_of_size(var.size(), *signed)?, Vec::new())),
+        Shape::Bits { base, .. } => Ok((*base, Vec::new())),
+        Shape::Union { .. } => Err(Skip::Unspeakable("联合体")),
+        Shape::Struct { .. } => Err(Skip::Unspeakable("结构体")),
+        Shape::Opaque => Err(Skip::Unspeakable("指针或未知类型")),
+    }
+}
+
+/// 宽度与符号到整数类型的对照表。写成表而不是八条分支：这是数据，不是
+/// 逻辑，改成表之后既没有分支要测也没有 CC 要压。
+const INTEGER_BY_SIZE: [(u64, [ElemType; 2]); 4] = [
+    (1, [ElemType::U8, ElemType::I8]),
+    (2, [ElemType::U16, ElemType::I16]),
+    (4, [ElemType::U32, ElemType::I32]),
+    (8, [ElemType::U64, ElemType::I64]),
+];
+
+/// 由字节宽度与有无符号还原底层整数类型。
+fn integer_of_size(size: u64, signed: bool) -> Result<ElemType, Skip> {
+    let (_, pair) = INTEGER_BY_SIZE
+        .iter()
+        .find(|(width, _)| *width == size)
+        .ok_or(Skip::Unspeakable("非标准宽度的枚举"))?;
+    Ok(pair[usize::from(signed)])
 }
 
 /// 加载错误。
@@ -227,6 +332,8 @@ pub fn load(path: &Path) -> Result<ElfSource, Error> {
         ));
     }
 
+    let byte_order = byte_order_of(&header_bytes(path)?)?;
+
     let mut vars = Vec::new();
     for (name, list) in &debug.variables {
         let unique = list.len() == 1;
@@ -242,7 +349,34 @@ pub fn load(path: &Path) -> Result<ElfSource, Error> {
     }
     vars.sort_by(|a, b| a.name.cmp(&b.name).then(a.address.cmp(&b.address)));
 
-    Ok(ElfSource { vars, notes })
+    Ok(ElfSource {
+        vars,
+        notes,
+        byte_order,
+    })
+}
+
+/// 读 ELF 头的前几个字节，用来判断字节序。
+fn header_bytes(path: &Path) -> Result<[u8; 6], Error> {
+    use std::io::Read;
+    let mut header = [0u8; 6];
+    std::fs::File::open(path)?.read_exact(&mut header)?;
+    Ok(header)
+}
+
+/// 从 ELF 头判断字节序：`e_ident[EI_DATA]` 为 1 是小端，2 是大端。
+///
+/// 不查日志就不猜——`Variable` 的默认字节序是 Big，照搬默认值会让 x86 上
+/// 抽出来的每个变量都读反。
+fn byte_order_of(header: &[u8; 6]) -> Result<ByteOrder, Error> {
+    if &header[0..4] != b"\x7fELF" {
+        return Err(Error::Parse("不是 ELF 文件".to_owned()));
+    }
+    match header[5] {
+        1 => Ok(ByteOrder::Little),
+        2 => Ok(ByteOrder::Big),
+        other => Err(Error::Parse(format!("未知的 ELF 字节序标记 {other}"))),
+    }
 }
 
 /// 把上游的失败分成"没有调试信息"与"文件本身坏了"两类：前者用户能自己修
@@ -302,7 +436,7 @@ fn shape_of(types: &HashMap<usize, TypeInfo>, ty: &TypeInfo) -> Shape {
             bit_offset,
             bit_size,
         } => Shape::Bits {
-            base: shape_of(types, basetype).scalar_or(Scalar::U32),
+            base: shape_of(types, basetype).scalar_or(ElemType::U32),
             bit_offset: *bit_offset,
             bit_width: *bit_size,
         },
@@ -331,31 +465,31 @@ fn shape_of(types: &HashMap<usize, TypeInfo>, ty: &TypeInfo) -> Shape {
 }
 
 /// 上游把标量分成整数与浮点两族，分开两支让每支都是一眼看完的表。
-fn scalar_of(datatype: &DbgDataType) -> Option<Scalar> {
+fn scalar_of(datatype: &DbgDataType) -> Option<ElemType> {
     integer_of(datatype).or_else(|| float_of(datatype))
 }
 
 /// 八个整数变体逐个对到标量。这是一张真值表而不是复杂度：拆成"无符号"
 /// 与"有符号"两支能让 CC 降到 5，但两支结构完全一致，dryer 会报 1.00 重复
 /// ——把 8 行数据换个写法换来一处重复，不划算。已登记为指标例外。
-fn integer_of(datatype: &DbgDataType) -> Option<Scalar> {
+fn integer_of(datatype: &DbgDataType) -> Option<ElemType> {
     Some(match datatype {
-        DbgDataType::Uint8 => Scalar::U8,
-        DbgDataType::Uint16 => Scalar::U16,
-        DbgDataType::Uint32 => Scalar::U32,
-        DbgDataType::Uint64 => Scalar::U64,
-        DbgDataType::Sint8 => Scalar::I8,
-        DbgDataType::Sint16 => Scalar::I16,
-        DbgDataType::Sint32 => Scalar::I32,
-        DbgDataType::Sint64 => Scalar::I64,
+        DbgDataType::Uint8 => ElemType::U8,
+        DbgDataType::Uint16 => ElemType::U16,
+        DbgDataType::Uint32 => ElemType::U32,
+        DbgDataType::Uint64 => ElemType::U64,
+        DbgDataType::Sint8 => ElemType::I8,
+        DbgDataType::Sint16 => ElemType::I16,
+        DbgDataType::Sint32 => ElemType::I32,
+        DbgDataType::Sint64 => ElemType::I64,
         _ => return None,
     })
 }
 
-fn float_of(datatype: &DbgDataType) -> Option<Scalar> {
+fn float_of(datatype: &DbgDataType) -> Option<ElemType> {
     Some(match datatype {
-        DbgDataType::Float => Scalar::F32,
-        DbgDataType::Double => Scalar::F64,
+        DbgDataType::Float => ElemType::F32,
+        DbgDataType::Double => ElemType::F64,
         _ => return None,
     })
 }
@@ -406,7 +540,7 @@ fn fields_of(
 
 impl Shape {
     /// 形状是标量时取它，否则退回给定默认值——位域的底层类型偶尔取不到。
-    fn scalar_or(self, fallback: Scalar) -> Scalar {
+    fn scalar_or(self, fallback: ElemType) -> ElemType {
         match self {
             Self::Scalar(inner) => inner,
             _ => fallback,
@@ -430,16 +564,16 @@ mod tests {
     #[test]
     fn every_integer_width_and_signedness_maps_to_its_own_scalar() {
         let cases = [
-            (DbgDataType::Uint8, Scalar::U8),
-            (DbgDataType::Uint16, Scalar::U16),
-            (DbgDataType::Uint32, Scalar::U32),
-            (DbgDataType::Uint64, Scalar::U64),
-            (DbgDataType::Sint8, Scalar::I8),
-            (DbgDataType::Sint16, Scalar::I16),
-            (DbgDataType::Sint32, Scalar::I32),
-            (DbgDataType::Sint64, Scalar::I64),
-            (DbgDataType::Float, Scalar::F32),
-            (DbgDataType::Double, Scalar::F64),
+            (DbgDataType::Uint8, ElemType::U8),
+            (DbgDataType::Uint16, ElemType::U16),
+            (DbgDataType::Uint32, ElemType::U32),
+            (DbgDataType::Uint64, ElemType::U64),
+            (DbgDataType::Sint8, ElemType::I8),
+            (DbgDataType::Sint16, ElemType::I16),
+            (DbgDataType::Sint32, ElemType::I32),
+            (DbgDataType::Sint64, ElemType::I64),
+            (DbgDataType::Float, ElemType::F32),
+            (DbgDataType::Double, ElemType::F64),
         ];
         for (datatype, expected) in cases {
             assert_eq!(scalar_of(&datatype), Some(expected), "{datatype:?}");
@@ -484,7 +618,7 @@ mod tests {
         assert_eq!(
             shape_of(&types, &outer),
             Shape::Array {
-                elem: Scalar::F32,
+                elem: ElemType::F32,
                 dims: vec![4, 3]
             }
         );
@@ -518,6 +652,22 @@ mod tests {
         let types = HashMap::new();
         let ty = typeinfo(DbgDataType::TypeRef(42, 0));
         assert_eq!(shape_of(&types, &ty), Shape::Opaque);
+    }
+
+    #[test]
+    fn byte_order_is_read_from_the_elf_header() {
+        // 只认 e_ident[EI_DATA]：1 小端、2 大端。IR 的默认值是 Big，
+        // 照搬默认值会让 x86 上的每个变量都读反。
+        assert_eq!(
+            byte_order_of(b"\x7fELF\x02\x01").expect("小端"),
+            ByteOrder::Little
+        );
+        assert_eq!(
+            byte_order_of(b"\x7fELF\x02\x02").expect("大端"),
+            ByteOrder::Big
+        );
+        assert!(byte_order_of(b"\x7fELF\x02\x09").is_err(), "未知标记要拒绝");
+        assert!(byte_order_of(b"NOTELF").is_err(), "非 ELF 要拒绝");
     }
 
     #[test]

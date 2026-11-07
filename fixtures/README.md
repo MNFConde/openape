@@ -4,7 +4,7 @@
 
 | 目录 | 内容 | 来源 |
 |---|---|---|
-| `elf/` | 覆盖标定/观测典型形态的 C 源码（常量、二维 Map、双轴、结构体、位域、枚举、跨 CU 同名 static、被优化折叠的 static const），以及编好的 `test.elf` | M0-4 spike |
+| `elf/` | 覆盖标定/观测典型形态的 C 源码（常量、二维 Map、双轴、结构体、位域、枚举、指针、函数指针、跨 CU 同名 static、被优化折叠的 static const），以及编好的 `test.elf` 与 `stripped.elf` | M0-4 spike |
 | `a2l/` | 轴绑定导出的 golden A2L 片段 | M0-5 RFC 第 8 节 |
 
 ## ELF 夹具：产物入库，源码随改随编
@@ -19,12 +19,15 @@ gcc -c -g -O2 -o calib.o calib.c
 gcc -c -g -O2 -o other.o other.c
 gcc -c -g -O2 -o main.o main.c
 gcc -o test.elf calib.o other.o main.o
+cp test.elf stripped.elf && strip stripped.elf
 rm -f *.o
 ```
 
+`stripped.elf` 是同一份二进制去掉调试信息后的样子，用来钉住"体检提示要说人话"这条验收。
+
 `-g` 与 `-O2` 同时给是刻意的：`-g` 才有 DWARF，`-O2` 才能复现"变量被折叠掉"的场景（`s_folded` 在符号表与 DWARF 中都不存在）。
 
-产物可复现的前提是**在同一目录下重编**：DWARF 里记录编译单元路径（`DW_AT_comp_dir`），换个目录编出来的字节就不同。当前产物由 gcc 13.3.0（Ubuntu 24.04）编出，md5 `f68a4fb63f429ef5b36d0a279983bc73`。升级 gcc 后重编会得到新字节，属正常，提交时在 message 里说明即可。
+产物可复现的前提是**在同一目录下重编**：DWARF 里记录编译单元路径（`DW_AT_comp_dir`），换个目录编出来的字节就不同。当前产物由 gcc 13.3.0（Ubuntu 24.04）编出，md5 `345b9226bf11eb4b7b3172e394ffc58c`。升级 gcc 后重编会得到新字节，属正常，提交时在 message 里说明即可。
 
 `.o` 中间产物不入库。
 

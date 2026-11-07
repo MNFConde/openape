@@ -32,6 +32,10 @@ struct {
     float ref;
 } obs_state;
 
+/* 指针与函数指针：真实 ECU 的 ELF 里到处都是，IR 里没有对应形状 */
+float *obs_ptr;
+float (*obs_callback)(float);
+
 /* static：本 CU 私有，other.c 里有同名者 */
 static volatile float s_private_gain = 2.5f;
 

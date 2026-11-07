@@ -3,14 +3,14 @@
 //! 断言的是用户看得见的事实——"这个变量在 ELF 里是什么形状"，不碰内部
 //! 实现怎么遍历 DWARF。
 
-use openape_format_elf::{ElfSource, Field, Scalar, Shape, load};
+use openape_format_elf::{ElemType, ElfSource, Field, Shape, load};
 
 fn golden() -> ElfSource {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/elf/test.elf");
     load(std::path::Path::new(path)).expect("golden ELF 必须能读")
 }
 
-fn scalar(name: &str) -> Scalar {
+fn scalar(name: &str) -> ElemType {
     match golden().get(name).expect("变量必须存在").shape() {
         Shape::Scalar(inner) => *inner,
         other => panic!("{name} 应为标量，实为 {other:?}"),
@@ -19,8 +19,8 @@ fn scalar(name: &str) -> Scalar {
 
 #[test]
 fn scalar_constants_carry_their_element_type() {
-    assert_eq!(scalar("cal_kp"), Scalar::F32);
-    assert_eq!(scalar("cal_folded"), Scalar::F32);
+    assert_eq!(scalar("cal_kp"), ElemType::F32);
+    assert_eq!(scalar("cal_folded"), ElemType::F32);
     assert_eq!(golden().get("cal_kp").expect("cal_kp 存在").size(), 4);
 }
 
@@ -31,7 +31,7 @@ fn arrays_carry_every_dimension_in_declaration_order() {
     assert_eq!(
         var.shape(),
         &Shape::Array {
-            elem: Scalar::F32,
+            elem: ElemType::F32,
             dims: vec![4, 3]
         },
         "cal_map[4][3] 的维度顺序必须与声明一致"
@@ -42,7 +42,7 @@ fn arrays_carry_every_dimension_in_declaration_order() {
     assert_eq!(
         axis.shape(),
         &Shape::Array {
-            elem: Scalar::F32,
+            elem: ElemType::F32,
             dims: vec![3]
         }
     );
@@ -58,11 +58,11 @@ fn structs_carry_member_offsets() {
     assert_eq!(members.len(), 2);
     assert_eq!(
         members[0],
-        Field::new("kp", 0, Shape::Scalar(Scalar::F32)).expect("成员名非空")
+        Field::new("kp", 0, Shape::Scalar(ElemType::F32)).expect("成员名非空")
     );
     assert_eq!(
         members[1],
-        Field::new("ki", 4, Shape::Scalar(Scalar::F32)).expect("成员名非空")
+        Field::new("ki", 4, Shape::Scalar(ElemType::F32)).expect("成员名非空")
     );
     assert_eq!(gains.size(), 8);
 }
@@ -97,17 +97,17 @@ fn bitfields_carry_their_bit_position() {
         shapes,
         vec![
             &Shape::Bits {
-                base: Scalar::U32,
+                base: ElemType::U32,
                 bit_offset: 0,
                 bit_width: 3
             },
             &Shape::Bits {
-                base: Scalar::U32,
+                base: ElemType::U32,
                 bit_offset: 3,
                 bit_width: 5
             },
             &Shape::Bits {
-                base: Scalar::U32,
+                base: ElemType::U32,
                 bit_offset: 8,
                 bit_width: 8
             },
