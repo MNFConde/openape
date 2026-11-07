@@ -102,6 +102,22 @@ message DaqSample {
 
 message StreamRequest {}
 
+// 离线重开（M5-05）：从 daemon 主机侧的一份录制文件按点推流。路径与
+// 通道都由调用方指定——路径是 daemon 所在主机的路径，浏览器拿不到
+// daemon 的文件系统，这正是把读端放在 daemon 的原因。
+message RecordingRequest {
+  // 录制文件路径（MF4）。相对路径按 daemon 进程的工作目录解析。
+  string path = 1;
+  // 要取的数据通道名（不带时间主通道）。
+  string channel = 2;
+}
+
+// 录制文件里的一条点：解好值的物理值 + 相对采集起点的微秒时间戳。
+message RecordingPoint {
+  uint64 timestamp_us = 1;
+  double value = 2;
+}
+
 // 指标快照。
 message MetricsSnapshot {
   double daq_fps = 1;
@@ -280,6 +296,9 @@ service OpenApe {
   rpc GetMetrics(Empty) returns (MetricsSnapshot);
   // 采集样本流。慢消费者丢最旧，丢掉的量在指标里可查。
   rpc StreamSamples(StreamRequest) returns (stream DaqSample);
+
+  // 离线重开：按点推一份录制文件里指定通道的样本（M5-05）。
+  rpc OpenRecording(RecordingRequest) returns (stream RecordingPoint);
   // 当前加载的变量清单。界面用它画标定量表格。
   rpc ListVariables(Empty) returns (VariableList);
   // 最近的故障。只读 `openape_diag::Fault`，daemon 不自造错误类型。

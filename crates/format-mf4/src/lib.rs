@@ -18,6 +18,7 @@
 
 use std::path::Path;
 
+use mf4_rs::api::mdf::MDF;
 use mf4_rs::blocks::common::DataType;
 use mf4_rs::error::MdfError;
 use mf4_rs::parsing::decoder::DecodedValue;
@@ -62,6 +63,36 @@ pub enum Error {
         /// 建文件时的通道数。
         expected: usize,
         /// 本行实到的值数。
+        actual: usize,
+    },
+
+    /// 文件打不开（不存在、不是 MDF、结构损坏）。
+    #[error("打不开 {path}：{source}")]
+    Open {
+        /// 想打开的路径。
+        path: std::path::PathBuf,
+        /// 底层解析错误。
+        #[source]
+        source: MdfError,
+    },
+
+    /// 按名取列时通道不存在；错误信息点名可用通道。
+    #[error("通道 {requested} 不存在；可用：{}", available.join("、"))]
+    MissingChannel {
+        /// 想取的通道名。
+        requested: String,
+        /// 文件里实际有的通道名（含时间主通道）。
+        available: Vec<String>,
+    },
+
+    /// 列长不一致（第三方文件）：以时间列为准，别的列对不齐就报。
+    #[error("列长不一致：时间列 {expected} 行，通道 {channel} 有 {actual} 行")]
+    RaggedColumns {
+        /// 时间列行数。
+        expected: usize,
+        /// 对不齐的通道。
+        channel: String,
+        /// 该通道实有行数。
         actual: usize,
     },
 }
@@ -162,3 +193,113 @@ impl Writer {
         Ok(())
     }
 }
+
+/// 一行读回的样本：微秒时间戳 + 各通道物理值（顺序同 [`Writer::create`]）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct Row {
+    /// 相对采集起点的微秒时间戳（时间列乘 1e6 取整，写出端除法的无损逆）。
+    pub timestamp_us: u64,
+    /// 各通道物理值。
+    pub values: Vec<f64>,
+}
+
+/// 读端（M5-05）：离线重开的语义层。
+///
+/// 解析不自己写——走 `mf4-rs` 的读端，本类型只立约定：时间主通道名为
+/// `time`、数据列为 f64、按写序还原行。第三方工具写的文件只要守同一
+/// 约定就能读；不守的（时间通道另有其名、列长不齐）在取用时明确报错，
+/// 不猜。
+pub struct Reader {
+    mdf: MDF,
+    names: Vec<String>,
+}
+
+impl std::fmt::Debug for Reader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Reader")
+            .field("channels", &self.names)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Reader {
+    /// 打开一份 MF4 并列举数据通道名（时间主通道不计入）。
+    pub fn open(path: &Path) -> Result<Self, Error> {
+        let as_str = path
+            .to_str()
+            .ok_or_else(|| Error::BadPath(path.to_path_buf()))?;
+        let mdf = MDF::from_file(as_str).map_err(|source| Error::Open {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        let mut names = Vec::new();
+        for group in mdf.channel_groups() {
+            for channel in group.channels() {
+                if let Some(name) = channel.name()?
+                    && name != TIME_CHANNEL
+                {
+                    names.push(name);
+                }
+            }
+        }
+        Ok(Self { mdf, names })
+    }
+
+    /// 数据通道名，按文件里的写序。
+    pub fn channel_names(&self) -> &[String] {
+        &self.names
+    }
+
+    /// 按名取一列物理值。通道不存在时报错并点名可用通道。
+    pub fn column(&self, name: &str) -> Result<Vec<f64>, Error> {
+        let channel = self
+            .mdf
+            .channel(name)
+            .ok_or_else(|| Error::MissingChannel {
+                requested: name.to_owned(),
+                available: self.all_channel_names(),
+            })?;
+        Ok(channel.values_as_f64()?)
+    }
+
+    /// 整份文件的行：时间列还原成微秒，各列按 [`Self::channel_names`]
+    /// 顺序排齐。列长不齐（第三方文件）以时间列为准明确报错。
+    pub fn rows(&self) -> Result<Vec<Row>, Error> {
+        let time = self.column(TIME_CHANNEL)?;
+        let columns = self
+            .names
+            .iter()
+            .map(|name| Ok((name, self.column(name)?)))
+            .collect::<Result<Vec<(&String, Vec<f64>)>, Error>>()?;
+        let mut rows = Vec::with_capacity(time.len());
+        for (index, seconds) in time.iter().enumerate() {
+            let mut values = Vec::with_capacity(columns.len());
+            for (name, column) in &columns {
+                let Some(value) = column.get(index) else {
+                    return Err(Error::RaggedColumns {
+                        expected: time.len(),
+                        channel: (*name).clone(),
+                        actual: column.len(),
+                    });
+                };
+                values.push(*value);
+            }
+            rows.push(Row {
+                timestamp_us: (seconds * 1e6).round().max(0.0) as u64,
+                values,
+            });
+        }
+        Ok(rows)
+    }
+
+    /// 全部有名通道（含时间主通道），给报错点名用。
+    fn all_channel_names(&self) -> Vec<String> {
+        let mut names = vec![TIME_CHANNEL.to_owned()];
+        names.extend(self.names.iter().cloned());
+        names
+    }
+}
+
+/// 时间主通道的固定名。写出端 [`Writer::create`] 落这个名字，读端按它取
+/// 时间列；第三方文件不守这个约定时，`rows` 报错并点名可用通道。
+const TIME_CHANNEL: &str = "time";

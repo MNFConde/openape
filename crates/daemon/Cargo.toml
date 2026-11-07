@@ -15,6 +15,7 @@ path = "src/main.rs"
 openape-assembly.workspace = true
 openape-format-a2l.workspace = true
 openape-format-elf.workspace = true
+openape-format-mf4.workspace = true
 openape-bus.workspace = true
 openape-bus-socketcan.workspace = true
 openape-cal-core.workspace = true

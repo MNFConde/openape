@@ -272,6 +272,42 @@ export interface DaqSample {
 export interface StreamRequest {
 }
 /**
+ * 离线重开（M5-05）：从 daemon 主机侧的一份录制文件按点推流。路径与
+ * 通道都由调用方指定——路径是 daemon 所在主机的路径，浏览器拿不到
+ * daemon 的文件系统，这正是把读端放在 daemon 的原因。
+ *
+ * @generated from protobuf message openape.v1.RecordingRequest
+ */
+export interface RecordingRequest {
+    /**
+     * 录制文件路径（MF4）。相对路径按 daemon 进程的工作目录解析。
+     *
+     * @generated from protobuf field: string path = 1
+     */
+    path: string;
+    /**
+     * 要取的数据通道名（不带时间主通道）。
+     *
+     * @generated from protobuf field: string channel = 2
+     */
+    channel: string;
+}
+/**
+ * 录制文件里的一条点：解好值的物理值 + 相对采集起点的微秒时间戳。
+ *
+ * @generated from protobuf message openape.v1.RecordingPoint
+ */
+export interface RecordingPoint {
+    /**
+     * @generated from protobuf field: uint64 timestamp_us = 1
+     */
+    timestampUs: bigint;
+    /**
+     * @generated from protobuf field: double value = 2
+     */
+    value: number;
+}
+/**
  * 指标快照。
  *
  * @generated from protobuf message openape.v1.MetricsSnapshot
@@ -1734,6 +1770,116 @@ class StreamRequest$Type extends MessageType<StreamRequest> {
  */
 export const StreamRequest = new StreamRequest$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class RecordingRequest$Type extends MessageType<RecordingRequest> {
+    constructor() {
+        super("openape.v1.RecordingRequest", [
+            { no: 1, name: "path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "channel", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RecordingRequest>): RecordingRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.path = "";
+        message.channel = "";
+        if (value !== undefined)
+            reflectionMergePartial<RecordingRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RecordingRequest): RecordingRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string path */ 1:
+                    message.path = reader.string();
+                    break;
+                case /* string channel */ 2:
+                    message.channel = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RecordingRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string path = 1; */
+        if (message.path !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.path);
+        /* string channel = 2; */
+        if (message.channel !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.channel);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.RecordingRequest
+ */
+export const RecordingRequest = new RecordingRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RecordingPoint$Type extends MessageType<RecordingPoint> {
+    constructor() {
+        super("openape.v1.RecordingPoint", [
+            { no: 1, name: "timestamp_us", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "value", kind: "scalar", T: 1 /*ScalarType.DOUBLE*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RecordingPoint>): RecordingPoint {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.timestampUs = 0n;
+        message.value = 0;
+        if (value !== undefined)
+            reflectionMergePartial<RecordingPoint>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RecordingPoint): RecordingPoint {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint64 timestamp_us */ 1:
+                    message.timestampUs = reader.uint64().toBigInt();
+                    break;
+                case /* double value */ 2:
+                    message.value = reader.double();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RecordingPoint, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint64 timestamp_us = 1; */
+        if (message.timestampUs !== 0n)
+            writer.tag(1, WireType.Varint).uint64(message.timestampUs);
+        /* double value = 2; */
+        if (message.value !== 0)
+            writer.tag(2, WireType.Bit64).double(message.value);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.RecordingPoint
+ */
+export const RecordingPoint = new RecordingPoint$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class MetricsSnapshot$Type extends MessageType<MetricsSnapshot> {
     constructor() {
         super("openape.v1.MetricsSnapshot", [
@@ -3134,6 +3280,7 @@ export const OpenApe = new ServiceType("openape.v1.OpenApe", [
     { name: "Health", options: {}, I: Empty, O: HealthStatus },
     { name: "GetMetrics", options: {}, I: Empty, O: MetricsSnapshot },
     { name: "StreamSamples", serverStreaming: true, options: {}, I: StreamRequest, O: DaqSample },
+    { name: "OpenRecording", serverStreaming: true, options: {}, I: RecordingRequest, O: RecordingPoint },
     { name: "ListVariables", options: {}, I: Empty, O: VariableList },
     { name: "ListFaults", options: {}, I: Empty, O: FaultList },
     { name: "WriteMemory", options: {}, I: WriteRequest, O: WriteResponse },

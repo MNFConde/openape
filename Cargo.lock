@@ -1094,6 +1094,7 @@ dependencies = [
  "openape-diag",
  "openape-format-a2l",
  "openape-format-elf",
+ "openape-format-mf4",
  "openape-proto",
  "openape-session",
  "openape-sim-ecu",

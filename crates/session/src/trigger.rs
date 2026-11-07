@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn no_hit_means_no_window_and_no_file() {
-        let dir = tempdir();
+        let dir = tempdir("no-hit");
         let mut recorder = recorder();
         for (index, value) in [1u16, 2, 3, 4].into_iter().enumerate() {
             assert!(recorder.push(&sample(index as u64, value)).is_none());
@@ -462,7 +462,7 @@ mod tests {
         .expect("配置合法");
         let _ = trigger_recorder.push(&sample(0, 10));
         let window = trigger_recorder.push(&sample(1, 99)).expect("命中即导出");
-        let dir = tempdir();
+        let dir = tempdir("export");
         let channels = vec![RecorderChannel::new(
             0,
             0,
@@ -537,7 +537,7 @@ mod tests {
     #[tokio::test]
     async fn a_live_stream_that_never_hits_writes_nothing() {
         let stream = DaqStream::new(8);
-        let dir = tempdir();
+        let dir = tempdir("live-miss");
         let channels = vec![RecorderChannel::new(
             0,
             0,
@@ -565,7 +565,7 @@ mod tests {
     #[tokio::test]
     async fn a_live_stream_hit_lands_on_disk() {
         let stream = DaqStream::new(8);
-        let dir = tempdir();
+        let dir = tempdir("live-hit");
         let channels = vec![RecorderChannel::new(
             0,
             0,
@@ -603,7 +603,7 @@ mod tests {
         let stream = DaqStream::new(64);
         let mut reader = stream.subscribe();
         let layout = layout();
-        let rec_dir = tempdir();
+        let rec_dir = tempdir("cont");
         let continuous = Recorder::start(
             RecorderConfig {
                 channels: vec![RecorderChannel::new(
@@ -621,7 +621,7 @@ mod tests {
             &layout,
         )
         .expect("常时录制必须能起");
-        let trig_dir = tempdir();
+        let trig_dir = tempdir("trig");
         let channels = vec![RecorderChannel::new(
             0,
             0,
@@ -689,9 +689,11 @@ mod tests {
         );
     }
 
-    fn tempdir() -> PathBuf {
+    fn tempdir(name: &str) -> PathBuf {
+        // 名字带调用方给的子名：同一线程里多次取目录时互不覆盖，不然
+        // 第二次调用把第一个目录连根删了，写出线程建文件就 ENOENT。
         let dir = std::env::temp_dir().join(format!(
-            "openape-trigger-{}-{:?}",
+            "openape-trigger-{}-{:?}-{name}",
             std::process::id(),
             std::thread::current().id()
         ));

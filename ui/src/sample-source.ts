@@ -51,6 +51,32 @@ function decodeDto(sample: DaqSample): SamplePoint {
 }
 
 /**
+ * daemon 的离线重开流（M5-05）：从一份 MF4 取指定通道的解值点。
+ *
+ * 与实时流走同一个 [SampleSource] 接口，所以离线曲线与实时曲线是同一条
+ * 渲染路径（runCurve）；差别只在取数这一头。通道名不带时间主通道——
+ * 时间轴是每份文件的 time 列，daemon 侧已经还原成微秒时间戳。
+ */
+export class GrpcRecordingSource implements SampleSource {
+  private readonly client: OpenApeClient;
+  private readonly path: string;
+  private readonly channel: string;
+
+  constructor(client: OpenApeClient, path: string, channel: string) {
+    this.client = client;
+    this.path = path;
+    this.channel = channel;
+  }
+
+  async *points(): AsyncIterable<SamplePoint> {
+    const call = this.client.openRecording({ path: this.path, channel: this.channel });
+    for await (const point of call.responses) {
+      yield { tsUs: Number(point.timestampUs), value: point.value };
+    }
+  }
+}
+
+/**
  * 给定点的回放源：假数据演示与离线重开的原型。
  *
  * 一次性放完全部点。要模拟实时节拍时在这里加间隔，别让曲线组件等。

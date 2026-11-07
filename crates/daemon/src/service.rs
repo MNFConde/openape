@@ -385,6 +385,67 @@ impl proto::open_ape_server::OpenApe for OpenApeService {
 
     type StreamSamplesStream = ReceiverStream<Result<proto::DaqSample, Status>>;
 
+    /// 离线重开（M5-05）：把 daemon 主机侧的一份 MF4 按点推给客户端。
+    ///
+    /// 读文件与解列是阻塞 IO，进 `spawn_blocking`；可错部分全部在这个
+    /// 任务里做完——错误以 `Status` 交回 async 侧，流建立前就失败，客户端
+    /// 拿到的是明确的错误而不是空流。推流在 async 侧做，客户端断开即停。
+    async fn open_recording(
+        &self,
+        request: Request<proto::RecordingRequest>,
+    ) -> Result<Response<Self::OpenRecordingStream>, Status> {
+        let request = request.into_inner();
+        if request.path.trim().is_empty() {
+            return Err(Status::invalid_argument(
+                "给一个录制文件路径（MF4），离线重开才有数据可推",
+            ));
+        }
+        let path = std::path::PathBuf::from(request.path.trim());
+        let channel = request.channel;
+        let prepared = tokio::task::spawn_blocking(
+            move || -> Result<(Vec<openape_format_mf4::Row>, usize), Status> {
+                let reader = openape_format_mf4::Reader::open(&path).map_err(|err| {
+                    Status::not_found(format!(
+                        "打不开 {}：{err}；确认路径存在且是 openape 录制的 MF4",
+                        path.display()
+                    ))
+                })?;
+                if let Err(err) = reader.column(&channel) {
+                    // MissingChannel 的文本点名了可用通道，客户端能直接改。
+                    return Err(Status::not_found(err.to_string()));
+                }
+                let rows = reader
+                    .rows()
+                    .map_err(|err| Status::invalid_argument(err.to_string()))?;
+                let index = reader
+                    .channel_names()
+                    .iter()
+                    .position(|name| name == &channel)
+                    .expect("通道刚验证过存在");
+                Ok((rows, index))
+            },
+        )
+        .await
+        .map_err(|err| Status::internal(format!("读录制文件的任务中断：{err}")))?;
+        let (rows, index) = prepared?;
+
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+        tokio::spawn(async move {
+            for row in rows {
+                let point = proto::RecordingPoint {
+                    timestamp_us: row.timestamp_us,
+                    value: row.values[index],
+                };
+                if tx.send(Ok(point)).await.is_err() {
+                    break;
+                }
+            }
+        });
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    type OpenRecordingStream = ReceiverStream<Result<proto::RecordingPoint, Status>>;
+
     async fn write_memory(
         &self,
         request: Request<proto::WriteRequest>,

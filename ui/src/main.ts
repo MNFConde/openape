@@ -11,7 +11,7 @@ import { GrpcWebFetchTransport } from '@protobuf-ts/grpcweb-transport';
 
 import { OpenApeClient } from './generated/openape/v1/openape.client';
 
-import { GrpcSampleSource, SampleSource, type SamplePoint } from './sample-source';
+import { GrpcRecordingSource, GrpcSampleSource, SampleSource, type SamplePoint } from './sample-source';
 
 /** 曲线最多保留的点数。 */
 const MAX_POINTS = 600;
@@ -28,8 +28,18 @@ const client = new OpenApeClient(transport);
 /**
  * 曲线的数据源。换成假源（演示、测试）或离线文件源只动 import 与这一行，
  * 曲线组件零改动——数据源接口见 sample-source.ts。
+ *
+ * 离线重开（M5-05）：URL 带 `?replay=<MF4 路径>&channel=<通道>` 时换成
+ * 文件回放源，渲染路径不变。
  */
-const dataSource: SampleSource = new GrpcSampleSource(client);
+const replayQuery = new URLSearchParams(location.search);
+const replayPath = replayQuery.get('replay');
+const dataSource: SampleSource = replayPath
+  ? new GrpcRecordingSource(client, replayPath, replayQuery.get('channel') ?? '')
+  : new GrpcSampleSource(client);
+
+/** 实时只看最近窗口，离线要整段历史——push 的数据治理按这个分。 */
+type CurveMode = 'live' | 'replay';
 
 function requireElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -63,21 +73,30 @@ const plot = new uPlot(
   chartHost,
 );
 
-function push(point: SamplePoint): void {
+function push(point: SamplePoint, mode: CurveMode): void {
   const tsMs = point.tsUs / 1000;
   timestamps.push(tsMs);
   values.push(point.value);
 
-  const cutoff = tsMs - WINDOW_MS;
-  let drop = 0;
-  while (drop < timestamps.length && timestamps[drop] < cutoff) {
-    drop += 1;
-  }
-  const overflow = Math.max(0, timestamps.length - MAX_POINTS);
-  const remove = Math.max(drop, overflow);
-  if (remove > 0) {
-    timestamps.splice(0, remove);
-    values.splice(0, remove);
+  if (mode === 'replay') {
+    // 离线要整段历史：不做时间窗口，只设总量上限防大文件卡死渲染。
+    const overflow = Math.max(0, timestamps.length - MAX_POINTS);
+    if (overflow > 0) {
+      timestamps.splice(0, overflow);
+      values.splice(0, overflow);
+    }
+  } else {
+    const cutoff = tsMs - WINDOW_MS;
+    let drop = 0;
+    while (drop < timestamps.length && timestamps[drop] < cutoff) {
+      drop += 1;
+    }
+    const overflow = Math.max(0, timestamps.length - MAX_POINTS);
+    const remove = Math.max(drop, overflow);
+    if (remove > 0) {
+      timestamps.splice(0, remove);
+      values.splice(0, remove);
+    }
   }
   plot.setData([timestamps, values]);
 }
@@ -325,11 +344,13 @@ async function renderFaults(): Promise<void> {
   }
 }
 
-async function runCurve(source: SampleSource): Promise<void> {
-  statusLine.textContent = '订阅样本流…';
+async function runCurve(source: SampleSource, mode: CurveMode): Promise<void> {
+  statusLine.textContent = replayPath
+    ? `离线重开 ${replayPath}（${replayQuery.get('channel') ?? ''}）…`
+    : '订阅样本流…';
   let count = 0;
   for await (const point of source.points()) {
-    push(point);
+    push(point, mode);
     count += 1;
     if (count % 10 === 1) {
       statusLine.textContent = `已收 ${count} 帧`;
@@ -344,7 +365,7 @@ async function main(): Promise<void> {
   await renderVariables();
   await renderFaults();
   await refreshPage();
-  await runCurve(dataSource);
+  await runCurve(dataSource, replayPath ? 'replay' : 'live');
 }
 
 main().catch((err: unknown) => {

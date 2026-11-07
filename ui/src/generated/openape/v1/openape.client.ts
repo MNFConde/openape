@@ -14,6 +14,8 @@ import type { WriteResponse } from "./openape";
 import type { WriteRequest } from "./openape";
 import type { FaultList } from "./openape";
 import type { VariableList } from "./openape";
+import type { RecordingPoint } from "./openape";
+import type { RecordingRequest } from "./openape";
 import type { DaqSample } from "./openape";
 import type { StreamRequest } from "./openape";
 import type { ServerStreamingCall } from "@protobuf-ts/runtime-rpc";
@@ -69,6 +71,12 @@ export interface IOpenApeClient {
      * @generated from protobuf rpc: StreamSamples
      */
     streamSamples(input: StreamRequest, options?: RpcOptions): ServerStreamingCall<StreamRequest, DaqSample>;
+    /**
+     * 离线重开：按点推一份录制文件里指定通道的样本（M5-05）。
+     *
+     * @generated from protobuf rpc: OpenRecording
+     */
+    openRecording(input: RecordingRequest, options?: RpcOptions): ServerStreamingCall<RecordingRequest, RecordingPoint>;
     /**
      * 当前加载的变量清单。界面用它画标定量表格。
      *
@@ -185,12 +193,21 @@ export class OpenApeClient implements IOpenApeClient, ServiceInfo {
         return stackIntercept<StreamRequest, DaqSample>("serverStreaming", this._transport, method, opt, input);
     }
     /**
+     * 离线重开：按点推一份录制文件里指定通道的样本（M5-05）。
+     *
+     * @generated from protobuf rpc: OpenRecording
+     */
+    openRecording(input: RecordingRequest, options?: RpcOptions): ServerStreamingCall<RecordingRequest, RecordingPoint> {
+        const method = this.methods[7], opt = this._transport.mergeOptions(options);
+        return stackIntercept<RecordingRequest, RecordingPoint>("serverStreaming", this._transport, method, opt, input);
+    }
+    /**
      * 当前加载的变量清单。界面用它画标定量表格。
      *
      * @generated from protobuf rpc: ListVariables
      */
     listVariables(input: Empty, options?: RpcOptions): UnaryCall<Empty, VariableList> {
-        const method = this.methods[7], opt = this._transport.mergeOptions(options);
+        const method = this.methods[8], opt = this._transport.mergeOptions(options);
         return stackIntercept<Empty, VariableList>("unary", this._transport, method, opt, input);
     }
     /**
@@ -199,7 +216,7 @@ export class OpenApeClient implements IOpenApeClient, ServiceInfo {
      * @generated from protobuf rpc: ListFaults
      */
     listFaults(input: Empty, options?: RpcOptions): UnaryCall<Empty, FaultList> {
-        const method = this.methods[8], opt = this._transport.mergeOptions(options);
+        const method = this.methods[9], opt = this._transport.mergeOptions(options);
         return stackIntercept<Empty, FaultList>("unary", this._transport, method, opt, input);
     }
     /**
@@ -208,7 +225,7 @@ export class OpenApeClient implements IOpenApeClient, ServiceInfo {
      * @generated from protobuf rpc: WriteMemory
      */
     writeMemory(input: WriteRequest, options?: RpcOptions): UnaryCall<WriteRequest, WriteResponse> {
-        const method = this.methods[9], opt = this._transport.mergeOptions(options);
+        const method = this.methods[10], opt = this._transport.mergeOptions(options);
         return stackIntercept<WriteRequest, WriteResponse>("unary", this._transport, method, opt, input);
     }
     /**
@@ -217,7 +234,7 @@ export class OpenApeClient implements IOpenApeClient, ServiceInfo {
      * @generated from protobuf rpc: GetCalPage
      */
     getCalPage(input: Empty, options?: RpcOptions): UnaryCall<Empty, CalPageResponse> {
-        const method = this.methods[10], opt = this._transport.mergeOptions(options);
+        const method = this.methods[11], opt = this._transport.mergeOptions(options);
         return stackIntercept<Empty, CalPageResponse>("unary", this._transport, method, opt, input);
     }
     /**
@@ -226,7 +243,7 @@ export class OpenApeClient implements IOpenApeClient, ServiceInfo {
      * @generated from protobuf rpc: SetCalPage
      */
     setCalPage(input: SetCalPageRequest, options?: RpcOptions): UnaryCall<SetCalPageRequest, CalPageResponse> {
-        const method = this.methods[11], opt = this._transport.mergeOptions(options);
+        const method = this.methods[12], opt = this._transport.mergeOptions(options);
         return stackIntercept<SetCalPageRequest, CalPageResponse>("unary", this._transport, method, opt, input);
     }
     /**
@@ -235,7 +252,7 @@ export class OpenApeClient implements IOpenApeClient, ServiceInfo {
      * @generated from protobuf rpc: DiffPages
      */
     diffPages(input: PageDiffRequest, options?: RpcOptions): UnaryCall<PageDiffRequest, PageDiffResponse> {
-        const method = this.methods[12], opt = this._transport.mergeOptions(options);
+        const method = this.methods[13], opt = this._transport.mergeOptions(options);
         return stackIntercept<PageDiffRequest, PageDiffResponse>("unary", this._transport, method, opt, input);
     }
     /**
@@ -244,7 +261,7 @@ export class OpenApeClient implements IOpenApeClient, ServiceInfo {
      * @generated from protobuf rpc: ListAudit
      */
     listAudit(input: Empty, options?: RpcOptions): UnaryCall<Empty, AuditList> {
-        const method = this.methods[13], opt = this._transport.mergeOptions(options);
+        const method = this.methods[14], opt = this._transport.mergeOptions(options);
         return stackIntercept<Empty, AuditList>("unary", this._transport, method, opt, input);
     }
     /**
@@ -253,7 +270,7 @@ export class OpenApeClient implements IOpenApeClient, ServiceInfo {
      * @generated from protobuf rpc: Unlock
      */
     unlock(input: Empty, options?: RpcOptions): UnaryCall<Empty, UnlockResponse> {
-        const method = this.methods[14], opt = this._transport.mergeOptions(options);
+        const method = this.methods[15], opt = this._transport.mergeOptions(options);
         return stackIntercept<Empty, UnlockResponse>("unary", this._transport, method, opt, input);
     }
 }
