@@ -11,6 +11,8 @@ import { GrpcWebFetchTransport } from '@protobuf-ts/grpcweb-transport';
 
 import { OpenApeClient } from './generated/openape/v1/openape.client';
 
+import { GrpcSampleSource, SampleSource, type SamplePoint } from './sample-source';
+
 /** 曲线最多保留的点数。 */
 const MAX_POINTS = 600;
 
@@ -22,6 +24,12 @@ const ACTOR = 'ui';
 
 const transport = new GrpcWebFetchTransport({ baseUrl: location.origin });
 const client = new OpenApeClient(transport);
+
+/**
+ * 曲线的数据源。换成假源（演示、测试）或离线文件源只动 import 与这一行，
+ * 曲线组件零改动——数据源接口见 sample-source.ts。
+ */
+const dataSource: SampleSource = new GrpcSampleSource(client);
 
 function requireElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -55,9 +63,10 @@ const plot = new uPlot(
   chartHost,
 );
 
-function push(tsMs: number, value: number): void {
+function push(point: SamplePoint): void {
+  const tsMs = point.tsUs / 1000;
   timestamps.push(tsMs);
-  values.push(value);
+  values.push(point.value);
 
   const cutoff = tsMs - WINDOW_MS;
   let drop = 0;
@@ -316,19 +325,11 @@ async function renderFaults(): Promise<void> {
   }
 }
 
-async function streamSamples(): Promise<void> {
+async function runCurve(source: SampleSource): Promise<void> {
   statusLine.textContent = '订阅样本流…';
-  const call = client.streamSamples({});
   let count = 0;
-  for await (const sample of call.responses) {
-    // 采样信号是 2 字节，按小端 u16 解释；换成多信号后这里按布局切分。
-    const view = new DataView(
-      sample.payload.buffer as ArrayBuffer,
-      sample.payload.byteOffset,
-      sample.payload.byteLength,
-    );
-    const value = sample.payload.byteLength >= 2 ? view.getUint16(0, true) : 0;
-    push(Number(sample.timestampUs) / 1000, value);
+  for await (const point of source.points()) {
+    push(point);
     count += 1;
     if (count % 10 === 1) {
       statusLine.textContent = `已收 ${count} 帧`;
@@ -343,7 +344,7 @@ async function main(): Promise<void> {
   await renderVariables();
   await renderFaults();
   await refreshPage();
-  await streamSamples();
+  await runCurve(dataSource);
 }
 
 main().catch((err: unknown) => {
