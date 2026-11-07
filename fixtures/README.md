@@ -8,7 +8,7 @@
 | `dbc/` | CAN 数据库夹具（`typical.dbc`：Intel/Motorola、有符号、带单位） | M3-08 |
 | `config/` | 轴绑定 golden 的工程配置（`axis-binding-golden.toml`）与期望 IR 快照（`.ir.json`） | M3-06 |
 | `a2l/` | 轴绑定导出的 golden A2L 片段（`axis-binding-golden.a2l`）与档二 golden（`elf-export-golden.a2l`：`test.elf` 全量导出） | M0-5 RFC 第 8 节 / M3-05 |
-| `cdf/` | CDF 档二 golden 三件套：输入样本（`minimal.cdf`）、变量名配置（`golden.names.toml`）、期望导入结果（`golden.import.json`） | M4-06 / M4-07 |
+| `cdf/` | CDF 档二 golden 三件套：输入样本（`minimal.cdf`）、变量名配置（`golden.names.toml`）、期望导入结果（`golden.import.json`）；另有一份 ISO-8859-1 编码样本（`latin1.cdfx`） | M4-06 / M4-07 |
 
 ## ELF 夹具：产物入库，源码随改随编
 
@@ -63,3 +63,9 @@ OPENAPE_WRITE_GOLDEN=1 cargo test -p openape-format-cdf --test golden
 没有这个开关时只比对不写。改了期望要在提交里说明是哪一种改动（样本／投影／提示），否则"改实现顺手改 golden"会让比对失去意义。
 
 **已知边界**：`format-cdf` 按 CDF 2.0.0 实现，2.1.0 与 2.0.0 的差异未验证；真实工具链导出的文件到手后，应先跑一遍解析、把元素集表里的漏项补齐，再考虑补进 fixtures。
+
+### `cdf/latin1.cdfx`：编码路径的钉子
+
+真实 CDF/CDFX 导出件常写成 `ISO-8859-1`（ETAS 系工具如此），单位里的 `°C` 就是 `0xB0` 一个字节。按 UTF-8 读会让整份合法文件失败——这是最容易漏掉的失败方式，所以单放一份样本钉住它：`parse_file` 先按 UTF-8 读，不行再按 ISO-8859-1 解码并给提示。
+
+这份文件**必须保持 ISO-8859-1 编码**，改动后别让编辑器顺手转成 UTF-8，否则测的就不是这条路径了。文件里的注释也只能用 ASCII（ISO-8859-1 装不下中文）。
