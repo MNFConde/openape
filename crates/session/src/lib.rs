@@ -12,6 +12,7 @@ pub mod dbc_observer;
 pub mod engine;
 pub mod lock;
 pub mod pages;
+pub mod recorder;
 pub mod seq;
 pub mod trigger;
 pub mod write;
@@ -23,6 +24,9 @@ pub use dbc_observer::{CanObserver, DecodedFrame, DecodedSignal};
 pub use engine::{ChannelProbe, Session, SessionConfig, list_channels, probe_channel};
 pub use lock::DeviceLock;
 pub use pages::calibration_variables;
+pub use recorder::{
+    DEFAULT_QUEUE_CAPACITY, Recorder, RecorderChannel, RecorderConfig, RecorderStats,
+};
 pub use trigger::{
     Compare, Condition, TriggerConfig, TriggerHandle, TriggerRecorder, TriggerWindow,
     spawn_trigger, write_window,

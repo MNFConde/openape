@@ -25,3 +25,5 @@ pub const PAGE: u32 = 14;
 pub const RANGE: u32 = 15;
 /// 触发录制未命中或未收齐。
 pub const TRIGGER: u32 = 16;
+/// 常时录制（MF4 + CSV）配置或落盘失败。
+pub const RECORDER: u32 = 17;

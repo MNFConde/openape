@@ -1186,11 +1186,13 @@ name = "openape-session"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "mf4-rs",
  "openape-bus",
  "openape-bus-socketcan",
  "openape-cal-core",
  "openape-diag",
  "openape-format-dbc",
+ "openape-format-mf4",
  "openape-xcp",
  "serde",
  "serde_json",
