@@ -184,13 +184,26 @@ impl SimEcu {
                 }
             }
             Command::Download { len: _, data } => {
-                let start = self.mta as usize;
-                if start + data.len() > self.memory.len() {
+                if !self.write_memory(self.mta, &data) {
                     return err(ErrorCode::OutOfRange);
                 }
-                self.memory[start..start + data.len()].copy_from_slice(&data);
                 self.mta = self.mta.saturating_add(data.len() as u32);
                 ok(code, vec![])
+            }
+            Command::ShortDownload {
+                len: _,
+                address_extension,
+                address,
+                data,
+            } => {
+                if address_extension != 0 {
+                    return err(ErrorCode::OutOfRange);
+                }
+                if self.write_memory(address, &data) {
+                    ok(code, vec![])
+                } else {
+                    err(ErrorCode::OutOfRange)
+                }
             }
             // pyXCP 取 response[2]（PID 与保留位之后），单字节标准响应它读不到第 3 字节
             Command::GetCalPage { .. } => ok(code, vec![0x00, 0x00, self.page]),
@@ -270,6 +283,20 @@ impl SimEcu {
         let start = address as usize;
         let end = start.checked_add(len as usize)?;
         (end <= self.memory.len()).then(|| self.memory[start..end].to_vec())
+    }
+
+    /// 写内存。越界整笔拒绝，不写半截——半截写入会让 master 的写后读回
+    /// 对不上，却查不出是哪一半没写进去。
+    fn write_memory(&mut self, address: u32, data: &[u8]) -> bool {
+        let start = address as usize;
+        let Some(end) = start.checked_add(data.len()) else {
+            return false;
+        };
+        if end > self.memory.len() {
+            return false;
+        }
+        self.memory[start..end].copy_from_slice(data);
+        true
     }
 }
 
@@ -844,6 +871,49 @@ mod tests {
                 frame.len()
             );
         }
+    }
+
+    #[test]
+    fn short_download_writes_without_moving_the_transfer_address() {
+        // 经典 CAN 一帧 8 字节装不下带数据的短写，所以这里手搓加宽帧——从站
+        // 按 `len` 取数据，帧有多宽与它无关（CAN FD 上是常态）。
+        let mut ecu = ecu();
+        let _ = send(
+            &mut ecu,
+            Command::SetMta {
+                address_extension: 0,
+                address: 0x3000,
+            },
+        );
+        expect_ok(
+            ecu.handle(&[0xED, 2, 0, 0, 0x00, 0x20, 0x00, 0x00, 0x12, 0x34]),
+            CommandCode::ShortDownload,
+        );
+        assert_eq!(ecu.peek(0x2000, 2), &[0x12, 0x34], "写到了短写地址");
+        // 传输地址没动：接着 DOWNLOAD 应当落在 0x3000。
+        let _ = send(
+            &mut ecu,
+            Command::Download {
+                len: 1,
+                data: vec![0x77],
+            },
+        );
+        assert_eq!(ecu.peek(0x3000, 1), &[0x77], "短写不该动 MTA");
+    }
+
+    #[test]
+    fn short_download_past_the_end_is_refused() {
+        let mut ecu = ecu();
+        // 地址 0xFFFE + 2 字节正好写满，再加一字节就出界。
+        let last_two = [0xED, 2, 0, 0, 0xFE, 0xFF, 0x00, 0x00, 0x11, 0x22];
+        expect_ok(ecu.handle(&last_two), CommandCode::ShortDownload);
+
+        let past_end = [0xED, 2, 0, 0, 0xFF, 0xFF, 0x00, 0x00, 0x33, 0x44];
+        match ecu.handle(&past_end) {
+            Response::Err { code } => assert_eq!(code, ErrorCode::OutOfRange as u8),
+            other => panic!("期望越界错误，实际 {other:?}"),
+        }
+        assert_eq!(ecu.peek((MEM_SIZE - 1) as u32, 1), &[0x22], "越界不写半截");
     }
 
     #[test]

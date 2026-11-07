@@ -3,6 +3,10 @@
 use crate::codec::{Decoder, Encoder};
 use crate::{DecodeError, EncodeError, MAX_CTO};
 
+/// 短读写与设置传输地址里那个"保留字节"的取值。参考从站（xcplib）把它当
+/// 填充，不用；发出去就写 0，不要往里塞地址扩展——地址扩展在第 3 字节。
+const RESERVED: u8 = 0;
+
 /// 命令码。数值取自 ASAM XCP 标准；M0-2 spike 里有两条错值，见模块文档。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
@@ -25,6 +29,8 @@ pub enum CommandCode {
     ShortUpload = 0xF4,
     /// 向当前地址写。
     Download = 0xF0,
+    /// 按地址短写。
+    ShortDownload = 0xED,
     /// 查标定页。
     GetCalPage = 0xEA,
     /// 切标定页。
@@ -68,6 +74,7 @@ impl CommandCode {
             0xF5 => Self::Upload,
             0xF4 => Self::ShortUpload,
             0xF0 => Self::Download,
+            0xED => Self::ShortDownload,
             0xEA => Self::GetCalPage,
             0xEB => Self::SetCalPage,
             0xDA => Self::GetDaqProcessorInfo,
@@ -128,6 +135,17 @@ pub enum Command {
     Download {
         /// 字节数。
         len: u8,
+        /// 数据，长度与 `len` 一致。
+        data: Vec<u8>,
+    },
+    /// 按地址短写，不动传输地址。
+    ShortDownload {
+        /// 字节数。
+        len: u8,
+        /// 地址扩展。
+        address_extension: u8,
+        /// 目标地址。
+        address: u32,
         /// 数据，长度与 `len` 一致。
         data: Vec<u8>,
     },
@@ -240,6 +258,7 @@ impl Command {
             Self::Upload { .. } => CommandCode::Upload,
             Self::ShortUpload { .. } => CommandCode::ShortUpload,
             Self::Download { .. } => CommandCode::Download,
+            Self::ShortDownload { .. } => CommandCode::ShortDownload,
             Self::GetCalPage { .. } => CommandCode::GetCalPage,
             Self::SetCalPage { .. } => CommandCode::SetCalPage,
             Self::GetDaqProcessorInfo => CommandCode::GetDaqProcessorInfo,
@@ -284,6 +303,7 @@ impl Command {
                 address,
             } => Encoder::with_command(code)
                 .u8(*len)
+                .u8(RESERVED)
                 .u8(*address_extension)
                 .u32(*address)
                 .finish(),
@@ -295,6 +315,26 @@ impl Command {
                     });
                 }
                 Encoder::with_command(code).u8(*len).bytes(data).finish()
+            }
+            Self::ShortDownload {
+                len,
+                address_extension,
+                address,
+                data,
+            } => {
+                if data.len() != *len as usize {
+                    return Err(EncodeError::LenMismatch {
+                        declared: *len,
+                        actual: data.len(),
+                    });
+                }
+                Encoder::with_command(code)
+                    .u8(*len)
+                    .u8(RESERVED)
+                    .u8(*address_extension)
+                    .u32(*address)
+                    .bytes(data)
+                    .finish()
             }
             Self::GetCalPage { mode, segment } => {
                 Encoder::with_command(code).u8(*mode).u8(*segment).finish()
@@ -404,6 +444,7 @@ impl Command {
             CommandCode::Upload => Self::decode_upload(decoder),
             CommandCode::ShortUpload => Self::decode_short_upload(decoder),
             CommandCode::Download => Self::decode_download(decoder),
+            CommandCode::ShortDownload => Self::decode_short_download(decoder),
             CommandCode::GetCalPage => Self::decode_get_cal_page(decoder),
             CommandCode::SetCalPage => Self::decode_set_cal_page(decoder),
             CommandCode::GetDaqProcessorInfo => Ok(Self::GetDaqProcessorInfo),
@@ -479,6 +520,7 @@ impl Command {
 
     fn decode_short_upload(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
         let len = decoder.u8()?;
+        let _reserved = decoder.u8()?;
         let address_extension = decoder.u8()?;
         Ok(Self::ShortUpload {
             len,
@@ -491,6 +533,21 @@ impl Command {
         let len = decoder.u8()?;
         let data = decoder.take(len as usize)?.to_vec();
         Ok(Self::Download { len, data })
+    }
+
+    fn decode_short_download(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
+        let len = decoder.u8()?;
+        let _reserved = decoder.u8()?;
+        let address_extension = decoder.u8()?;
+        let address = decoder.u32()?;
+        // 数据从第 8 字节起；`len` 是权威，帧尾的填充零不算数据。
+        let data = decoder.take(len as usize)?.to_vec();
+        Ok(Self::ShortDownload {
+            len,
+            address_extension,
+            address,
+            data,
+        })
     }
 
     fn decode_get_cal_page(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
@@ -671,6 +728,100 @@ mod tests {
     }
 
     #[test]
+    fn short_write_matches_the_reference_slave_layout() {
+        // 参考从站（xcplib）的宏：SHORT_DOWNLOAD 的 SIZE 在 byte1、EXT 在
+        // byte3、ADDR 是 dword[1]（byte4..8）、数据从 byte8 起。经典 CAN 一帧
+        // 8 字节，所以 32 位地址下短写装不下数据——空写是它的极限形态。
+        assert_eq!(
+            Command::ShortDownload {
+                len: 0,
+                address_extension: 0,
+                address: 0x1000,
+                data: vec![],
+            }
+            .encode()
+            .expect("空写正好一帧"),
+            vec![0xED, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00]
+        );
+
+        // 帧宽够时（CAN FD / 以太网）数据落在 byte8 之后，`len` 决定取几字节，
+        // 帧尾填充零不算数据。
+        let wide = [
+            0xED, 0x02, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0xAA, 0xBB, 0x00, 0x00,
+        ];
+        assert_eq!(
+            Command::decode(&wide),
+            Ok(Command::ShortDownload {
+                len: 2,
+                address_extension: 0,
+                address: 0x1000,
+                data: vec![0xAA, 0xBB],
+            })
+        );
+    }
+
+    #[test]
+    fn short_write_refuses_data_that_cannot_fit_a_classic_frame() {
+        // 命令码 + len + 保留 + ext + 地址 = 8 字节，数据必然溢出。
+        let err = Command::ShortDownload {
+            len: 2,
+            address_extension: 0,
+            address: 0x1000,
+            data: vec![0xAA, 0xBB],
+        }
+        .encode()
+        .expect_err("经典 CAN 放不下带数据的短写");
+        assert_eq!(
+            err,
+            EncodeError::TooLong {
+                len: 10,
+                max: MAX_CTO
+            }
+        );
+    }
+
+    #[test]
+    fn short_write_rejects_len_that_disagrees_with_data() {
+        let err = Command::ShortDownload {
+            len: 4,
+            address_extension: 0,
+            address: 0x1000,
+            data: vec![0xAA],
+        }
+        .encode()
+        .expect_err("长度与数据不一致");
+        assert_eq!(
+            err,
+            EncodeError::LenMismatch {
+                declared: 4,
+                actual: 1
+            }
+        );
+    }
+
+    #[test]
+    fn short_upload_puts_the_address_extension_on_byte_three() {
+        // 同一套布局：byte2 是保留字节，地址扩展在 byte3。ext=0 时与 M0-2 抓帧
+        // 逐字节相同，ext≠0 时才是这条测试真正钉住的东西。
+        let frame = Command::ShortUpload {
+            len: 2,
+            address_extension: 1,
+            address: 0x1002,
+        }
+        .encode()
+        .expect("一帧放得下");
+        assert_eq!(frame, vec![0xF4, 0x02, 0x00, 0x01, 0x02, 0x10, 0x00, 0x00]);
+        assert_eq!(
+            Command::decode(&frame),
+            Ok(Command::ShortUpload {
+                len: 2,
+                address_extension: 1,
+                address: 0x1002,
+            })
+        );
+    }
+
+    #[test]
     fn every_command_round_trips() {
         let commands = [
             Command::Connect { mode: 0 },
@@ -691,6 +842,12 @@ mod tests {
             Command::Download {
                 len: 2,
                 data: vec![0x11, 0x22],
+            },
+            Command::ShortDownload {
+                len: 0,
+                address_extension: 0,
+                address: 0x1000,
+                data: vec![],
             },
             Command::GetCalPage {
                 mode: 0,
@@ -745,6 +902,15 @@ mod tests {
                 CommandCode::Download,
             ),
             (
+                Command::ShortDownload {
+                    len: 0,
+                    address_extension: 0,
+                    address: 0,
+                    data: vec![],
+                },
+                CommandCode::ShortDownload,
+            ),
+            (
                 Command::GetCalPage {
                     mode: 0,
                     segment: 0,
@@ -782,6 +948,7 @@ mod tests {
             (0xF5, CommandCode::Upload),
             (0xF4, CommandCode::ShortUpload),
             (0xF0, CommandCode::Download),
+            (0xED, CommandCode::ShortDownload),
             (0xEA, CommandCode::GetCalPage),
             (0xEB, CommandCode::SetCalPage),
         ];
