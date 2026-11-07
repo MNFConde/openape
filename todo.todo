@@ -53,20 +53,38 @@
 [x] M3-11 feat(ui)：标定量表格 + 统一故障面板 → 验收：故障面板只读 diag 的 Fault，不自造错误类型
 [x] M3-12 docs：M3 收尾（golden 说明、fixtures 补件、状态回写）→ 验收：文档与实现无矛盾
 
-[ ] M4 标定写入（含写前快照与审计日志）+ 页切换与页对比 + 条件触发录制 + A2L 量程校验 + dataset JSON/DCM 导入/对比（含 DCM 解析的档二 golden）（15 项）—— MVP 完成
-[ ] M4-01 feat(xcp-proto)：写入命令码（DOWNLOAD / SHORT_DOWNLOAD）与帧编解码 → 验收：写帧与现有 spike 样本逐字节对照一致，长度或对齐非法即拒绝
-[ ] M4-02 feat(sim-ecu)：从站写侧（分块写、写后读回、页号寻址）→ 验收：页 0 与页 1 的内存互不串扰，越界写返回从站错误码
-[ ] M4-03 feat(xcp)：写通路（短写 + 按 max_cto 分块 + 写后读回）与页切换收口 → 验收：读回不一致给可分类 Fault，非法页号带可操作建议
-[ ] M4-04 feat(cal-core)：dataset 模型与 JSON 读写（版本字段 + 模式标记：仅 ELF / 带 A2L）→ 验收：旧版可读、两档数值混比被拒、diff 输出排序稳定
-[ ] M4-05 feat(format-dcm)：crate 成立 + DCM 只读解析（值表 + 按 A2L 名或地址映射）→ 验收：坏文件给可操作提示，不 panic
-[ ] M4-06 test：DCM 档二 golden 三件套入库（与实现同批，不先于被测对象）→ 验收：纯重构零 diff
-[ ] M4-07 feat(session)：写入编排——单点写 + 写前读回 + 写前快照 + 写后校验 + 审计日志（谁/何时/写前写后值）→ 验收：每次写入落快照与审计各一条，整表批量入口不存在（D-13）
-[ ] M4-08 feat(session)：A2L 量程写入前校验 → 验收：越界被拒并报 min/max 与实际值；无 A2L 时不校验但标 [raw]
-[ ] M4-09 feat(session)：页切换 + 参考页与工作页 diff 及复制 → 验收：diff 只列差异地址，复制前需显式确认
-[ ] M4-10 feat(session)：条件触发录制（判据 + 前后环形窗口，命中即导出窗口）→ 验收：命中落在窗口中途时导出含命中前缓冲，未命中零落盘
-[ ] M4-11 feat(proto)：写入 / 页 / dataset 三类方法与 schema → 验收：CLI 与 UI 共用同一类型、地址仍用 string、审计与快照字段可直接查询
-[ ] M4-12 feat(daemon)：写入与页操作经 daemon 代理托管 → 验收：daemon 持硬件时 CLI 写入不抢锁，失败形状仍走 FaultList
-[ ] M4-13 feat(cli)：write / page / dataset 子命令（人类可读 + --json + 分段退出码）→ 验收：写入前打印快照与量程结论，一条命令一次自足事务
-[ ] M4-14 feat(ui)：标定量写入与页对比视图 → 验收：写入经确认，故障进统一面板，不自造错误类型
-[ ] M4-15 docs：M4 收尾（12 号清单新增写入类第五节、dataset 与 DCM 说明、状态回写）→ 验收：文档与实现无矛盾
-[ ] M5+ MDF4 录制与离线重开分析 / 怪癖配置层完善 / ZLG FFI 后端实作 / CAN-FD 实作 / XCP-on-Ethernet
+[ ] M4 标定写入（含写前快照与审计日志）+ 页切换与页对比 + 条件触发录制 + A2L 量程校验 + dataset JSON/DCM 导入/对比（含 DCM 解析的档二 golden）（16 项）—— MVP 完成
+[ ] M4-01 feat(xcp-proto)：补 SHORT_DOWNLOAD 命令码与帧编解码（DOWNLOAD 已在 M1 落地，只补短写）→ 验收：短写帧与现有 spike 样本逐字节对照一致，长度或对齐非法即拒绝
+[ ] M4-02 feat(xcp-proto)：GET_SEED / UNLOCK 命令码与帧编解码 → 验收：seed 与 key 序列与 sim-ecu 回放一致，错误 key 返回从站拒绝码
+[ ] M4-03 feat(sim-ecu)：从站写侧补齐——页独立内存（页 0 与页 1 各一份）+ 短写 + 保护种子与密钥模拟 → 验收：页间互不串扰，未解锁时写入被拒
+[ ] M4-04 feat(xcp)：写通路（短写 + 按 max_cto 分块 + 写后读回）+ 页切换与解锁收口（key 算法外部可配，默认示例算法）→ 验收：读回不一致给可分类 Fault，非法页号与未解锁带可操作建议
+[ ] M4-05 feat(cal-core)：dataset 模型与 JSON 读写（版本字段 + 模式标记：仅 ELF / 带 A2L）→ 验收：旧版可读、两档数值混比被拒、diff 输出排序稳定
+[ ] M4-06 feat(format-dcm)：crate 成立 + DCM 只读解析（值表 + 按 A2L 名或地址映射）→ 验收：坏文件给可操作提示，不 panic
+[ ] M4-07 test：DCM 档二 golden 三件套入库（与实现同批，不先于被测对象）→ 验收：纯重构零 diff
+[ ] M4-08 feat(session)：写入编排——单点写 + 写前读回 + 写前快照 + 写后校验 + 审计日志（谁/何时/写前写后值）→ 验收：每次写入落快照与审计各一条，整表批量入口不存在（D-13）
+[ ] M4-09 feat(session)：A2L 量程写入前校验 → 验收：越界被拒并报 min/max 与实际值；无 A2L 时不校验但标 [raw]
+[ ] M4-10 feat(session)：页切换 + 参考页与工作页 diff 及复制 → 验收：diff 只列差异地址，复制前需显式确认
+[ ] M4-11 feat(session)：条件触发录制（判据 + 前后环形窗口，命中即导出窗口）→ 验收：命中落在窗口中途时导出含命中前缓冲，未命中零落盘
+[ ] M4-12 feat(proto)：写入 / 页 / dataset 三类方法与 schema → 验收：CLI 与 UI 共用同一类型、地址仍用 string、审计与快照字段可直接查询
+[ ] M4-13 feat(daemon)：写入与页操作经 daemon 代理托管 → 验收：daemon 持硬件时 CLI 写入不抢锁，失败形状仍走 FaultList
+[ ] M4-14 feat(cli)：write / page / dataset 子命令（人类可读 + --json + 分段退出码）→ 验收：写入前打印快照与量程结论，一条命令一次自足事务
+[ ] M4-15 feat(ui)：标定量写入与页对比视图 → 验收：写入经确认，故障进统一面板，不自造错误类型
+[ ] M4-16 docs：M4 收尾（12 号清单新增写入类第五节、dataset 与 DCM 说明、状态回写，并更正 gateway 方法名与 CAN-FD 的 MVP 归属）→ 验收：文档与实现、文档之间均无矛盾
+[ ] M5 录制与离线重开分析 + 怪癖配置层 + 真机后端（ZLG / CAN-FD）+ XCP-on-Ethernet + 交付面（17 项）
+[ ] M5-01 refactor(ui)：抽出数据源接口（实时流与文件同一入口），曲线页只经接口取数——离线与实时必须共用同一接口 → 验收：换成假数据源时组件零改动
+[ ] M5-02 feat(format-mf4)：crate 成立 + MDF4 写入（录制）→ 验收：产物能被 mf4-rs 与第三方工具读回，通道与时间戳与样本一致
+[ ] M5-03 feat(session)：录制器（样本流 → MF4 + CSV，含背压与丢帧记账）→ 验收：一次采集落 MF4 与 CSV，样本数与指标一致
+[ ] M5-04 feat(session)：条件触发录制接录制器，统一 M4-11 的窗口导出出口（前置 M5-03）→ 验收：命中窗口与录制文件时间轴对齐，未命中零落盘
+[ ] M5-05 feat(format-mf4)：MDF4 读取 + 离线重开（前置 M5-01、M5-02）→ 验收：离线曲线与实时曲线走同一条渲染路径
+[ ] M5-06 feat(cal-core)：quirk 扩展点（外部配置填 trait，D-06）→ 验收：类 ECU 差异改配置不改代码，坏配置给可操作提示
+[ ] M5-07 feat(sim-ecu)：怪癖注入，复现 M5-06 的配置（前置 M5-06）→ 验收：注入的填充与回显差异在 vcan 上可复现
+[ ] M5-08 feat(bus-zlg)：ZLG FFI 后端 + 装配分支（仅 Windows）→ 验收：12 号 H-01–H-17 全绿，能力位如实上报
+[ ] M5-09 feat(bus-socketcan)：CAN-FD 收发与能力位，经典帧不回归 → 验收：H-02 能力位与驱动一致，FD 帧双向收发通
+[ ] M5-10 feat(bus-replay)：BLF / ASC 日志回放后端（按用户请求触发）→ 验收：回放与实时走同一条采集通路
+[ ] M5-11 feat(bus-socketcand)：socketcand 客户端（按用户请求触发）→ 验收：能力位按服务端如实上报，上层零分支
+[ ] M5-12 feat(xcp)：XCP-on-Ethernet 传输（经 XcpConnection，UDP 先行）→ 验收：与 xcp-lite 从站互通，CONNECT 与 DAQ 跑通
+[ ] M5-13 feat(ui-tauri)：桌面壳与 daemon sidecar（仅 Windows，D-21）→ 验收：双击启动可用，sidecar 生命周期与崩溃重启正确
+[ ] M5-14 chore(ci)：GitHub Actions（cargo 四门 + 前端检查 + 文档三检查 + golden）→ 验收：PR 上全绿且与本机结论一致
+[ ] M5-15 test/docs：契约 crate 的 examples/（D-20 完成标准）+ cargo semver-checks 门 → 验收：每个契约 crate 有只用公开 API 的流程，semver 检查可跑
+[ ] M5-16 feat(cli)：doctor 自检，与分阶段探测共用判定实现 → 验收：各故障类别的判定条件可一次跑完
+[ ] M5-17 feat(ui)：性能面板 + CLI 实时视图（五项一等指标）→ 验收：指标出口的数据在界面与终端都可见
