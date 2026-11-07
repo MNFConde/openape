@@ -43,7 +43,7 @@ updated: 2026-11-05
 |---|---|
 | ASAM MCD-1 XCP | 协议命令帧、DAQ 与页切换语义 |
 | ASAM MCD-2 MC（A2L） | 标定描述文件结构与关键字 |
-| ASAM MCD-1 DCM | 标定数据集体格式 |
+| ASAM CDF | 标定数据集体交换格式（XML + schema）。取代原计划的 MCD-1 DCM——后者已不在 ASAM 现行目录，见 [D-24](decisions.md#d-24-数据集对接格式改判-cdf) |
 | ASAM MDF4 | 录制文件格式 |
 | ISO 11898（CAN 与 CAN-FD） | 帧格式与 CAN-FD 位速率切换 |
 | DWARF 标准 | 调试信息结构 |

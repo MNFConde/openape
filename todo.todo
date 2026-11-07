@@ -39,12 +39,12 @@
 [x] M2-14 feat(cli)：--via-daemon 经本地 gRPC 复用运行中的会话 → 验收：daemon 持有硬件时 CLI 探测不抢锁
 [x] M2-15 docs：复核 pyXCP 两处非标准行为（GET_CAL_PAGE 响应补齐、WRITE_DAQ 指针自增）并落 D-12 更正 → 验收：结论带 ASAM 条款或实测证据
 
-[x] M3 ELF 前端 + ELF→A2L 导出 + DBC 解码显示 + 档二 golden + 交叉校验（12 项）——vcan 与夹具上全部验证；DCM 部分随 M4
+[x] M3 ELF 前端 + ELF→A2L 导出 + DBC 解码显示 + 档二 golden + 交叉校验（12 项）——vcan 与夹具上全部验证；CDF 部分随 M4
 [x] M3-01 feat(format-elf)：crate 成立 + DWARF 抽取（gimli/object，借 a2ltool 逻辑）→ 名/类型/地址/长度/布局/enum → 验收：fixtures ELF 抽取结果与 C 源码一致
 [x] M3-02 feat(format-elf)：加载体检（-g / 未 strip 检测 + 逐条可操作提示，只警告不阻断）+ static 同名跨 CU 加前缀 → 验收：strip 过的 ELF 给出带修复命令的提示
 [x] M3-03 feat(format-elf)：ELF → IR（仅 ELF 档：语义字段 None、角色留待用户指定）→ 验收：不推断单位、量程与角色
 [x] M3-04 feat(format-elf)：ELF → A2L 导出（维度取自 DWARF，轴归属由工程配置给出）→ 验收：导出件能被 a2lfile 严格模式接受
-[x] M3-05 test：档二 golden——ELF→A2L 字节级对比，三件套入库（DCM 部分随 M4 实现同批）→ 验收：纯重构零 diff
+[x] M3-05 test：档二 golden——ELF→A2L 字节级对比，三件套入库（CDF 部分随 M4 实现同批）→ 验收：纯重构零 diff
 [x] M3-06 test：轴绑定 golden 三件套入库（ELF 夹具、工程配置、期望 JSON 与 A2L 片段），按 10 号 RFC 第 8 节的字节级口径 → 验收：正例全过、R1–R7 反例各一条
 [x] M3-07 feat(assembly)：crate 成立 + A2L 与 ELF 交叉校验（地址/尺寸/类型冲突报告）→ 验收：冲突在 probe source 阶段即出报告
 [x] M3-08 feat(format-dbc)：crate 成立 + DBC 解析 + 信号 pack/unpack（自研）→ 验收：与 can-dbc 逐条对照，差异列举并注明采纳哪边及理由（DBC 无公开规范，对照不是标准）
@@ -53,16 +53,15 @@
 [x] M3-11 feat(ui)：标定量表格 + 统一故障面板 → 验收：故障面板只读 diag 的 Fault，不自造错误类型
 [x] M3-12 docs：M3 收尾（golden 说明、fixtures 补件、状态回写）→ 验收：文档与实现无矛盾
 
-[ ] M4 标定写入（含写前快照与审计日志）+ 页切换与页对比 + 条件触发录制 + A2L 量程校验 + dataset JSON/DCM 导入/对比（含 DCM 解析的档二 golden）+ ZLG 真机后端（17 项）—— MVP 完成
+[ ] M4 标定写入（含写前快照与审计日志）+ 页切换与页对比 + 条件触发录制 + A2L 量程校验 + dataset JSON/CDF 导入/对比（含 CDF 解析的档二 golden）+ ZLG 真机后端（17 项）—— MVP 完成
 [x] M4-01 feat(xcp-proto)：补 SHORT_DOWNLOAD 命令码与帧编解码（DOWNLOAD 已在 M1 落地，只补短写）→ 验收：短写帧与现有 spike 样本逐字节对照一致，长度或对齐非法即拒绝
 [x] M4-02 feat(xcp-proto)：GET_SEED / UNLOCK 命令码与帧编解码 → 验收：seed 与 key 序列与 sim-ecu 回放一致，错误 key 返回从站拒绝码
 [x] M4-03 feat(sim-ecu)：从站写侧补齐——页独立内存（页 0 与页 1 各一份）+ 短写 + 保护种子与密钥模拟 → 验收：页间互不串扰，未解锁时写入被拒
 [x] M4-04 feat(xcp)：写通路（短写 + 按 max_cto 分块 + 写后读回）+ 页切换与解锁收口（key 算法外部可配，默认示例算法）→ 验收：读回不一致给可分类 Fault，非法页号与未解锁带可操作建议
 [x] M4-05 feat(cal-core)：dataset 模型与 JSON 读写（版本字段 + 模式标记：仅 ELF / 带 A2L）→ 验收：旧版可读、两档数值混比被拒、diff 输出排序稳定
-[ ] M4-06 feat(format-dcm)：crate 成立 + DCM 只读解析（值表 + 按 A2L 名或地址映射）→ 验收：坏文件给可操作提示，不 panic
-    阻塞（2026-11-07）：手头既无 ASAM MCD-1 DCM 规范原文也无真实 `.dcm` 样本，按记忆写解析器等于发明格式；需先补规格与一份可入库的样本，再动工
-[ ] M4-07 test：DCM 档二 golden 三件套入库（与实现同批，不先于被测对象）→ 验收：纯重构零 diff
-    随 M4-06 阻塞：golden 不能先于被测对象存在
+[ ] M4-06 feat(format-cdf)：crate 成立 + CDF 只读解析（XML 值表 + 按 A2L 名或地址映射 + schema 校验）→ 验收：坏文件给可操作提示，不 panic，越出 schema 即拒绝
+    改判说明（2026-11-07）：原定 DCM，因 ASAM MCD-1 DCM 已退役、规范与样本都拿不到而改判 CDF（D-24）。前置：先从 ASAM 取到 CDF 规范与 XSD，并入库一份真实 `.cdf` 样本作 fixtures
+[ ] M4-07 test：CDF 档二 golden 三件套入库（与实现同批，不先于被测对象）→ 验收：纯重构零 diff
 [x] M4-08 feat(session)：写入编排——单点写 + 写前读回 + 写前快照 + 写后校验 + 审计日志（谁/何时/写前写后值）→ 验收：每次写入落快照与审计各一条，整表批量入口不存在（D-13）
 [x] M4-09 feat(session)：A2L 量程写入前校验 → 验收：越界被拒并报 min/max 与实际值；无 A2L 时不校验但标 [raw]
 [x] M4-10 feat(session)：页切换 + 参考页与工作页 diff 及复制 → 验收：diff 只列差异地址，复制前需显式确认
@@ -72,7 +71,7 @@
 [x] M4-14 feat(cli)：write / page / dataset 子命令（人类可读 + --json + 分段退出码）→ 验收：写入前打印快照与量程结论，一条命令一次自足事务
 [x] M4-15 feat(ui)：标定量写入与页对比视图 → 验收：写入经确认，故障进统一面板，不自造错误类型
 [x] M4-16 feat(bus-zlg)：ZLG FFI 后端（仅 Windows）+ 装配层按配置选后端，随后执行档三抽验 → 验收：代码面无硬件即验（能力位如实、帧路径与 socketcan 行为对等、装配不按后端名分支）；真机面填实 H-01–H-17 与写入类第五节，硬件不在场时整段标「未验」且不阻塞本项
-[x] M4-17 docs：M4 收尾（12 号清单新增写入类第五节、dataset 与 DCM 说明、状态回写，并更正 gateway 方法名与 CAN-FD 的 MVP 归属）→ 验收：文档与实现、文档之间均无矛盾
+[x] M4-17 docs：M4 收尾（12 号清单新增写入类第五节、dataset 与 CDF 说明、状态回写，并更正 gateway 方法名与 CAN-FD 的 MVP 归属）→ 验收：文档与实现、文档之间均无矛盾
 [ ] M5 录制与离线重开分析 + 怪癖配置层 + 真机后端（CAN-FD 与复验）+ XCP-on-Ethernet + 交付面（17 项）
 [ ] M5-01 refactor(ui)：抽出数据源接口（实时流与文件同一入口），曲线页只经接口取数——离线与实时必须共用同一接口 → 验收：换成假数据源时组件零改动
 [ ] M5-02 feat(format-mf4)：crate 成立 + MDF4 写入（录制）→ 验收：产物能被 mf4-rs 与第三方工具读回，通道与时间戳与样本一致

@@ -97,6 +97,7 @@ updated: 2026-11-07
 - 决策：内部 dataset 文件用 JSON（diff/版本化友好）；MVP 加 DCM 只读导入（解析器自研）；DCM 双向后补。
 - 依据：JSON 对 git diff 与工具链最友好；DCM 是 INCA/WinOLS 事实标准，只读导入已可打通存量资产。
 - 影响：`format-dcm` 范围锁定为只读；dataset schema 需版本字段。
+- 更正说明（2026-11-07）：**对外互通格式由 DCM 改判为 CDF**，见 [D-24](#d-24-数据集对接格式改判-cdf)。"内部用 JSON + 只读导入 + schema 带版本字段"三条不变；改的只是"读哪种外来文件"。D-08 原文保留以留决策轨迹。
 
 ## D-09 仓库形态
 
@@ -238,3 +239,12 @@ updated: 2026-11-07
 - 决策：`bus-zlg` 提前到 M4 末尾（`todo.todo` 的 M4-16），验收分两层：**代码面**（能力位如实、帧路径与 socketcan 行为对等、装配按配置选后端，不需要硬件即验）与**真机面**（12 号清单 H-01–H-17 加写入类检查点，记录表填实）。硬件或驱动不在场时，M4 可勾但记录表整段标「未验」，真机复验落 M5-08，不阻塞 MVP。
 - 依据：（1）MVP 边界本就把周立功 CAN-FD 卡算在内（见 requirements 的"预留不做"段），把它排到 M5 是排期与边界的错位，不是取舍；（2）`Bus` trait 已把硬件差异关在 L2，装配层加一个配置分支即可，`xcp` 与 `session` 不动，改动面可控；（3）ZLG 的 FFI 面只有开设备、发、收三个（[D-11](#d-11-automotive-后端外挂裁决) 已核实），风险集中在 Windows 构建链与驱动，不在协议；（4）把"硬件是否在场"与"代码是否完成"拆成两层验收，避免把 MVP 完成绑在不可控的外部条件上。
 - 影响：M4 需补 Windows 侧构建链与 `zlgcan` 库路径的环境记录（[90-env.md](90-env.md)）；`bus-zlg` 是全仓第一个必须放开 `unsafe` 的位置——现有 15 个 crate 一律 `#![forbid(unsafe_code)]`，该项只在 FFI 模块内局部放开并注明理由；M5 增加一项真机复验（M5-08）。
+## D-24 数据集对接格式改判 CDF
+
+- 状态：已决策
+- 日期：2026-11-07
+- 规范位置：[requirements.md](requirements.md) 能力清单与验收口径、[11-architecture-layers.md](11-architecture-layers.md#切分判据与后置项)、[credits.md](credits.md#格式与规范)
+- 背景：[D-08](#d-08-数据集格式) 把 DCM 只读导入定为 MVP 的对外互通入口。M4 动工时这条路走不通：ASAM MCD-1 DCM 已不在现行标准目录（`asam.net/standards/detail/mcd-1-dcm/` 返回 404，现行页只有 MCD-1 CCP / MCD-1 XCP / MCD-2 MC / CDF / MCD-2 CERP），规范正文只剩退役文档渠道；公开样本与现成解析实现同样找不到。按记忆写解析器等于发明格式，与"未经确认的判断不写成既成事实"冲突——M4-06/M4-07 因此停在未动工状态。
+- 决策：MVP 的 dataset 对外互通格式由 DCM 改为 **ASAM CDF**（当前 2.x，Base Standard，XML + schema）；crate 名随之改为 `format-cdf`，范围仍是只读导入，内部 dataset 仍是 JSON（[D-08](#d-08-数据集格式) 的其余三条不变）。M4-06/M4-07 按 CDF 重写，仍未落地。
+- 依据：（1）CDF 是在册、在维护的 ASAM 标准，规范与配套文档可从官网取得，不像退役的 DCM 那样只剩购买渠道；（2）CDF 是 XML + XSD，能接上档一（权威校验器）与档二（golden 字节基线），DCM 的文本格式给不了这个条件；（3）CDF 覆盖标量、字符串、数组、曲线、map 与结构体，并带单位与质量/版次元信息，正对上我们的标定量模型；（4）工具链支持真实存在（MathWorks 与主流 MC 工具链都读写 CDF），属"事实可用"而非纸面标准。
+- 影响：`format-dcm` 不在本期建 crate；requirements 的"MVP 完成定义"与档二 golden 口径一并改为 CDF；[credits.md](credits.md#格式与规范) 的规范表随之替换。DCM 只保留"拿到真实样本后再议"的可能，不写进任何里程碑。**未验证项**：CDF 规范正文与 XSD 的下载方式与许可尚未实测（本会话只确认标准在册与其公开定位），动工前需先取到规范与 schema，并入库一份真实 `.cdf` 样本作 fixtures。

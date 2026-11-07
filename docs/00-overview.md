@@ -22,7 +22,7 @@ OpenAPE 是一个 Rust 开发的**开放汽车标定工具**（对标 CANape/INC
 | `format-elf` | L2 | ELF+DWARF → IR（维度取自 DWARF，轴归属归工程配置） | object、gimli，vendor 自 a2ltool 的 debuginfo（见 `vendor/a2ltool-dwarf/README.md`） |
 | `format-a2l` | L2 | A2L → IR；IR → A2L 生成 | a2lfile |
 | `format-dbc` | L2 | DBC → 报文/信号模型；信号 pack/unpack（自研，与 can-dbc 逐条对照） | 自研 |
-| `format-dcm` | L2 | DCM 标定数据集只读导入 | 自研解析 |
+| `format-cdf` | L2 | CDF 标定数据集只读导入（XML + schema 校验） | 自研解析，见 [D-24](decisions.md#d-24-数据集对接格式改判-cdf) |
 | `format-mf4` | L2 | 测量数据录制/导出 | mf4-rs、CSV |
 | `bus` | L2 | async Bus trait 与 `BusCapabilities`：帧类型位（经典/FD）、硬件时间戳、通道能力 | — |
 | `bus-socketcan` / `bus-socketcand` / `bus-zlg` / `bus-vector` / `bus-replay` | L2 | 各后端 | socketcan-rs 4.0、自研 socketcand 客户端、ZLG 官方库 FFI、Vector XL API（后补）、blf_asc |
@@ -53,7 +53,7 @@ OpenAPE 是一个 Rust 开发的**开放汽车标定工具**（对标 CANape/INC
 > 调研基准日 2026-11-04；维护状态与许可证详情见调研报告存档，此处只留结论。
 
 - **直接复用**：socketcan-rs 4.0（含 FD/异步/vcan）、a2lfile / a2ltool（A2L 读写与 DWARF→A2L）、object / gimli（ELF/DWARF）、can-dbc（DBC 解析）、mf4-rs（MDF4 读写）、blf_asc（BLF/ASC）、tonic 与 prost（gRPC/grpc-web）、tracing（结构化日志）、uPlot（Web 曲线）
-- **必须自研**：XCP master 与会话层（automotive 仅作行为参考，见 [D-16](decisions.md#d-16-xcp-master-自研)）、XCP 帧编解码、XCP-on-CAN 从站（见 [D-12](decisions.md#d-12-xcp-on-can-从站自研)）、DBC 信号 pack/unpack 语义（字节序/因子/多路复用）、socketcand 协议客户端、ZLG zlgcan FFI 后端、DCM 解析器、quirk 外部配置层、Curve/Map 轴点注记语法、故障分类学与可观测层
+- **必须自研**：XCP master 与会话层（automotive 仅作行为参考，见 [D-16](decisions.md#d-16-xcp-master-自研)）、XCP 帧编解码、XCP-on-CAN 从站（见 [D-12](decisions.md#d-12-xcp-on-can-从站自研)）、DBC 信号 pack/unpack 语义（字节序/因子/多路复用）、socketcand 协议客户端、ZLG zlgcan FFI 后端、CDF 解析器、quirk 外部配置层、Curve/Map 轴点注记语法、故障分类学与可观测层
 - **参考而非依赖**：阅读上游实现以理解协议或算法，产物代码自写，出处统一登记在 [credits.md](credits.md)
 - 依赖均为单人或实验性维护的项目，统一隔离在 trait 边界内，必要时 vendored fork（见 [decisions.md](decisions.md) D-07）；外部差异的定量屏蔽点见 [11-architecture-layers.md](11-architecture-layers.md#三道屏蔽墙)
 

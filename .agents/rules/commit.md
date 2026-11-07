@@ -160,6 +160,6 @@ echo "docs: 活性探针" > /tmp/probe-good.txt
 > 代码层门禁见第五节；本节管**产物**对不对，判定与细则依据见 vibe-project-init `references/acceptance.md`。本项目按档判定结果：
 
 - [ ] 档一·权威校验器（**适用，M3 起**）：A2L 导出件用 a2lfile 重新解析 + 版本降级检查，零 fatal 零 error 才算过
-- [ ] 档二·golden 基线（**适用，M3 落地**）：ELF→A2L 导出与 DCM 解析做字节级 golden 测试，fixtures 入库；更新 golden 须人工确认 diff；纯重构以字节零 diff 为通过线
+- [ ] 档二·golden 基线（**适用，M3 落地**）：ELF→A2L 导出与 CDF 解析做字节级 golden 测试，fixtures 入库；更新 golden 须人工确认 diff；纯重构以字节零 diff 为通过线
 - [ ] 档三·人工抽验（**适用，M1 起建清单**）：里程碑合入前真机抽验——周立功 CAN-FD 卡 + 目标 ECU，检查点矩阵随 M1 产出；发现问题按"发现 → 固化进 fixtures/golden → 门禁覆盖"回路回灌
 - 档四·决策日志：**不适用**——无运行时判定通道；条件成立时按 `references/acceptance.md` 启用

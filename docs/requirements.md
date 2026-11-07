@@ -17,7 +17,7 @@ updated: 2026-11-07
 4. **变量信息来源**：ELF（仅 ELF，DWARF）与 A2L 双前端建立变量结构；额外提供 ELF → A2L 导出。两档输入口径——仅 ELF 时提供变量名/类型/地址/长度/结构布局与用户自选轴值绑定，不提供单位、量程、物理换算、轴归属与标定-观测角色（角色由用户指定）；带 A2L 时提供全部语义。详见 [decisions.md](decisions.md) D-13
 5. **DBC 支持**：报文/信号解析与物理值换算
 6. **UI 形态**：Windows 桌面应用（Tauri 壳，与网页共用同一份前端产物）与全平台网页（daemon 托管，本地或远端）；界面代码只有一套，见 [decisions.md](decisions.md#d-21-native-gui-决策逆转)
-7. **标定数据集**：JSON dataset、对比 diff、DCM 只读导入
+7. **标定数据集**：JSON dataset、对比 diff、CDF 只读导入（[decisions.md](decisions.md#d-24-数据集对接格式改判-cdf)）
 8. **录制导出**：MDF4 与 CSV
 9. **两种使用形态**：常驻作业（daemon 加桌面或 Web UI，本地或远程）与单次探测（CLI 一条命令看现象，输出人类可读或 JSON，供外部脚本与 AI 代理编排测试环境）；两者共享同一套编排实现，见 [decisions.md](decisions.md) D-18
 10. **可观测性**：维测日志（帧级记录与运行时开关、故障时自动落盘最近窗口）、全系统统一故障上报（稳定编号、可操作建议、UI 统一故障面板）、内部性能指标（含丢帧数），见 [decisions.md](decisions.md) D-19
@@ -55,8 +55,8 @@ MVP 不做的：见下"不做 / 预留不做 / 怪癖兼容"三段。
 
 ## 验收口径
 
-- **进度注记（2026-11-07，M4 收尾）**：M4 的 17 项中 15 项已落地；M4-06/M4-07（DCM 只读导入与其 golden）因手头既无 ASAM MCD-1 DCM 规范原文也无真实 `.dcm` 样本而阻塞——按记忆写解析器等于发明格式，故未动工。因此下方"MVP 完成定义"里的"DCM 导入可用"一项**尚未满足**，其余各项已满足。
-- **MVP 完成定义**：todo.todo 中 M1–M4 全部勾完——即：vcan 上 sim-ecu 与 daemon 全链路采集/标定写入/页切换跑通；A2L 与 ELF 双前端 + ELF→A2L 导出出件；曲线与标定量表格在 Web UI 本地/远程可用；dataset 对比与 DCM 导入可用；CLI 分阶段探测命令与统一故障面板可用
-- **档二 golden（适用）**：ELF→A2L 导出在 M3 落地、DCM 解析在 M4 与实现同批落地——golden 不能先于被测对象存在；fixtures 入库，纯重构以零 diff 为通过线
+- **进度注记（2026-11-07，M4 收尾）**：M4 的 17 项中 15 项已落地；M4-06/M4-07（数据集对外互通与其 golden）原按 DCM 排的排期走不通——ASAM MCD-1 DCM 已不在现行标准目录、规范与样本都拿不到，故改判为 CDF（[D-24](decisions.md#d-24-数据集对接格式改判-cdf)），内容按 CDF 重写后仍未动工。因此下方"MVP 完成定义"里的"CDF 导入可用"一项**尚未满足**，其余各项已满足。
+- **MVP 完成定义**：todo.todo 中 M1–M4 全部勾完——即：vcan 上 sim-ecu 与 daemon 全链路采集/标定写入/页切换跑通；A2L 与 ELF 双前端 + ELF→A2L 导出出件；曲线与标定量表格在 Web UI 本地/远程可用；dataset 对比与 CDF 导入可用；CLI 分阶段探测命令与统一故障面板可用
+- **档二 golden（适用）**：ELF→A2L 导出在 M3 落地、CDF 解析在 M4 与实现同批落地——golden 不能先于被测对象存在；fixtures 入库，纯重构以零 diff 为通过线
 - **档三 人工抽验（适用，M1 起建清单）**：里程碑合入前用真机抽验——周立功 CAN-FD 卡 + 目标 ECU，检查点矩阵见 [12-hardware-checklist.md](12-hardware-checklist.md)（M1 产出）。2026-11-07 裁决：抽验的软件路径由 `bus-zlg`（Windows）在 M4 末尾提供；硬件或驱动不在场时该里程碑可勾，但抽验记录整段标「未验」，不得声明抽验通过，复验落 M5 的 M5-08，见 [decisions.md](decisions.md#d-23-真机抽验排期)
 - 门禁（代码层）见 `.agents/rules/commit.md`，与本文档验收口径（产物层）并存
