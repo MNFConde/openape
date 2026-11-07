@@ -4,9 +4,11 @@ use std::time::Duration;
 
 use openape_bus::CanId;
 use openape_cal_core::{Address, ByteLen};
-use openape_diag::Fault;
-use openape_proto::{BusReport, ConnectInfo, ConnectReport};
+use openape_diag::{Domain, Fault, FaultCode, Severity};
+use openape_proto::open_ape_client::OpenApeClient;
+use openape_proto::{BusReport, ConnectReport};
 use openape_session::{Session, SessionConfig, list_channels, probe_channel};
+use tonic::transport::Channel;
 
 use crate::output::{connect_info, probe_report, read_report, render};
 use crate::usage_fault;
@@ -19,7 +21,12 @@ pub(crate) async fn probe_bus(config_channel: Option<&str>, json: bool) -> Resul
         None => None,
     };
     let report = BusReport { channels, probed };
-    render(json, &report, || {
+    render_bus(json, &report)
+}
+
+/// 通道报告的双模渲染，直连与经 daemon 共用。
+pub(crate) fn render_bus(json: bool, report: &BusReport) -> Result<String, Fault> {
+    render(json, report, || {
         let mut out = format!("通道 {} 条", report.channels.len());
         if report.channels.is_empty() {
             out.push_str("\n  无 CAN 通道；vcan 可用 `ip link add dev vcan0 type vcan` 建一个");
@@ -65,14 +72,7 @@ pub(crate) async fn probe_xcp(
         )),
     };
     session.disconnect().await.ok();
-    let ConnectReport { channel, info } = &report;
-    let info: &ConnectInfo = info.as_ref().expect("上面刚构造");
-    render(json, &report, || {
-        format!(
-            "{channel} 建链成功：resource={:#04x} maxCto={} maxDto={}",
-            info.resource, info.max_cto, info.max_dto
-        )
-    })
+    render_connect(json, &report)
 }
 
 /// `read`：读一段内存并打印。
@@ -98,9 +98,7 @@ pub(crate) async fn read_memory(
         len.get(),
         &data,
     );
-    render(json, &report, || {
-        format!("{} {} = [{}]", report.address, report.len, report.data_hex)
-    })
+    render_read(json, &report)
 }
 
 /// 把命令行参数变成会话配置，顺手校验标识符范围。
@@ -122,6 +120,126 @@ pub(crate) fn session_config(
 fn to_standard_id(raw: u32, flag: &str) -> Result<u16, Fault> {
     u16::try_from(raw).map_err(|_| {
         usage_fault(format!("{flag} {raw:#x} 超出 16 位")).with_context("flag", flag.to_owned())
+    })
+}
+
+/// `--via-daemon` 不带值时的默认地址。
+pub(crate) const DAEMON_DEFAULT: &str = "http://127.0.0.1:47711";
+
+/// 经 daemon 探测通道：daemon 已经拿着设备锁，这里只是问它要答案。
+pub(crate) async fn probe_bus_via(
+    url: &str,
+    channel: Option<&str>,
+    json: bool,
+) -> Result<String, Fault> {
+    let mut client = connect(url).await?;
+    let channels = client
+        .list_channels(openape_proto::Empty {})
+        .await
+        .map_err(daemon_fault)?
+        .into_inner()
+        .channels;
+    let probed = match channel {
+        Some(channel) => Some(
+            client
+                .probe_channel(openape_proto::ProbeChannelRequest {
+                    channel: channel.to_owned(),
+                })
+                .await
+                .map_err(daemon_fault)?
+                .into_inner(),
+        ),
+        None => None,
+    };
+    let report = BusReport { channels, probed };
+    render_bus(json, &report)
+}
+
+/// 经 daemon 读内存。读之前 daemon 会让采集泵让开接收端。
+pub(crate) async fn read_via(
+    url: &str,
+    address: u32,
+    len: u16,
+    json: bool,
+) -> Result<String, Fault> {
+    if len == 0 {
+        return Err(usage_fault("--len 必须大于 0".into()));
+    }
+    let mut client = connect(url).await?;
+    let report = client
+        .read_memory(openape_proto::ReadRequest {
+            address: format!("0x{address:08x}"),
+            len: u32::from(len),
+        })
+        .await
+        .map_err(daemon_fault)?
+        .into_inner();
+    render_read(json, &report)
+}
+
+/// 经 daemon 看会话状态：它建好链了，就不必我们再连一次。
+pub(crate) async fn probe_xcp_via(url: &str, channel: &str, json: bool) -> Result<String, Fault> {
+    let mut client = connect(url).await?;
+    let status = client
+        .get_session(openape_proto::Empty {})
+        .await
+        .map_err(daemon_fault)?
+        .into_inner();
+    if !status.linked {
+        return Err(daemon_fault(
+            "daemon 没有接管任何通道；去掉 --via-daemon 直连设备",
+        ));
+    }
+    if status.channel != channel {
+        return Err(daemon_fault(format!(
+            "daemon 接管的是 {}，不是 {channel}",
+            status.channel
+        )));
+    }
+    let report = ConnectReport {
+        channel: status.channel,
+        info: status.info,
+    };
+    render_connect(json, &report)
+}
+
+async fn connect(url: &str) -> Result<OpenApeClient<Channel>, Fault> {
+    OpenApeClient::connect(url.to_owned())
+        .await
+        .map_err(|err| daemon_fault(format!("连不上 daemon {url}：{err}")))
+}
+
+/// daemon 侧的失败。归会话域：设备在 daemon 手里，问题出在那条会话上。
+fn daemon_fault(message: impl ToString) -> Fault {
+    Fault::new(
+        FaultCode::new(Domain::Session, 4).expect("序号 4 合法"),
+        Severity::Error,
+        message.to_string(),
+    )
+}
+
+/// 建链报告的双模渲染，两条路径共用，输出不会漂移。
+pub(crate) fn render_connect(json: bool, report: &ConnectReport) -> Result<String, Fault> {
+    let channel = &report.channel;
+    let info = report.info.as_ref();
+    render(json, report, || {
+        let Some(info) = info else {
+            return format!("{channel} 建链成功（daemon 未报告会话参数）");
+        };
+        format!(
+            "{channel} 建链成功：resource={:#04x} maxCto={} maxDto={}",
+            info.resource, info.max_cto, info.max_dto
+        )
+    })
+}
+
+/// 读结果的双模渲染。
+pub(crate) fn render_read(
+    json: bool,
+    report: &openape_proto::ReadResponse,
+) -> Result<String, Fault> {
+    render(json, report, || {
+        format!("{} {} = [{}]", report.address, report.len, report.data_hex)
     })
 }
 

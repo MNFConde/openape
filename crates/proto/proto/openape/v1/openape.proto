@@ -121,6 +121,14 @@ message HealthStatus {
   string version = 2;
 }
 
+// daemon 当前接管了什么。
+message SessionReport {
+  string channel = 1;
+  bool linked = 2;
+  ConnectInfo info = 3;
+  bool capturing = 4;
+}
+
 // CLI 的结构化输出：通道列表 + 可选的一条探测结果。
 message BusReport {
   repeated string channels = 1;
@@ -137,6 +145,10 @@ message ConnectReport {
 service OpenApe {
   rpc ListChannels(Empty) returns (ListChannelsResponse);
   rpc ProbeChannel(ProbeChannelRequest) returns (ChannelProbe);
+  // 读一段内存。daemon 接管硬件时由它代读，CLI 因此不必抢设备锁。
+  rpc ReadMemory(ReadRequest) returns (ReadResponse);
+  // daemon 的会话状态。CLI 用它回答"现在是谁拿着设备"。
+  rpc GetSession(Empty) returns (SessionReport);
   rpc Health(Empty) returns (HealthStatus);
   rpc GetMetrics(Empty) returns (MetricsSnapshot);
   // 采集样本流。慢消费者丢最旧，丢掉的量在指标里可查。

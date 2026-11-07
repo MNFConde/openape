@@ -889,17 +889,21 @@ dependencies = [
 name = "openape-cli"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "clap",
  "openape-bus",
  "openape-bus-socketcan",
  "openape-cal-core",
+ "openape-daemon",
  "openape-diag",
  "openape-proto",
  "openape-session",
  "openape-sim-ecu",
+ "openape-xcp",
  "serde",
  "serde_json",
  "tokio",
+ "tonic",
 ]
 
 [[package]]

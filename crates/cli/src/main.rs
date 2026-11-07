@@ -25,6 +25,19 @@ struct Cli {
     /// 记录每一帧（收发方向与字节）。
     #[arg(long, global = true)]
     frame_trace: bool,
+    /// 经运行中的 daemon 执行，复用它的会话与设备锁。
+    ///
+    /// 不给值时用 `http://127.0.0.1:47711`；自定义地址写成 `--via-daemon=URL`，
+    /// 必须是等号形式，否则子命令名会被当成地址。
+    #[arg(
+        long,
+        global = true,
+        value_name = "URL",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = commands::DAEMON_DEFAULT
+    )]
+    via_daemon: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
@@ -113,10 +126,31 @@ pub(crate) fn usage_fault(message: String) -> Fault {
 async fn run(cli: &Cli) -> Result<String, Fault> {
     match &cli.command {
         Command::Probe { target } => match target {
-            ProbeTarget::Bus(args) => commands::probe_bus(args.channel.as_deref(), cli.json).await,
-            ProbeTarget::Xcp(args) => {
-                commands::probe_xcp(
+            ProbeTarget::Bus(args) => match cli.via_daemon.as_deref() {
+                Some(url) => commands::probe_bus_via(url, args.channel.as_deref(), cli.json).await,
+                None => commands::probe_bus(args.channel.as_deref(), cli.json).await,
+            },
+            ProbeTarget::Xcp(args) => match cli.via_daemon.as_deref() {
+                Some(url) => commands::probe_xcp_via(url, &args.channel, cli.json).await,
+                None => {
+                    commands::probe_xcp(
+                        &args.channel,
+                        args.tx_id,
+                        args.rx_id,
+                        args.timeout_ms,
+                        cli.json,
+                    )
+                    .await
+                }
+            },
+        },
+        Command::Read(args) => match cli.via_daemon.as_deref() {
+            Some(url) => commands::read_via(url, args.address, args.len, cli.json).await,
+            None => {
+                commands::read_memory(
                     &args.channel,
+                    args.address,
+                    args.len,
                     args.tx_id,
                     args.rx_id,
                     args.timeout_ms,
@@ -125,18 +159,6 @@ async fn run(cli: &Cli) -> Result<String, Fault> {
                 .await
             }
         },
-        Command::Read(args) => {
-            commands::read_memory(
-                &args.channel,
-                args.address,
-                args.len,
-                args.tx_id,
-                args.rx_id,
-                args.timeout_ms,
-                cli.json,
-            )
-            .await
-        }
     }
 }
 
@@ -190,6 +212,20 @@ mod tests {
         assert_eq!(parse_u32("0X10").expect("大写前缀"), 0x10);
         assert_eq!(parse_u32("1536").expect("十进制"), 1536);
         assert!(parse_u32("0xZZ").is_err());
+    }
+
+    #[test]
+    fn via_daemon_defaults_to_the_local_daemon() {
+        let cli = Cli::try_parse_from(["openape", "--via-daemon", "probe", "bus"]).expect("可解析");
+        assert_eq!(
+            cli.via_daemon.as_deref(),
+            Some(commands::DAEMON_DEFAULT),
+            "不带值时用默认地址"
+        );
+
+        let cli = Cli::try_parse_from(["openape", "--via-daemon=http://box:47711", "probe", "bus"])
+            .expect("可解析");
+        assert_eq!(cli.via_daemon.as_deref(), Some("http://box:47711"));
     }
 
     #[test]

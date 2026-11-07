@@ -5,9 +5,11 @@
 
 use std::sync::Arc;
 
+use openape_cal_core::{Address, ByteLen};
 use openape_diag::{Fault, Metrics};
 use openape_proto as proto;
 use openape_session::{CaptureConfig, DaqCapture, DaqStream, Session, list_channels};
+use openape_xcp::ConnectInfo;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
@@ -20,10 +22,11 @@ pub struct AppState {
     /// 已接管的会话与采集。会话本身也要留着：丢出即释放设备锁，
     /// 采集泵虽然还在读总线，但锁已经没了。
     capture: Option<DaqCapture>,
-    /// 只为持有而不读：会话被丢弃即释放设备锁，采集泵虽仍在读总线，
-    /// 但通道已经可以被别人抢走。名字前的下划线是给 `dead_code` 看的。
-    _session: Option<Session>,
+    /// 会话本身也要留着：丢出即释放设备锁，采集泵虽然还在读总线，但通道
+    /// 已经能被别人抢走。加锁是为了让代读命令与采集互斥。
+    session: Option<tokio::sync::Mutex<Session>>,
     channel: Option<String>,
+    info: Option<ConnectInfo>,
 }
 
 impl AppState {
@@ -33,8 +36,9 @@ impl AppState {
             metrics,
             idle: Arc::new(DaqStream::new(CaptureConfig::default().capacity)),
             capture: None,
-            _session: None,
+            session: None,
             channel: None,
+            info: None,
         }
     }
 
@@ -44,13 +48,15 @@ impl AppState {
         channel: String,
         session: Session,
         capture: DaqCapture,
+        info: ConnectInfo,
     ) -> Self {
         Self {
             metrics,
             idle: Arc::new(DaqStream::new(CaptureConfig::default().capacity)),
             capture: Some(capture),
-            _session: Some(session),
+            session: Some(tokio::sync::Mutex::new(session)),
             channel: Some(channel),
+            info: Some(info),
         }
     }
 
@@ -62,6 +68,21 @@ impl AppState {
     /// 已接管的通道名。
     pub fn channel(&self) -> Option<&str> {
         self.channel.as_deref()
+    }
+
+    /// 建链时从站报告的能力，供 CLI 与 UI 显示。
+    pub fn info(&self) -> Option<&ConnectInfo> {
+        self.info.as_ref()
+    }
+
+    /// 已接管的会话。没有接管时说明 daemon 只是健康检查壳子。
+    pub fn session(&self) -> Option<&tokio::sync::Mutex<Session>> {
+        self.session.as_ref()
+    }
+
+    /// 采集泵。`None` 表示没有在采集。
+    pub fn capture(&self) -> Option<&DaqCapture> {
+        self.capture.as_ref()
     }
 
     fn stream(&self) -> &DaqStream {
@@ -102,10 +123,20 @@ impl proto::open_ape_server::OpenApe for OpenApeService {
     ) -> Result<Response<proto::ChannelProbe>, Status> {
         let channel = request.into_inner().channel;
         if self.state.channel() == Some(channel.as_str()) {
-            // 已接管：答自己知道的，别再去抢一次锁。
-            return Err(Status::failed_precondition(format!(
-                "daemon 已独占 {channel}，探测请走 CLI 的 --via-daemon"
-            )));
+            // 已接管：答自己知道的，再去抢一次锁必然撞锁。
+            if let Some(session) = self.state.session() {
+                let guard = session.lock().await;
+                let capabilities = guard.capabilities();
+                return Ok(Response::new(proto::ChannelProbe {
+                    channel,
+                    backend: openape_bus_socketcan::BACKEND.to_owned(),
+                    capabilities: Some(proto::BusCapabilities {
+                        classic_can: capabilities.classic_can(),
+                        can_fd: capabilities.can_fd(),
+                        hardware_timestamp: capabilities.hardware_timestamp,
+                    }),
+                }));
+            }
         }
         let probe = openape_session::probe_channel(&channel).map_err(to_status)?;
         Ok(Response::new(proto::ChannelProbe {
@@ -116,6 +147,60 @@ impl proto::open_ape_server::OpenApe for OpenApeService {
                 can_fd: probe.capabilities.can_fd(),
                 hardware_timestamp: probe.capabilities.hardware_timestamp,
             }),
+        }))
+    }
+
+    async fn read_memory(
+        &self,
+        request: Request<proto::ReadRequest>,
+    ) -> Result<Response<proto::ReadResponse>, Status> {
+        let request = request.into_inner();
+        let Some(session) = self.state.session() else {
+            return Err(Status::failed_precondition(
+                "daemon 没有接管通道，无法代读；直接连设备或用 CLI 不带 --via-daemon",
+            ));
+        };
+        let address = parse_address(&request.address)?;
+        let len = u16::try_from(request.len)
+            .ok()
+            .and_then(ByteLen::new)
+            .ok_or_else(|| Status::invalid_argument(format!("长度 {} 不合法", request.len)))?;
+
+        // 读之前让采集泵让开接收端，读完无论成败都要恢复。
+        let capture = self.state.capture();
+        if let Some(capture) = capture {
+            capture.set_paused(true);
+        }
+        let mut guard = session.lock().await;
+        let read = guard.read(address, len).await;
+        drop(guard);
+        if let Some(capture) = capture {
+            capture.set_paused(false);
+        }
+
+        let data = read.map_err(to_status)?;
+        let channel = self.state.channel().unwrap_or_default().to_owned();
+        Ok(Response::new(proto::ReadResponse {
+            channel,
+            address: address.to_string(),
+            len: u32::from(len.get()),
+            data_hex: data
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        }))
+    }
+
+    async fn get_session(
+        &self,
+        _request: Request<proto::Empty>,
+    ) -> Result<Response<proto::SessionReport>, Status> {
+        Ok(Response::new(proto::SessionReport {
+            channel: self.state.channel().unwrap_or_default().to_owned(),
+            linked: self.state.session().is_some(),
+            info: self.state.info().map(to_connect_info),
+            capturing: self.state.capture().is_some(),
         }))
     }
 
@@ -169,6 +254,43 @@ impl proto::open_ape_server::OpenApe for OpenApeService {
         });
         Ok(Response::new(ReceiverStream::new(rx)))
     }
+}
+
+/// 会话层的建链信息转成契约类型。
+fn to_connect_info(info: &ConnectInfo) -> proto::ConnectInfo {
+    proto::ConnectInfo {
+        resource: u32::from(info.resource),
+        comm_mode_basic: u32::from(info.comm_mode_basic),
+        max_cto: u32::from(info.max_cto),
+        max_dto: u32::from(info.max_dto),
+        protocol_version: info
+            .protocol_version
+            .map(|(major, minor)| proto::ProtocolVersion {
+                major: u32::from(major),
+                minor: u32::from(minor),
+            }),
+        transport_version: info
+            .transport_version
+            .map(|(major, minor)| proto::ProtocolVersion {
+                major: u32::from(major),
+                minor: u32::from(minor),
+            }),
+    }
+}
+
+/// 地址从字符串解析。十六进制带 `0x` 前缀，也接受纯十进制。
+fn parse_address(raw: &str) -> Result<Address, Status> {
+    let trimmed = raw.trim();
+    let digits = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"));
+    let parsed = match digits {
+        Some(hex) => u32::from_str_radix(hex, 16),
+        None => trimmed.parse::<u32>(),
+    };
+    parsed
+        .map(Address::new)
+        .map_err(|_| Status::invalid_argument(format!("地址 {raw} 不是 32 位整数")))
 }
 
 /// 把域故障翻成 gRPC 状态。消息带上原始提示，客户端不必再查表。

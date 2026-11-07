@@ -5,6 +5,7 @@
 //! 是唯一读者，也是唯一命令发起方（M2-14 的 `--via-daemon` 复用同一会话）。
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use openape_bus::{Bus, BusError, CanId};
@@ -20,6 +21,7 @@ const RECV_SLICE: Duration = Duration::from_millis(50);
 #[derive(Debug)]
 pub struct DaqCapture {
     stream: Arc<DaqStream>,
+    paused: Arc<AtomicBool>,
     task: JoinHandle<()>,
 }
 
@@ -32,6 +34,15 @@ impl DaqCapture {
     /// 采集侧的统计。
     pub fn stats(&self) -> DaqStats {
         self.stream.stats()
+    }
+
+    /// 暂停或恢复。
+    ///
+    /// 暂停期间泵不读总线，命令事务才有机会收到自己的响应帧——两者共用一个
+    /// 接收端，谁都不能一边抢帧一边等回应。代价是暂停期间的 DTO 直接丢掉，
+    /// 不会记进缓冲，所以别把它当常态。
+    pub fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::Relaxed);
     }
 }
 
@@ -49,13 +60,30 @@ pub(crate) fn spawn(
     capacity: usize,
 ) -> DaqCapture {
     let stream = Arc::new(DaqStream::new(capacity));
+    let paused = Arc::new(AtomicBool::new(false));
     let worker = Arc::clone(&stream);
-    let task = tokio::spawn(async move { pump(bus, response_id, layout, worker).await });
-    DaqCapture { stream, task }
+    let gate = Arc::clone(&paused);
+    let task = tokio::spawn(async move { pump(bus, response_id, layout, worker, gate).await });
+    DaqCapture {
+        stream,
+        paused,
+        task,
+    }
 }
 
-async fn pump(bus: Arc<dyn Bus>, response_id: CanId, layout: DaqLayout, stream: Arc<DaqStream>) {
+async fn pump(
+    bus: Arc<dyn Bus>,
+    response_id: CanId,
+    layout: DaqLayout,
+    stream: Arc<DaqStream>,
+    paused: Arc<AtomicBool>,
+) {
     loop {
+        if paused.load(Ordering::Relaxed) {
+            // 让出接收端给命令事务。
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            continue;
+        }
         match bus.recv(RECV_SLICE).await {
             Ok(frame) => {
                 // 命令响应与 DAQ 数据共用接收端：只认响应标识符上的帧，别把

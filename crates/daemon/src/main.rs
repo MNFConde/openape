@@ -134,6 +134,7 @@ async fn open_session(
         channel.to_owned(),
         session,
         capture,
+        info,
     ))
 }
 

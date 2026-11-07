@@ -20,6 +20,7 @@ openape-bus-socketcan = { path = "crates/bus-socketcan" }
 openape-xcp = { path = "crates/xcp" }
 openape-session = { path = "crates/session" }
 openape-sim-ecu = { path = "crates/sim-ecu" }
+openape-daemon = { path = "crates/daemon" }
 openape-cli = { path = "crates/cli" }
 
 # 外部依赖：版本只在此处钉

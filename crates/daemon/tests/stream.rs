@@ -154,7 +154,7 @@ async fn twenty_samples_reach_a_grpc_client() {
     let slave = tokio::spawn(openape_sim_ecu::serve(ecu, bus));
 
     let mut session = Session::open(SessionConfig::new(vcan.name())).expect("会话可打开");
-    session.connect(0).await.expect("建链成功");
+    let info = session.connect(0).await.expect("建链成功");
     let list = DaqListSpec::new(
         0,
         1,
@@ -173,6 +173,7 @@ async fn twenty_samples_reach_a_grpc_client() {
         vcan.name().to_owned(),
         session,
         capture,
+        info,
     ));
     let app = build_router(state, Path::new("ui/does-not-exist"));
 
@@ -228,7 +229,7 @@ async fn headless_chrome_renders_the_curve() {
     let slave = tokio::spawn(openape_sim_ecu::serve(ecu, bus));
 
     let mut session = Session::open(SessionConfig::new(vcan.name())).expect("会话可打开");
-    session.connect(0).await.expect("建链成功");
+    let info = session.connect(0).await.expect("建链成功");
     let list = DaqListSpec::new(
         0,
         1,
@@ -246,6 +247,7 @@ async fn headless_chrome_renders_the_curve() {
         vcan.name().to_owned(),
         session,
         capture,
+        info,
     ));
     let app = build_router(state, &dist);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

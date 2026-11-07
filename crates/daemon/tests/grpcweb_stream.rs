@@ -102,7 +102,7 @@ async fn grpc_web_streaming_over_http1_carries_twenty_frames() {
     let slave = tokio::spawn(openape_sim_ecu::serve(ecu, bus));
 
     let mut session = Session::open(SessionConfig::new(vcan.name())).expect("会话可打开");
-    session.connect(0).await.expect("建链成功");
+    let info = session.connect(0).await.expect("建链成功");
     let list = DaqListSpec::new(
         0,
         1,
@@ -120,6 +120,7 @@ async fn grpc_web_streaming_over_http1_carries_twenty_frames() {
         vcan.name().to_owned(),
         session,
         capture,
+        info,
     ));
     let app = build_router(state, Path::new("ui/does-not-exist"));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

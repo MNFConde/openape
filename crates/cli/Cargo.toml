@@ -15,6 +15,7 @@ path = "src/main.rs"
 openape-bus.workspace = true
 openape-cal-core.workspace = true
 openape-proto.workspace = true
+tonic.workspace = true
 clap.workspace = true
 serde.workspace = true
 openape-diag.workspace = true
@@ -24,7 +25,10 @@ tokio.workspace = true
 
 [dev-dependencies]
 openape-bus-socketcan.workspace = true
+openape-daemon.workspace = true
+axum.workspace = true
 openape-sim-ecu.workspace = true
+openape-xcp.workspace = true
 tokio = { workspace = true, features = ["process"] }
 
 [lints]
