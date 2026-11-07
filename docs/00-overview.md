@@ -2,7 +2,7 @@
 type: architecture
 status: active
 summary: "OpenAPE 总纲：定位、workspace 拓扑规划、复用与自研边界"
-updated: 2026-11-05
+updated: 2026-11-07
 ---
 
 # 总纲
@@ -29,7 +29,7 @@ OpenAPE 是一个 Rust 开发的**开放汽车标定工具**（对标 CANape/INC
 | `xcp` | L2 | XCP master：会话、DAQ 配置、页切换、上下载；内部经 `XcpConnection` 隔离传输介质 | 自研，automotive 仅作行为参考 |
 | `sim-ecu` | L3 | XCP 从站模拟器：CAN 传输层 + 虚拟内存 + 怪癖注入配置 + vcan | 自研，见 [D-12](decisions.md#d-12-xcp-on-can-从站自研) |
 | `session` | L3 | 编排引擎：设备装配、DAQ 环形缓冲、录制、状态机、设备锁 | — |
-| `assembly` | L4 | 唯一指名具体后端 crate 的装配层：当前做 A2L 与 ELF 的交叉校验 | — |
+| `assembly` | L4 | 唯一指名具体后端 crate 的装配层：A2L 与 ELF 的交叉校验、描述文件装配（`load_variables`）、按配置选总线后端（`backend::open`） | — |
 | `daemon` | L5 | 常驻外壳：`session` + gRPC 服务 + 静态托管 | tonic（grpc-web） |
 | `cli` | L5 | 单次探测外壳：一条命令一次事务，输出人类可读或 JSON | — |
 | `ui` | L5 | Web 前端：曲线（uPlot）、标定量表格、dataset 对比、故障面板 | TypeScript + uPlot |
