@@ -48,7 +48,7 @@
 [x] M3-06 test：轴绑定 golden 三件套入库（ELF 夹具、工程配置、期望 JSON 与 A2L 片段），按 10 号 RFC 第 8 节的字节级口径 → 验收：正例全过、R1–R7 反例各一条
 [x] M3-07 feat(assembly)：crate 成立 + A2L 与 ELF 交叉校验（地址/尺寸/类型冲突报告）→ 验收：冲突在 probe source 阶段即出报告
 [x] M3-08 feat(format-dbc)：crate 成立 + DBC 解析 + 信号 pack/unpack（自研）→ 验收：与 can-dbc 逐条对照，差异列举并注明采纳哪边及理由（DBC 无公开规范，对照不是标准）
-[ ] M3-09 feat(session)：DBC 解码接入观测通路 → 验收：同一总线帧既能出原始位也能出物理值
+[x] M3-09 feat(session)：DBC 解码接入观测通路 → 验收：同一总线帧既能出原始位也能出物理值
 [ ] M3-10 feat(cli)：probe source / probe ecu 完整化（含交叉校验报告与 [raw] 标注）→ 验收：仅 ELF 档缺失字段标 [raw] 而非填默认值
 [ ] M3-11 feat(ui)：标定量表格 + 统一故障面板 → 验收：故障面板只读 diag 的 Fault，不自造错误类型
 [ ] M3-12 docs：M3 收尾（golden 说明、fixtures 补件、状态回写）→ 验收：文档与实现无矛盾

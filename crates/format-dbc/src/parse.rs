@@ -175,6 +175,14 @@ impl Signal {
         Ok(raw as i64 as u64)
     }
 
+    /// 取原始值并做符号扩展，不做换算。
+    ///
+    /// 与 [`Self::decode`] 的区别只在最后一步：换算用错单位时，只有原始值
+    /// 还说得清到底从总线上收到了什么。
+    pub fn sign_extended_raw(&self, frame: &[u8]) -> i64 {
+        self.sign_extend(self.raw_bits(frame))
+    }
+
     /// 取原始位（未做符号扩展与换算）。
     pub fn raw_bits(&self, frame: &[u8]) -> u64 {
         match self.byte_order {

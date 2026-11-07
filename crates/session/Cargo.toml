@@ -8,6 +8,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+openape-format-dbc.workspace = true
 openape-bus.workspace = true
 openape-bus-socketcan.workspace = true
 openape-cal-core.workspace = true

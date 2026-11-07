@@ -1109,6 +1109,7 @@ dependencies = [
  "openape-bus-socketcan",
  "openape-cal-core",
  "openape-diag",
+ "openape-format-dbc",
  "openape-xcp",
  "thiserror",
  "tokio",
