@@ -1,0 +1,144 @@
+syntax = "proto3";
+
+package openape.v1;
+
+// 空入参。
+message Empty {}
+
+// 总线后端能力。上层据此决定可用的帧类型与时间戳精度。
+message BusCapabilities {
+  bool classic_can = 1;
+  bool can_fd = 2;
+  bool hardware_timestamp = 3;
+}
+
+// 一条通道的探测结果。
+message ChannelProbe {
+  string channel = 1;
+  string backend = 2;
+  BusCapabilities capabilities = 3;
+}
+
+message ProbeChannelRequest {
+  string channel = 1;
+}
+
+message ListChannelsResponse {
+  repeated string channels = 1;
+}
+
+// 协议版本。
+message ProtocolVersion {
+  uint32 major = 1;
+  uint32 minor = 2;
+}
+
+// 建链后从站报告的会话参数。
+message ConnectInfo {
+  uint32 resource = 1;
+  uint32 comm_mode_basic = 2;
+  uint32 max_cto = 3;
+  uint32 max_dto = 4;
+  // 缺失表示从站没上报，不臆造默认值。
+  ProtocolVersion protocol_version = 5;
+  ProtocolVersion transport_version = 6;
+}
+
+message ConnectRequest {
+  uint32 mode = 1;
+}
+
+message SessionStatus {
+  bool running = 1;
+  uint32 protection = 2;
+}
+
+// 读一段内存。地址用字符串：JS 的 number 只精确到 2^53。
+message ReadRequest {
+  string address = 1;
+  uint32 len = 2;
+}
+
+message ReadResponse {
+  string channel = 1;
+  string address = 2;
+  uint32 len = 3;
+  string data_hex = 4;
+}
+
+// 一个要采集的内存块。
+message DaqSignal {
+  string address = 1;
+  uint32 len = 2;
+}
+
+// 一条 DAQ list 的配置。
+message DaqList {
+  uint32 event = 1;
+  uint32 prescaler = 2;
+  repeated DaqSignal signals = 3;
+}
+
+message DaqConfig {
+  repeated DaqList lists = 1;
+}
+
+// 一个 ODT 承载哪几段字节，按信号顺序给出长度。
+message DaqOdt {
+  uint32 pid = 1;
+  repeated uint32 signal_lens = 2;
+}
+
+message DaqLayout {
+  repeated DaqOdt odts = 1;
+}
+
+// 一条 DAQ 样本：一帧 DTO 的载荷。
+message DaqSample {
+  uint32 pid = 1;
+  uint64 timestamp_us = 2;
+  bytes payload = 3;
+}
+
+message StreamRequest {}
+
+// 指标快照。
+message MetricsSnapshot {
+  double daq_fps = 1;
+  uint64 daq_frames_total = 2;
+  uint64 dropped_frames_total = 3;
+  uint32 latency_p50_us = 4;
+  uint32 latency_p99_us = 5;
+  uint64 latency_samples = 6;
+  uint64 queue_depth = 7;
+  uint64 rss_bytes = 8;
+}
+
+// 存活探针。名字不与 rpc 方法同名：protoc 在 service 内解析返回类型时
+// 会先看到方法名，同名会报 "is not a message type"。
+message HealthStatus {
+  bool ok = 1;
+  string version = 2;
+}
+
+// CLI 的结构化输出：通道列表 + 可选的一条探测结果。
+message BusReport {
+  repeated string channels = 1;
+  ChannelProbe probed = 2;
+}
+
+// CLI 的结构化输出：建链。
+message ConnectReport {
+  string channel = 1;
+  ConnectInfo info = 2;
+}
+
+// daemon 对 CLI 与 UI 提供的服务。
+service OpenApe {
+  rpc ListChannels(Empty) returns (ListChannelsResponse);
+  rpc ProbeChannel(ProbeChannelRequest) returns (ChannelProbe);
+  rpc Health(Empty) returns (HealthStatus);
+  rpc GetMetrics(Empty) returns (MetricsSnapshot);
+  // 采集样本流。慢消费者丢最旧，丢掉的量在指标里可查。
+  rpc StreamSamples(StreamRequest) returns (stream DaqSample);
+}

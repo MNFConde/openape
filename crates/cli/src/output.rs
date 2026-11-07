@@ -1,57 +1,64 @@
 //! 输出结构与双模渲染。
+//!
+//! 结构来自 `openape_proto`：同一份类型既走 gRPC 也走 `--json`，两边不会
+//! 各写一遍再漂移（M2-11 之前这里是本地 serde 结构，已下线）。
 
 use openape_diag::Fault;
-use openape_session::ChannelProbe;
+use openape_proto::{BusCapabilities, ChannelProbe, ConnectInfo, ProtocolVersion, ReadResponse};
+use openape_session::ChannelProbe as SessionProbe;
 use serde::Serialize;
 
-/// 结构源暂时是本文件的 serde 结构：M1 只有 CLI 一个消费者，M2-11 建 proto
-/// 之后由生成的类型取代，届时本文件下线。
-#[derive(Debug, Serialize)]
-pub(crate) struct BusReport {
-    pub(crate) channels: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) probed: Option<ProbeReport>,
-}
-
-/// 通道探测结果。
-#[derive(Debug, Serialize)]
-pub(crate) struct ProbeReport {
-    pub(crate) channel: String,
-    pub(crate) backend: String,
-    pub(crate) classic_can: bool,
-    pub(crate) can_fd: bool,
-    pub(crate) hardware_timestamp: bool,
-}
-
-impl From<ChannelProbe> for ProbeReport {
-    fn from(probe: ChannelProbe) -> Self {
-        Self {
-            channel: probe.channel,
-            backend: probe.backend.to_owned(),
+/// 把会话层的探测结果转成契约类型。
+pub(crate) fn probe_report(probe: SessionProbe) -> ChannelProbe {
+    ChannelProbe {
+        channel: probe.channel,
+        backend: probe.backend.to_owned(),
+        capabilities: Some(BusCapabilities {
             classic_can: probe.capabilities.classic_can(),
             can_fd: probe.capabilities.can_fd(),
             hardware_timestamp: probe.capabilities.hardware_timestamp,
-        }
+        }),
     }
 }
 
-/// 建链结果。
-#[derive(Debug, Serialize)]
-pub(crate) struct ConnectReport {
-    pub(crate) channel: String,
-    pub(crate) resource: u8,
-    pub(crate) max_cto: u16,
-    pub(crate) max_dto: u16,
-    pub(crate) protocol_version: Option<String>,
+/// 把建链结果转成契约类型。协议版本缺省时留 `None`，不补 0.0。
+pub(crate) fn connect_info(
+    resource: u8,
+    comm_mode_basic: u8,
+    max_cto: u16,
+    max_dto: u16,
+    protocol_version: Option<(u8, u8)>,
+    transport_version: Option<(u8, u8)>,
+) -> ConnectInfo {
+    ConnectInfo {
+        resource: u32::from(resource),
+        comm_mode_basic: u32::from(comm_mode_basic),
+        max_cto: u32::from(max_cto),
+        max_dto: u32::from(max_dto),
+        protocol_version: protocol_version.map(version),
+        transport_version: transport_version.map(version),
+    }
 }
 
-/// 读结果。
-#[derive(Debug, Serialize)]
-pub(crate) struct ReadReport {
-    pub(crate) channel: String,
-    pub(crate) address: String,
-    pub(crate) len: u16,
-    pub(crate) data_hex: String,
+fn version((major, minor): (u8, u8)) -> ProtocolVersion {
+    ProtocolVersion {
+        major: u32::from(major),
+        minor: u32::from(minor),
+    }
+}
+
+/// 读结果。数据以十六进制串呈现而不是 `bytes`：JSON 里的 base64 没人看得懂。
+pub(crate) fn read_report(channel: String, address: String, len: u16, data: &[u8]) -> ReadResponse {
+    ReadResponse {
+        channel,
+        address,
+        len: u32::from(len),
+        data_hex: data
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<Vec<_>>()
+            .join(" "),
+    }
 }
 
 /// 按 `--json` 选结构化或人类可读，两者共用同一份值，不会漂移。

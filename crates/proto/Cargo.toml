@@ -1,0 +1,23 @@
+[package]
+name = "openape-proto"
+description = "gRPC 契约与消息类型；同时是 CLI 结构化输出的 schema 源"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+prost.workspace = true
+serde.workspace = true
+tonic.workspace = true
+tonic-prost.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[build-dependencies]
+tonic-prost-build.workspace = true
+
+[lints]
+workspace = true

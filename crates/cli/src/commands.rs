@@ -5,16 +5,17 @@ use std::time::Duration;
 use openape_bus::CanId;
 use openape_cal_core::{Address, ByteLen};
 use openape_diag::Fault;
+use openape_proto::{BusReport, ConnectInfo, ConnectReport};
 use openape_session::{Session, SessionConfig, list_channels, probe_channel};
 
-use crate::output::{BusReport, ConnectReport, ProbeReport, ReadReport, render};
+use crate::output::{connect_info, probe_report, read_report, render};
 use crate::usage_fault;
 
 /// `probe bus`：列通道，可选探测一条。
 pub(crate) async fn probe_bus(config_channel: Option<&str>, json: bool) -> Result<String, Fault> {
     let channels = list_channels();
     let probed = match config_channel {
-        Some(channel) => Some(ProbeReport::from(probe_channel(channel)?)),
+        Some(channel) => Some(probe_report(probe_channel(channel)?)),
         None => None,
     };
     let report = BusReport { channels, probed };
@@ -26,14 +27,15 @@ pub(crate) async fn probe_bus(config_channel: Option<&str>, json: bool) -> Resul
         for channel in &report.channels {
             out.push_str(&format!("\n  {channel}"));
         }
-        if let Some(probe) = &report.probed {
+        if let Some(probe) = report.probed.as_ref() {
+            let caps = probe.capabilities.as_ref();
             out.push_str(&format!(
                 "\n探测 {}（{}）：经典 CAN={} CAN-FD={} 硬件时间戳={}",
                 probe.channel,
                 probe.backend,
-                probe.classic_can,
-                probe.can_fd,
-                probe.hardware_timestamp
+                caps.is_some_and(|caps| caps.classic_can),
+                caps.is_some_and(|caps| caps.can_fd),
+                caps.is_some_and(|caps| caps.hardware_timestamp)
             ));
         }
         out
@@ -53,18 +55,22 @@ pub(crate) async fn probe_xcp(
     let info = session.connect(0).await?;
     let report = ConnectReport {
         channel: session.channel().to_owned(),
-        resource: info.resource,
-        max_cto: info.max_cto,
-        max_dto: info.max_dto,
-        protocol_version: info
-            .protocol_version
-            .map(|(major, minor)| format!("{major}.{minor}")),
+        info: Some(connect_info(
+            info.resource,
+            info.comm_mode_basic,
+            info.max_cto,
+            info.max_dto,
+            info.protocol_version,
+            info.transport_version,
+        )),
     };
     session.disconnect().await.ok();
+    let ConnectReport { channel, info } = &report;
+    let info: &ConnectInfo = info.as_ref().expect("上面刚构造");
     render(json, &report, || {
         format!(
-            "{} 建链成功：resource={:#04x} maxCto={} maxDto={}",
-            report.channel, report.resource, report.max_cto, report.max_dto
+            "{channel} 建链成功：resource={:#04x} maxCto={} maxDto={}",
+            info.resource, info.max_cto, info.max_dto
         )
     })
 }
@@ -86,16 +92,12 @@ pub(crate) async fn read_memory(
     let len = ByteLen::new(len).ok_or_else(|| usage_fault("--len 必须大于 0".into()))?;
     let data = session.read(address, len).await?;
     session.disconnect().await.ok();
-    let report = ReadReport {
-        channel: session.channel().to_owned(),
-        address: address.to_string(),
-        len: len.get(),
-        data_hex: data
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<Vec<_>>()
-            .join(" "),
-    };
+    let report = read_report(
+        session.channel().to_owned(),
+        address.to_string(),
+        len.get(),
+        &data,
+    );
     render(json, &report, || {
         format!("{} {} = [{}]", report.address, report.len, report.data_hex)
     })

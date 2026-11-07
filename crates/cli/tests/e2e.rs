@@ -77,8 +77,8 @@ async fn probe_xcp_reports_slave_capabilities() {
         String::from_utf8_lossy(&output.stderr)
     );
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON 输出");
-    assert_eq!(json["max_cto"], 8);
-    assert_eq!(json["max_dto"], 8);
+    assert_eq!(json["info"]["max_cto"], 8);
+    assert_eq!(json["info"]["max_dto"], 8);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -159,8 +159,8 @@ async fn probe_bus_lists_and_inspects_channels() {
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON");
     assert_eq!(json["probed"]["channel"], vcan.name());
     assert_eq!(json["probed"]["backend"], "socketcan");
-    assert_eq!(json["probed"]["classic_can"], true);
-    assert_eq!(json["probed"]["can_fd"], false);
+    assert_eq!(json["probed"]["capabilities"]["classic_can"], true);
+    assert_eq!(json["probed"]["capabilities"]["can_fd"], false);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
