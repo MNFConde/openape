@@ -1,0 +1,17 @@
+[package]
+name = "openape-format-elf"
+description = "ELF 信息源：把 DWARF 里的变量结构解析出来，不碰 A2L"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+a2ltool-dwarf = { path = "../../vendor/a2ltool-dwarf" }
+indexmap = "2.8.0"
+openape-cal-core.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

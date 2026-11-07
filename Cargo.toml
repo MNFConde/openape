@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "vendor/a2ltool-dwarf"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,6 +13,8 @@ authors = ["OpenAPE contributors"]
 # 内部 crate，按分档顺序排列（L0 → L5）；依赖只准向下
 openape-diag = { path = "crates/diag" }
 openape-cal-core = { path = "crates/cal-core" }
+openape-format-a2l = { path = "crates/format-a2l" }
+openape-format-elf = { path = "crates/format-elf" }
 openape-xcp-proto = { path = "crates/xcp-proto" }
 openape-proto = { path = "crates/proto" }
 openape-bus = { path = "crates/bus" }

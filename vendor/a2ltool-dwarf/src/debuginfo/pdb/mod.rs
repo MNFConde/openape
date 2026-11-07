@@ -1,0 +1,241 @@
+use crate::debuginfo::{DbgDataType, DebugData, VarInfo};
+use indexmap::IndexMap;
+use pdb2::{AddressMap, FallibleIterator, PDB, RawString, SymbolData};
+use std::{collections::HashMap, ffi::OsStr, fs::File, vec};
+use typereader::TypeReaderData;
+
+use super::TypeInfo;
+
+mod typereader;
+
+struct ModuleVars {
+    static_variables: IndexMap<String, Vec<VarInfo>>,
+    unit_list: Vec<Option<String>>,
+}
+
+pub(crate) fn load_pdb(filename: &OsStr, verbose: bool) -> Result<DebugData, String> {
+    let file = File::open(filename).map_err(|ioerr| ioerr.to_string())?;
+    load_pdb_from_source(&filename.to_string_lossy(), file, verbose)
+}
+
+// load the debug info from pdb file data in a u8 slice
+pub(crate) fn load_pdb_from_slice(
+    display_name: &str,
+    data: &[u8],
+    verbose: bool,
+) -> Result<DebugData, String> {
+    load_pdb_from_source(display_name, std::io::Cursor::new(data), verbose)
+}
+
+// load the debug info from any pdb2::Source
+// `display_name` is only used in error messages
+fn load_pdb_from_source<'s, S>(
+    display_name: &str,
+    source: S,
+    _verbose: bool,
+) -> Result<DebugData, String>
+where
+    S: pdb2::Source<'s> + Send + 's,
+{
+    let pdb = match PDB::open(source) {
+        Ok(pdb) => pdb,
+        Err(pdb2::Error::UnimplementedFeature(feat)) => {
+            return Err(format!("PDB feature not implemented: {feat}"));
+        }
+        Err(pdb2::Error::IoError(ioerr)) => {
+            return Err(ioerr.to_string());
+        }
+        Err(pdb2::Error::UnrecognizedFileFormat) => {
+            return Err(format!("Input file {display_name} is not in PDB format"));
+        }
+        Err(pdb2::Error::PageReferenceOutOfRange(_) | pdb2::Error::InvalidPageSize(_)) => {
+            return Err(format!("Input file {display_name} is corrupted"));
+        }
+        Err(err) => {
+            return Err(format!(
+                "Unknown error reading PDB file {display_name}: {err}"
+            ));
+        }
+    };
+
+    read_pdb(pdb).map_err(|pdberr| format!("PDB error: {pdberr:?}"))
+}
+
+fn read_pdb<'s, S: pdb2::Source<'s> + 's>(mut pdb: PDB<'s, S>) -> Result<DebugData, pdb2::Error> {
+    let address_map = pdb.address_map()?;
+    let global_variables = read_global_variables(&mut pdb, &address_map)?;
+    let ModuleVars {
+        static_variables,
+        unit_list,
+    } = read_static_variables(&mut pdb, &address_map)?;
+    // combine globals and statics into a single variable list, merging variables with the same name
+    let mut variables = global_variables;
+    for (name, varinfo) in static_variables {
+        match variables.entry(name) {
+            indexmap::map::Entry::Occupied(mut entry) => {
+                entry.get_mut().extend(varinfo);
+            }
+            indexmap::map::Entry::Vacant(entry) => {
+                entry.insert(varinfo);
+            }
+        }
+    }
+
+    let TypeReaderData {
+        types, typenames, ..
+    } = typereader::read_all_types(&mut pdb, &variables)?;
+
+    filter_extern_variables(&mut variables, &types);
+
+    // names in PDB debug info are not mangled, so we don't need to demangle them
+    let demangled_names = HashMap::new();
+
+    let mut sections = HashMap::new();
+    if let Some(sections_list) = pdb.sections()? {
+        for section in sections_list {
+            let name = section.name().to_string();
+            let virt_addr = section.virtual_address as u64;
+            let length = section.virtual_size as u64;
+            sections.insert(name, (virt_addr, virt_addr + length));
+        }
+    }
+
+    Ok(DebugData {
+        variables,
+        types,
+        typenames,
+        demangled_names,
+        unit_names: unit_list,
+        sections,
+    })
+}
+
+fn read_global_variables<'s, S: pdb2::Source<'s> + 's>(
+    pdb: &mut PDB<'s, S>,
+    address_map: &AddressMap<'_>,
+) -> Result<IndexMap<String, Vec<VarInfo>>, pdb2::Error> {
+    let mut global_variables: IndexMap<String, Vec<VarInfo>> = IndexMap::new();
+
+    let symbol_table = pdb.global_symbols()?;
+    let mut symbols_iter = symbol_table.iter();
+    while let Some(symbol) = symbols_iter.next()? {
+        if let Ok(SymbolData::Data(data_symbol)) = symbol.parse() {
+            let sym_full_name = data_symbol.name.to_string();
+            let mut ns_components = sym_full_name
+                .split("::")
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>();
+            let symbol_name = ns_components.pop();
+            let virt_addr = data_symbol.offset.to_rva(address_map);
+            if let (Some(symbol_name), Some(virt_addr)) = (symbol_name, virt_addr) {
+                global_variables
+                    .entry(symbol_name)
+                    .or_default()
+                    .push(VarInfo {
+                        address: virt_addr.0 as u64,
+                        typeref: data_symbol.type_index.0 as usize,
+                        unit_idx: 0,
+                        function: None,
+                        namespaces: ns_components,
+                    });
+            }
+        }
+    }
+
+    Ok(global_variables)
+}
+
+fn read_static_variables<'s, S: pdb2::Source<'s> + 's>(
+    pdb: &mut PDB<'s, S>,
+    address_map: &AddressMap<'_>,
+) -> Result<ModuleVars, pdb2::Error> {
+    let mut modvars = ModuleVars {
+        static_variables: IndexMap::new(),
+        unit_list: vec![None],
+    };
+
+    let dbi = pdb.debug_information()?;
+    let mut modules = dbi.modules()?;
+    while let Some(module) = modules.next()? {
+        modvars
+            .unit_list
+            .push(Some(module.module_name().to_string()));
+        let info = match pdb.module_info(&module)? {
+            Some(info) => info,
+            None => {
+                continue;
+            }
+        };
+
+        let mut scope_stack: Vec<(bool, Option<RawString<'_>>)> = Vec::new();
+
+        let mut symbols = info.symbols()?;
+        while let Some(symbol) = symbols.next()? {
+            if symbol.ends_scope() {
+                scope_stack.pop();
+            } else if symbol.starts_scope() {
+                // immediately push the scope so that the symbol stack remains consistent even if parsing fails
+                scope_stack.push((false, None));
+            }
+
+            if let Ok(symbol_data) = symbol.parse() {
+                if symbol.starts_scope() {
+                    // fix the info for the last symbol
+                    scope_stack.last_mut().unwrap().1 = symbol_data.name();
+                }
+
+                if let SymbolData::Procedure(_) = symbol_data {
+                    scope_stack.last_mut().unwrap().0 = true;
+                } else if let SymbolData::Data(data_symbol) = symbol_data {
+                    // skip unnamed symbols
+                    if data_symbol.name.is_empty() {
+                        continue;
+                    }
+                    let function_name: Option<String> = scope_stack
+                        .iter()
+                        .rfind(|(is_func, _)| *is_func)
+                        .and_then(|(_, name)| *name)
+                        .map(|name| name.to_string().into());
+                    let sym_name: String = data_symbol.name.to_string().into();
+
+                    let virt_addr = data_symbol.offset.to_rva(address_map);
+                    if let Some(virt_addr) = virt_addr {
+                        modvars
+                            .static_variables
+                            .entry(sym_name)
+                            .or_default()
+                            .push(VarInfo {
+                                address: virt_addr.0 as u64,
+                                typeref: data_symbol.type_index.0 as usize,
+                                unit_idx: modvars.unit_list.len() - 1,
+                                function: function_name,
+                                namespaces: vec![],
+                            });
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(modvars)
+}
+
+// extern declarations cause duplicated variables to be created in the variables list
+fn filter_extern_variables(
+    variables: &mut IndexMap<String, Vec<VarInfo>>,
+    types: &HashMap<usize, TypeInfo>,
+) {
+    for varinfo in variables.values_mut() {
+        if varinfo.len() > 1 {
+            // retain all elements which are not TypeRefs
+            // in this context, a TypeRef indicates an extern delcaration
+            varinfo.retain(|var| {
+                if let Some(typeinfo) = types.get(&var.typeref) {
+                    !matches!(&typeinfo.datatype, DbgDataType::TypeRef(_, _))
+                } else {
+                    true
+                }
+            });
+        }
+    }
+}

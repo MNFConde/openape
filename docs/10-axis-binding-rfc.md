@@ -121,6 +121,18 @@ R1 能挡住绝大多数顺序写错的情况，但方阵除外（见第 3 节�
 
 逆序的理由：C 的最后一维是内存中变化最快的维度，A2L 的 `MATRIX_DIM x y` 以 x 为快速维。这一条已在 M0-4 用真实的 `a2lfile` 写读回验证过（`AXIS_DESCR COM_AXIS` 加 `AXIS_PTS_REF` 完整保留）。
 
+### 7.1 没绑轴的变量怎么导
+
+导出时一个值可能没在工程配置里绑全场轴：一维没绑 x，二维只绑了 y。这时**跳过该变量并在导出报告里逐条列出"缺哪一维、该维是什么长度"**，不猜轴、不降级成 `VALUE`、也不导出无 `AXIS_DESCR` 的 `CURVE`/`MAP`。
+
+三条理由：
+
+- A2L 的 `CURVE`/`MAP` 语义上就是"带轴的值"，缺轴的 `CURVE` 在 `a2lfile` 严格模式下要么被拒要么被读成畸形对象，往返回来信息已经变了
+- 降级成 `VALUE` 等于悄悄丢掉维度，用户会以为导出完整
+- 跳过是可逆的：补上绑定重导一次即可，而错误的 A2L 会被用户拿去刷 ECU
+
+导出报告的"未绑轴清单"是返回值的一部分，不是日志——调用方（CLI 与 daemon）要能把它念给用户听。
+
 ## 8. Golden 样例
 
 输入取 M0-4 探针的夹具：`float cal_map[4][3]`、`cal_axis_x[3]`、`cal_axis_y[4]`（源码已入库：[fixtures/elf/calib.c](../fixtures/elf/calib.c)，编译方式见 [fixtures/README.md](../fixtures/README.md)）。

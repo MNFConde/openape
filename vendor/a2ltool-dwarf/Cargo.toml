@@ -1,0 +1,16 @@
+[package]
+name = "a2ltool-dwarf"
+description = "从 a2ltool 裁剪出的 DWARF/PDB 变量提取层（vendored，只做可见性调整）"
+version = "3.4.2"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+cpp_demangle = "0.5.0"
+gimli = { version = "0.34", default-features = false, features = ["read"] }
+indexmap = "2.8.0"
+memmap2 = "0.9"
+object = { version = "0.40", default-features = false, features = ["read"] }
+pdb2 = "0.10"
