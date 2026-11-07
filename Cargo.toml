@@ -16,6 +16,7 @@ openape-cal-core = { path = "crates/cal-core" }
 openape-format-a2l = { path = "crates/format-a2l" }
 openape-format-dbc = { path = "crates/format-dbc" }
 openape-format-elf = { path = "crates/format-elf" }
+openape-format-cdf = { path = "crates/format-cdf" }
 openape-xcp-proto = { path = "crates/xcp-proto" }
 openape-proto = { path = "crates/proto" }
 openape-bus = { path = "crates/bus" }
@@ -33,6 +34,7 @@ async-trait = "0.1"
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }
 prost = "0.14"
+roxmltree = "0.21"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio-stream = "0.1"

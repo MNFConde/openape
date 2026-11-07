@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE MSRSW SYSTEM "MSRSW.DTD">
+<!--
+  自造的最小 CDF 样本（M4-06）。
+
+  为什么自己写：ASAM 官网的 CDF 2.1.0 下载只对会员开放，公开可得的是 2.0.0
+  的 schema，而样例文件没有公开、许可干净的来源。这个文件按 2.0.0 的元素集
+  手写，版权归本项目，可以随便改造成坏样本来测报错路径。
+
+  覆盖：标量、字符串（VT）、曲线（一维）、map（二维）、结构体成员（嵌套
+  SW-INSTANCE）、带单位与不带单位、以及一个"合法但我们不解析"的
+  SW-CS-HISTORY（版次历史）。
+-->
+<MSRSW CREATOR="OpenAPE fixture" CREATOR-VERSION="1" F-DTD-VERSION="3.0.0">
+  <SHORT-NAME>openape-sample</SHORT-NAME>
+  <CATEGORY>CALIBRATION</CATEGORY>
+  <SW-SYSTEMS>
+    <SW-SYSTEM>
+      <SHORT-NAME>Engine</SHORT-NAME>
+      <CATEGORY>ECU</CATEGORY>
+      <SW-INSTANCE-SPEC>
+        <SW-INSTANCE-TREE>
+          <SHORT-NAME>Calibration</SHORT-NAME>
+          <SW-INSTANCE>
+            <SHORT-NAME>n_max</SHORT-NAME>
+            <CATEGORY>VALUE</CATEGORY>
+            <SW-VALUE-CONT>
+              <UNIT-DISPLAY-NAME>rpm</UNIT-DISPLAY-NAME>
+              <SW-VALUES-PHYS>
+                <V>6500</V>
+              </SW-VALUES-PHYS>
+            </SW-VALUE-CONT>
+            <SW-CS-HISTORY>
+              <CS-ENTRY>
+                <VT>released</VT>
+              </CS-ENTRY>
+            </SW-CS-HISTORY>
+          </SW-INSTANCE>
+          <SW-INSTANCE>
+            <SHORT-NAME>tq_offset</SHORT-NAME>
+            <CATEGORY>VALUE</CATEGORY>
+            <SW-VALUE-CONT>
+              <UNIT-DISPLAY-NAME>Nm</UNIT-DISPLAY-NAME>
+              <SW-VALUES-PHYS>
+                <V>-0.5</V>
+              </SW-VALUES-PHYS>
+            </SW-VALUE-CONT>
+          </SW-INSTANCE>
+          <SW-INSTANCE>
+            <SHORT-NAME>kf_curve</SHORT-NAME>
+            <CATEGORY>CURVE</CATEGORY>
+            <SW-VALUE-CONT>
+              <SW-ARRAYSIZE>
+                <V>3</V>
+              </SW-ARRAYSIZE>
+              <SW-VALUES-PHYS>
+                <V>1.0</V>
+                <V>1.5</V>
+                <V>2.0</V>
+              </SW-VALUES-PHYS>
+            </SW-VALUE-CONT>
+          </SW-INSTANCE>
+          <SW-INSTANCE>
+            <SHORT-NAME>map_ign</SHORT-NAME>
+            <CATEGORY>MAP</CATEGORY>
+            <SW-VALUE-CONT>
+              <UNIT-DISPLAY-NAME>degCA</UNIT-DISPLAY-NAME>
+              <SW-ARRAYSIZE>
+                <V>2</V>
+                <V>2</V>
+              </SW-ARRAYSIZE>
+              <SW-VALUES-PHYS>
+                <V>10</V>
+                <V>12</V>
+                <V>14</V>
+                <V>16</V>
+              </SW-VALUES-PHYS>
+            </SW-VALUE-CONT>
+          </SW-INSTANCE>
+          <SW-INSTANCE>
+            <SHORT-NAME>label_text</SHORT-NAME>
+            <CATEGORY>ASCII</CATEGORY>
+            <SW-VALUE-CONT>
+              <SW-VALUES-PHYS>
+                <VT>OpenAPE</VT>
+              </SW-VALUES-PHYS>
+            </SW-VALUE-CONT>
+          </SW-INSTANCE>
+          <SW-INSTANCE>
+            <SHORT-NAME>ctrl</SHORT-NAME>
+            <CATEGORY>STRUCTURE</CATEGORY>
+            <SW-INSTANCE>
+              <SHORT-NAME>gain</SHORT-NAME>
+              <CATEGORY>VALUE</CATEGORY>
+              <SW-VALUE-CONT>
+                <SW-VALUES-PHYS>
+                  <V>1.25</V>
+                </SW-VALUES-PHYS>
+              </SW-VALUE-CONT>
+            </SW-INSTANCE>
+          </SW-INSTANCE>
+        </SW-INSTANCE-TREE>
+      </SW-INSTANCE-SPEC>
+    </SW-SYSTEM>
+  </SW-SYSTEMS>
+</MSRSW>
