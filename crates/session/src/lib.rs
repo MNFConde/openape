@@ -20,4 +20,4 @@ pub use daq_stream::{DaqSample, DaqStats, DaqStream, DaqStreamReader};
 pub use dbc_observer::{CanObserver, DecodedFrame, DecodedSignal};
 pub use engine::{ChannelProbe, Session, SessionConfig, list_channels, probe_channel};
 pub use lock::DeviceLock;
-pub use write::{WriteContext, Written, persist_snapshot, read_snapshot};
+pub use write::{RangeVerdict, WriteContext, Written, persist_snapshot, read_snapshot};

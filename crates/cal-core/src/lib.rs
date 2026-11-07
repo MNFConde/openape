@@ -17,6 +17,7 @@ mod ir;
 mod notice;
 mod time;
 mod types;
+pub mod value;
 
 pub use config::{ConfigError, ProjectConfig, SCHEMA_VERSION};
 pub use dataset::{

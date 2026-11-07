@@ -9,8 +9,10 @@ use std::sync::Arc;
 use openape_bus::Bus;
 use openape_bus_socketcan::SocketCanBus;
 use openape_bus_socketcan::testing::VcanGuard;
-use openape_cal_core::{Address, ByteLen, ElemType, SourceMode, Symbol, Variable};
-use openape_session::{Session, SessionConfig, WriteContext, read_snapshot};
+use openape_cal_core::{
+    Address, ByteLen, ElemType, Range, Semantics, SourceMode, Symbol, Variable,
+};
+use openape_session::{RangeVerdict, Session, SessionConfig, WriteContext, read_snapshot};
 use openape_sim_ecu::{SimEcu, SimEcuConfig};
 use openape_xcp_proto::ExampleSeedKey;
 
@@ -22,8 +24,9 @@ fn variable(name: &str, address: u32) -> Variable {
     )
 }
 
-fn tempdir() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openape-writeflow-{}", std::process::id()));
+/// 每个用例一个目录：并行跑时共用目录会让审计条数互相污染。
+fn tempdir(case: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("openape-writeflow-{}-{case}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("建临时目录");
     dir
@@ -41,7 +44,7 @@ async fn write_records_snapshot_and_audit_and_can_be_rolled_back() {
     ecu.poke(0x1000, &[0x01, 0x02]);
     let slave = tokio::spawn(openape_sim_ecu::serve(ecu, bus));
 
-    let dir = tempdir();
+    let dir = tempdir("rollback");
     let context = WriteContext::open(&dir, "test:actor", SourceMode::WithA2l).expect("上下文");
     let target = variable("cal.kp", 0x1000);
     let mut session = Session::open(SessionConfig::new(vcan.name())).expect("打开会话");
@@ -102,6 +105,51 @@ async fn write_records_snapshot_and_audit_and_can_be_rolled_back() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn out_of_range_write_is_refused_before_it_reaches_the_ecu() {
+    let Some(vcan) = VcanGuard::create("y") else {
+        return;
+    };
+
+    let bus: Arc<dyn Bus> = Arc::new(SocketCanBus::open(vcan.name()).expect("从站总线"));
+    let mut ecu = SimEcu::new(SimEcuConfig::default_ids());
+    ecu.poke(0x1000, &[0x00, 0x05]);
+    let slave = tokio::spawn(openape_sim_ecu::serve(ecu, bus));
+
+    let dir = tempdir("range");
+    let context = WriteContext::open(&dir, "test:actor", SourceMode::WithA2l).expect("上下文");
+    let mut session = Session::open(SessionConfig::new(vcan.name())).expect("打开会话");
+    session.connect(0).await.expect("建链");
+
+    // 带 A2L 量程：0..=10，写 100 必须被拦。
+    let ranged = variable("cal.kp", 0x1000)
+        .with_semantics(Semantics::none().with_range(Range::new(0.0, 10.0).expect("合法量程")));
+    let err = session
+        .write_one(&ranged, &[0x00, 0x64], &context)
+        .await
+        .expect_err("100 越界");
+    assert!(err.message().contains("0..=10"), "{err}");
+    assert_eq!(
+        session
+            .read(ranged.address(), ByteLen::TWO)
+            .await
+            .expect("读回"),
+        vec![0x00, 0x05],
+        "被拦下的写入不能落到 ECU"
+    );
+
+    // 无量程（仅 ELF 档）：不校验，但要如实报告"未校验"。
+    let raw = variable("cal.kp", 0x1000);
+    let written = session
+        .write_one(&raw, &[0x00, 0x64], &context)
+        .await
+        .expect("没量程就不拦");
+    assert_eq!(written.range, RangeVerdict::Unchecked);
+
+    let _ = session.disconnect().await;
+    slave.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn wrong_length_is_refused_before_reading_the_ecu() {
     let Some(vcan) = VcanGuard::create("x") else {
         return;
@@ -113,7 +161,7 @@ async fn wrong_length_is_refused_before_reading_the_ecu() {
         bus,
     ));
 
-    let dir = tempdir();
+    let dir = tempdir("length");
     let context = WriteContext::open(&dir, "test:actor", SourceMode::ElfOnly).expect("上下文");
     let mut session = Session::open(SessionConfig::new(vcan.name())).expect("打开会话");
     session.connect(0).await.expect("建链");

@@ -88,6 +88,34 @@ pub struct Written {
     pub snapshot: PathBuf,
     /// 审计记录。
     pub audit: AuditRecord,
+    /// 量程结论。
+    pub range: RangeVerdict,
+}
+
+/// 写入前的量程结论。
+///
+/// 仅 ELF 档拿不到 min/max，此时不校验，但要把"没校验"如实说出来——静默
+/// 放行会让用户以为值被检查过。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RangeVerdict {
+    /// 落在量程内。
+    Within {
+        /// 物理值。
+        physical: f64,
+        /// 下限。
+        min: f64,
+        /// 上限。
+        max: f64,
+    },
+    /// 没有量程信息，未校验。界面上标 `[raw]`。
+    Unchecked,
+}
+
+impl RangeVerdict {
+    /// 是否做过校验。
+    pub const fn checked(self) -> bool {
+        matches!(self, Self::Within { .. })
+    }
 }
 
 impl Session {
@@ -114,6 +142,7 @@ impl Session {
         }
 
         let address = target.address();
+        let range = check_range(target, value)?;
         let before = self.read(address, expected).await?;
         let snapshot = Dataset::new(
             context.mode(),
@@ -147,6 +176,7 @@ impl Session {
             after,
             snapshot: snapshot_path,
             audit,
+            range,
         })
     }
 
@@ -191,10 +221,45 @@ impl Session {
                 after: audit.after.clone(),
                 snapshot: context.snapshot_dir().to_path_buf(),
                 audit,
+                range: RangeVerdict::Unchecked,
             });
         }
         Ok(written)
     }
+}
+
+/// 写入前的量程校验。
+///
+/// 有 A2L 量程就按物理值判（越界即拒，报出 min/max 与实际值）；没有量程就
+/// 如实返回"未校验"，由界面标 `[raw]`——仅 ELF 档本来就没有这一层语义。
+fn check_range(target: &Variable, value: &[u8]) -> Result<RangeVerdict, Fault> {
+    let semantics = target.semantics();
+    let Some(range) = semantics.range() else {
+        return Ok(RangeVerdict::Unchecked);
+    };
+    let physical =
+        openape_cal_core::value::to_physical(value, target.elem(), target.byte_order(), semantics)
+            .ok_or_else(|| {
+                range_fault(format!(
+                    "{} 的字节解不成数值（元素类型与字节序不匹配）",
+                    target.symbol()
+                ))
+            })?;
+    if !range.contains(physical) {
+        return Err(range_fault(format!(
+            "{} 写入 {physical} 越界：量程 {min}..={max}",
+            target.symbol(),
+            min = range.min(),
+            max = range.max()
+        ))
+        .with_context("symbol", target.symbol().to_string())
+        .with_context("physical", physical.to_string()));
+    }
+    Ok(RangeVerdict::Within {
+        physical,
+        min: range.min(),
+        max: range.max(),
+    })
 }
 
 /// 快照落盘。文件名带时刻与符号，同一次会话里不会互相覆盖。
@@ -242,10 +307,14 @@ fn restore_fault(message: impl Into<String>) -> Fault {
     fault(seq::RESTORE, message).with_hint("回滚只接受同档快照文件")
 }
 
+fn range_fault(message: impl Into<String>) -> Fault {
+    fault(seq::RANGE, message).with_hint("按 A2L 的 min/max 调整写入值，或确认标定量的量程来源")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openape_cal_core::{ElemType, Symbol, VariableTree};
+    use openape_cal_core::{ElemType, Range, Semantics, Symbol, VariableTree};
 
     fn symbol(name: &str) -> Symbol {
         Symbol::new(name).expect("测试符号合法")
@@ -291,5 +360,74 @@ mod tests {
         let tree = VariableTree::new(vec![variable.clone()]).expect("无重复");
         let target = tree.get(&symbol("kp")).expect("查得到");
         assert_eq!(target.byte_len().map(|len| len.get()), Some(4));
+    }
+
+    fn ranged(name: &str, semantics: Semantics) -> Variable {
+        Variable::new(symbol(name), Address::new(0x1000), ElemType::U16).with_semantics(semantics)
+    }
+
+    #[test]
+    fn value_inside_the_range_passes_and_reports_the_physical_value() {
+        let semantics = Semantics::none().with_range(Range::new(0.0, 100.0).expect("合法量程"));
+        let target = ranged("kp", semantics);
+        let verdict = check_range(&target, &[0x00, 0x32]).expect("50 在量程内");
+        assert_eq!(
+            verdict,
+            RangeVerdict::Within {
+                physical: 50.0,
+                min: 0.0,
+                max: 100.0
+            }
+        );
+        assert!(verdict.checked());
+    }
+
+    #[test]
+    fn value_outside_the_range_names_min_max_and_the_value() {
+        let semantics = Semantics::none().with_range(Range::new(0.0, 100.0).expect("合法量程"));
+        let target = ranged("kp", semantics);
+        let err = check_range(&target, &[0x00, 0xC8]).expect_err("200 越界");
+        assert_eq!(
+            err.code(),
+            FaultCode::new(Domain::Session, seq::RANGE).expect("序号合法")
+        );
+        let message = err.to_string();
+        assert!(message.contains("200"), "{message}");
+        assert!(message.contains("0..=100"), "{message}");
+        assert!(err.hint().is_some());
+    }
+
+    #[test]
+    fn range_is_judged_on_the_physical_value_not_the_raw_one() {
+        // 原始值 100，factor 0.5 → 物理值 50；量程按物理值判。
+        let semantics = Semantics::none()
+            .with_scale(openape_cal_core::Scale::Linear {
+                factor: 0.5,
+                offset: 0.0,
+            })
+            .with_range(Range::new(0.0, 60.0).expect("合法量程"));
+        let target = ranged("kp", semantics);
+        assert!(check_range(&target, &[0x00, 0x64]).is_ok());
+        let err = check_range(&target, &[0x00, 0xC8]).expect_err("物理值 100 越界");
+        assert!(err.to_string().contains("100"), "{err}");
+    }
+
+    #[test]
+    fn without_a_range_the_check_is_reported_as_unchecked() {
+        let target = ranged("kp", Semantics::none());
+        let verdict = check_range(&target, &[0x00, 0xC8]).expect("没量程就不拦");
+        assert_eq!(verdict, RangeVerdict::Unchecked, "仅 ELF 档标 [raw]");
+        assert!(!verdict.checked());
+    }
+
+    #[test]
+    fn unparsable_bytes_are_a_range_fault_not_a_silent_pass() {
+        let semantics = Semantics::none().with_range(Range::new(0.0, 100.0).expect("合法量程"));
+        let target = ranged("kp", semantics);
+        let err = check_range(&target, &[0x00]).expect_err("1 字节解不成 u16");
+        assert_eq!(
+            err.code(),
+            FaultCode::new(Domain::Session, seq::RANGE).expect("序号合法")
+        );
     }
 }
