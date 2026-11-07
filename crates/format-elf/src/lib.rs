@@ -246,11 +246,16 @@ pub fn load(path: &Path) -> Result<ElfSource, Error> {
 }
 
 /// 把上游的失败分成"没有调试信息"与"文件本身坏了"两类：前者用户能自己修
-/// （重编加 `-g`），后者只能换文件。
+/// （重编加 `-g`），后者只能换文件。前者的提示必须说到怎么修——只说"读不到
+/// 调试信息"等于让用户去查文档。
 fn classify(message: String) -> Error {
     let lowered = message.to_lowercase();
     if lowered.contains("debug") || lowered.contains("dwarf") {
-        Error::NoDebugInfo(message)
+        Error::NoDebugInfo(format!(
+            "{message}\n\
+             修法：去掉 strip 这一步，或重新编译时加 -g（例如 gcc -c -g -O2），\
+             并确认链接后没有再跑 strip"
+        ))
     } else {
         Error::Parse(message)
     }
@@ -259,13 +264,29 @@ fn classify(message: String) -> Error {
 fn build_var(debug: &DebugData, name: &str, info: &VarInfo, unique: bool) -> RawVar {
     let typeref = debug.types.get(&info.typeref);
     let shape = typeref.map_or(Shape::Opaque, |ty| shape_of(&debug.types, ty));
+    let unit = make_simple_unit_name(debug, info.unit_idx);
     RawVar {
-        name: name.to_owned(),
+        // 跨编译单元重名时必须加前缀：DWARF 里两个 `static` 都叫一个名字，
+        // 但地址不同，不加前缀写下去会打到另一个变量上。
+        name: if unique {
+            name.to_owned()
+        } else {
+            qualified(name, unit.as_deref(), info.unit_idx)
+        },
         address: info.address,
         size: typeref.map_or(0, TypeInfo::get_size),
-        unit: make_simple_unit_name(debug, info.unit_idx),
+        unit,
         unique,
         shape,
+    }
+}
+
+/// 给重名符号加上编译单元前缀。拿不到单元名时退回序号——序号不好读，但比
+/// 两条一模一样的名字强。
+fn qualified(name: &str, unit: Option<&str>, unit_idx: usize) -> String {
+    match unit {
+        Some(unit) => format!("{unit}.{name}"),
+        None => format!("unit{unit_idx}.{name}"),
     }
 }
 
@@ -497,6 +518,20 @@ mod tests {
         let types = HashMap::new();
         let ty = typeinfo(DbgDataType::TypeRef(42, 0));
         assert_eq!(shape_of(&types, &ty), Shape::Opaque);
+    }
+
+    #[test]
+    fn qualification_prefers_the_unit_name_and_falls_back_to_an_index() {
+        assert_eq!(
+            qualified("gain", Some("calib_c"), 3),
+            "calib_c.gain",
+            "有单元名时用它"
+        );
+        assert_eq!(
+            qualified("gain", None, 3),
+            "unit3.gain",
+            "拿不到单元名时退回序号，比两条同名强"
+        );
     }
 
     #[test]

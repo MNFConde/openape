@@ -131,7 +131,7 @@ fn cross_unit_duplicates_are_flagged_not_merged() {
     let same: Vec<&openape_format_elf::RawVar> = source
         .vars()
         .iter()
-        .filter(|var| var.name() == "s_private_gain")
+        .filter(|var| var.name().ends_with("s_private_gain"))
         .collect();
     assert_eq!(same.len(), 2, "calib.c 与 other.c 各有一份同名 static");
     assert!(
@@ -147,4 +147,43 @@ fn vars_are_sorted_by_symbol() {
     let mut sorted = names.clone();
     sorted.sort_unstable();
     assert_eq!(names, sorted, "输出顺序必须稳定，否则 golden 无法比对");
+}
+
+#[test]
+fn stripped_binary_fails_with_an_actionable_hint() {
+    // 验收（M3-02）：strip 过的 ELF 给出带修复办法的提示，而不是一句
+    // "解析失败"。用户能自己修的那类问题，报错就得说到怎么修。
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/elf/stripped.elf"
+    );
+    let err = load(std::path::Path::new(path)).expect_err("strip 过的 ELF 不该能读");
+    let text = err.to_string();
+    assert!(text.contains("-g"), "提示必须给出重编命令，实为：{text}");
+    assert!(
+        text.contains("strip"),
+        "提示必须点明 strip 会让调试信息消失，实为：{text}"
+    );
+}
+
+#[test]
+fn cross_unit_duplicates_are_prefixed_by_their_unit() {
+    // 验收（M3-02）：同名 static 靠编译单元前缀区分，否则写入时会打到
+    // 另一个变量的地址上。
+    let source = golden();
+    let names: Vec<&str> = source
+        .vars()
+        .iter()
+        .map(|var| var.name())
+        .filter(|name| name.contains("s_private_gain"))
+        .collect();
+    assert_eq!(names.len(), 2, "两份同名 static 都要在");
+    assert!(
+        names.iter().any(|name| name.starts_with("calib_c.")),
+        "calib.c 那份要带单元前缀，实为 {names:?}"
+    );
+    assert!(
+        names.iter().any(|name| name.starts_with("other_c.")),
+        "other.c 那份要带另一前缀，实为 {names:?}"
+    );
 }
