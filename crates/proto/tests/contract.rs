@@ -94,6 +94,7 @@ fn write_shapes_keep_addresses_as_strings_and_audit_fields_queryable() {
         data_hex: "aabb".to_owned(),
         symbol: "cal.kp".to_owned(),
         actor: "cli:alice".to_owned(),
+        value: None,
     };
     let json = serde_json::to_value(&request).expect("可序列化");
     assert_eq!(json["address"], "0x00001000");

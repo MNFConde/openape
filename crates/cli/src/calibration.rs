@@ -297,6 +297,7 @@ pub async fn write_via_daemon(
             data_hex: hex::encode(&data),
             symbol: options.symbol.clone().unwrap_or_default(),
             actor: options.actor.clone(),
+            value: None,
         })
         .await
         .map_err(daemon_fault)?

@@ -173,6 +173,9 @@ message WriteRequest {
   string symbol = 4;
   // 谁发起的，进审计。
   string actor = 5;
+  // 物理值。给了它就由 daemon 按变量的元素类型与换算编码，data_hex 必须留空：
+  // 两个来源同时给等于没有来源。
+  optional double value = 6;
 }
 
 message WriteResponse {

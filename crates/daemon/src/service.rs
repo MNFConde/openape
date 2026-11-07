@@ -401,8 +401,7 @@ impl proto::open_ape_server::OpenApe for OpenApeService {
             request.actor.trim().to_owned()
         };
         let address = parse_address(&request.address)?;
-        let data = parse_hex_bytes(&request.data_hex)?;
-        let target = resolve_target(self.state.tree(), &request.symbol, address, data.len())?;
+        let (target, data) = resolve_target(self.state.tree(), &request.symbol, address, &request)?;
         if target.address() != address {
             return Err(Status::invalid_argument(format!(
                 "符号 {} 在 {address} 上不存在：它记录的首地址是 {}",
@@ -628,34 +627,76 @@ fn mode_label(mode: SourceMode) -> &'static str {
     }
 }
 
-/// 决定这次写的是哪个变量。
+/// 决定这次写的是哪个变量，并把它变成要发的字节。
 ///
 /// 有清单就按符号查（长度、量程、元素类型都以清单为准）；没有符号时按地址
 /// 与长度造一条 `u8` 数组形状的临时变量——那是 raw 写入，量程不校验，界面
 /// 会标 `[raw]`。
+///
+/// 给了物理值时编码也在这里做：换算链只有 `cal_core::value` 一份，界面自己
+/// 编字节迟早出现"界面显示 5.0、ECU 里是别的数"。
 fn resolve_target(
     tree: Option<&Arc<VariableTree>>,
     symbol: &str,
     address: Address,
-    len: usize,
-) -> Result<Variable, Status> {
+    request: &proto::WriteRequest,
+) -> Result<(Variable, Vec<u8>), Status> {
+    let named = if symbol.trim().is_empty() {
+        None
+    } else {
+        let symbol = Symbol::new(symbol.trim())
+            .ok_or_else(|| Status::invalid_argument(format!("符号 {symbol:?} 不合法")))?;
+        let tree = tree.ok_or_else(|| {
+            Status::failed_precondition("按符号写需要变量清单：启动 daemon 时给 --elf 或 --a2l")
+        })?;
+        Some(
+            tree.get(&symbol)
+                .cloned()
+                .ok_or_else(|| Status::invalid_argument(format!("变量清单里没有 {symbol}")))?,
+        )
+    };
+
+    if let Some(value) = request.value {
+        if !request.data_hex.trim().is_empty() {
+            return Err(Status::invalid_argument(
+                "value 与 data_hex 只能给一个：给两个无法判断以哪个为准",
+            ));
+        }
+        let variable = named.ok_or_else(|| {
+            Status::invalid_argument("给 value 需要 symbol：按地址猜元素类型等于猜")
+        })?;
+        let bytes = openape_cal_core::value::from_physical(
+            value,
+            variable.elem(),
+            variable.byte_order(),
+            variable.semantics(),
+        )
+        .ok_or_else(|| {
+            Status::invalid_argument(format!(
+                "{value} 编不成 {} 的字节：超出类型范围或换算不可逆",
+                variable.symbol()
+            ))
+        })?;
+        return Ok((variable, bytes));
+    }
+
+    let data = parse_hex_bytes(&request.data_hex)?;
+    let target = match named {
+        Some(variable) => variable,
+        None => raw_variable(address, data.len())?,
+    };
+    Ok((target, data))
+}
+
+fn raw_variable(address: Address, len: usize) -> Result<Variable, Status> {
     let len_u16 = u16::try_from(len)
         .ok()
         .and_then(ByteLen::new)
         .ok_or_else(|| Status::invalid_argument(format!("长度 {len} 不合法")))?;
-    if let (Some(tree), false) = (tree, symbol.trim().is_empty()) {
-        let symbol = Symbol::new(symbol.trim())
-            .ok_or_else(|| Status::invalid_argument(format!("符号 {symbol:?} 不合法")))?;
-        return tree
-            .get(&symbol)
-            .cloned()
-            .ok_or_else(|| Status::invalid_argument(format!("变量清单里没有 {symbol}")));
-    }
-    let fallback = Symbol::new(symbol.trim())
-        .or_else(|| Symbol::new("raw"))
-        .ok_or_else(|| Status::invalid_argument(format!("符号 {symbol:?} 不合法")))?;
+    let symbol =
+        Symbol::new("raw").ok_or_else(|| Status::invalid_argument("符号不合法".to_owned()))?;
     let dims = u32::from(len_u16.get());
-    Variable::new(fallback, address, openape_cal_core::ElemType::U8)
+    Variable::new(symbol, address, openape_cal_core::ElemType::U8)
         .with_dims(vec![dims])
         .ok_or_else(|| Status::invalid_argument("长度不合法"))
 }

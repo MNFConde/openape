@@ -62,9 +62,36 @@
             <th>类型</th>
             <th>角色</th>
             <th>语义</th>
+            <th>写入</th>
           </tr>
         </thead>
         <tbody id="variables"></tbody>
+      </table>
+      <p id="write-result"></p>
+
+      <h2>标定页</h2>
+      <p>
+        当前页：<strong id="cal-page">未知</strong>
+        <button id="page-refresh" type="button">刷新</button>
+        <button id="page-set-0" type="button">切到页 0</button>
+        <button id="page-set-1" type="button">切到页 1</button>
+      </p>
+      <p>
+        参考页 <input id="page-reference" type="number" min="0" max="255" value="0" />
+        工作页 <input id="page-working" type="number" min="0" max="255" value="1" />
+        <button id="page-diff" type="button">对比</button>
+      </p>
+      <p id="page-diff-note"></p>
+      <table>
+        <thead>
+          <tr>
+            <th>符号</th>
+            <th>地址</th>
+            <th>参考页</th>
+            <th>工作页</th>
+          </tr>
+        </thead>
+        <tbody id="page-diff-rows"></tbody>
       </table>
 
       <h2>故障</h2>

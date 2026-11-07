@@ -288,6 +288,7 @@ async fn write_memory_goes_through_the_daemon_and_leaves_an_audit_record() {
             data_hex: "beef".to_owned(),
             symbol: entry.symbol.clone(),
             actor: "test:alice".to_owned(),
+            value: None,
         }))
         .await
         .expect("daemon 代写应成功")
@@ -346,6 +347,7 @@ async fn write_memory_refuses_a_symbol_that_is_not_at_that_address() {
             data_hex: "0001".to_owned(),
             symbol: entry.symbol.clone(),
             actor: String::new(),
+            value: None,
         }))
         .await
         .expect_err("符号与地址不符要拒绝");

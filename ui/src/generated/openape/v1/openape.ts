@@ -472,6 +472,13 @@ export interface WriteRequest {
      * @generated from protobuf field: string actor = 5
      */
     actor: string;
+    /**
+     * 物理值。给了它就由 daemon 按变量的元素类型与换算编码，data_hex 必须留空：
+     * 两个来源同时给等于没有来源。
+     *
+     * @generated from protobuf field: optional double value = 6
+     */
+    value?: number;
 }
 /**
  * @generated from protobuf message openape.v1.WriteResponse
@@ -2235,7 +2242,8 @@ class WriteRequest$Type extends MessageType<WriteRequest> {
             { no: 2, name: "len", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
             { no: 3, name: "data_hex", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 4, name: "symbol", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 5, name: "actor", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 5, name: "actor", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "value", kind: "scalar", opt: true, T: 1 /*ScalarType.DOUBLE*/ }
         ]);
     }
     create(value?: PartialMessage<WriteRequest>): WriteRequest {
@@ -2269,6 +2277,9 @@ class WriteRequest$Type extends MessageType<WriteRequest> {
                 case /* string actor */ 5:
                     message.actor = reader.string();
                     break;
+                case /* optional double value */ 6:
+                    message.value = reader.double();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2296,6 +2307,9 @@ class WriteRequest$Type extends MessageType<WriteRequest> {
         /* string actor = 5; */
         if (message.actor !== "")
             writer.tag(5, WireType.LengthDelimited).string(message.actor);
+        /* optional double value = 6; */
+        if (message.value !== undefined)
+            writer.tag(6, WireType.Bit64).double(message.value);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
