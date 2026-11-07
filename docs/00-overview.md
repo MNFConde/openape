@@ -19,9 +19,9 @@ OpenAPE 是一个 Rust 开发的**开放汽车标定工具**（对标 CANape/INC
 | `cal-core` | L1 | 内部 IR：变量树、观测量/标定量模型、Curve/Map/轴、转换规则、dataset 模型、quirk/trait 扩展点 | — |
 | `xcp-proto` | L1 | XCP 帧编解码：CTO/DTO、DAQ、页切换；master 与从站共享 | 自研，参考 automotive |
 | `proto` | L1 | gRPC 契约与消息类型；同时是 CLI 结构化输出 schema 的源 | tonic、prost |
-| `format-elf` | L2 | ELF+DWARF → IR（维度取自 DWARF，轴归属归工程配置）；ELF → A2L 导出 | object、gimli，借 a2ltool 的 DWARF 逻辑 |
+| `format-elf` | L2 | ELF+DWARF → IR（维度取自 DWARF，轴归属归工程配置） | object、gimli，vendor 自 a2ltool 的 debuginfo（见 `vendor/a2ltool-dwarf/README.md`） |
 | `format-a2l` | L2 | A2L → IR；IR → A2L 生成 | a2lfile |
-| `format-dbc` | L2 | DBC → 报文/信号模型；信号 pack/unpack（自研） | can-dbc |
+| `format-dbc` | L2 | DBC → 报文/信号模型；信号 pack/unpack（自研，与 can-dbc 逐条对照） | 自研 |
 | `format-dcm` | L2 | DCM 标定数据集只读导入 | 自研解析 |
 | `format-mf4` | L2 | 测量数据录制/导出 | mf4-rs、CSV |
 | `bus` | L2 | async Bus trait 与 `BusCapabilities`：帧类型位（经典/FD）、硬件时间戳、通道能力 | — |
@@ -29,7 +29,7 @@ OpenAPE 是一个 Rust 开发的**开放汽车标定工具**（对标 CANape/INC
 | `xcp` | L2 | XCP master：会话、DAQ 配置、页切换、上下载；内部经 `XcpConnection` 隔离传输介质 | 自研，automotive 仅作行为参考 |
 | `sim-ecu` | L3 | XCP 从站模拟器：CAN 传输层 + 虚拟内存 + 怪癖注入配置 + vcan | 自研，见 [D-12](decisions.md#d-12-xcp-on-can-从站自研) |
 | `session` | L3 | 编排引擎：设备装配、DAQ 环形缓冲、录制、状态机、设备锁 | — |
-| `assembly` | L4 | 唯一指名具体后端 crate 的装配层 | — |
+| `assembly` | L4 | 唯一指名具体后端 crate 的装配层：当前做 A2L 与 ELF 的交叉校验 | — |
 | `daemon` | L5 | 常驻外壳：`session` + gRPC 服务 + 静态托管 | tonic（grpc-web） |
 | `cli` | L5 | 单次探测外壳：一条命令一次事务，输出人类可读或 JSON | — |
 | `ui` | L5 | Web 前端：曲线（uPlot）、标定量表格、dataset 对比、故障面板 | TypeScript + uPlot |

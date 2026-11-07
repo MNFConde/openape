@@ -46,7 +46,7 @@ xcp  ──依赖──> bus（trait）
 | L1 契约 | `cal-core`（M1 仅基础类型）、`xcp-proto`、`proto`（M1 空档） | 跨 crate 的类型只准在这里定义，且保持轻依赖 |
 | L2 实现 | `bus`、`bus-*`、`format-*`、`xcp` | 只准依赖 L0 与 L1 |
 | L3 编排 | `session`、`sim-ecu` | 只准依赖 L0 至 L2 |
-| L4 装配 | `assembly`（M1 空档） | 唯一允许指名具体后端 crate 的位置 |
+| L4 装配 | `assembly` | 唯一允许指名具体后端 crate 的位置；当前只做 A2L 与 ELF 交叉校验 |
 | L5 外壳 | `daemon`、`cli`、`ui` | 只准依赖 L0 至 L4 |
 
 ```
@@ -101,9 +101,9 @@ crate 只能 `use` 自己 Cargo.toml 里声明过的依赖，反向引用在**�
 | `cal-core` 的 IR 与 `CalibrationSource` | 形状由 ELF 与 A2L 两份输入共同决定，M1 一个输入源都没有 | M2 引入 A2L 或 M3 引入 ELF，出现第一个真实消费者 | 无硬伤；反向代价是提前定形状必然整层重写 |
 | `cal-core` 的 quirk 扩展点 | 无真实怪癖样本，trait 形状只能靠猜 | 首次遇到需配置兼容的 ECU（预计 M5） | 怪癖只能改代码，违背 D-06 的开闭要求 |
 | `proto` crate | M2 前没有第二个消费者 | UI 与 CLI 同时需要同一套 schema（M2 落 gRPC） | 两处各自定义结构，开始漂移 |
-| 独立 `assembly` crate | 只有一个总线后端，一个 `match` 放 `session` 里就够 | 出现第二种重后端，且确有裁剪编译的需求 | 无硬伤，`session` 先变臃肿 |
-| `format-elf` / `format-a2l` | M1 的读写按裸地址进行，没有信息源消费者 | 分别随 M3 / M2 引入变量模型时 | 变量只能手填地址，无自动建立 |
-| `format-dbc` / `format-dcm` / `format-mf4` | 各自能力的里程碑未到 | DBC 显示 M3；DCM 导入与数据集 M4；MF4 录制与离线重开 M5 | 对应能力缺失，不影响 M1 验证 |
+| 独立 `assembly` crate | 只有一个总线后端，一个 `match` 放 `session` 里就够 | 出现第二种重后端，且确有裁剪编译的需求；**M3 已提前落地**（交叉校验需要同时指名两个 format 后端） | 无硬伤，`session` 先变臃肿 |
+| `format-elf` / `format-a2l` | M1 的读写按裸地址进行，没有信息源消费者 | 分别随 M3 / M2 引入变量模型时（**均已落地**） | 变量只能手填地址，无自动建立 |
+| `format-dbc` / `format-dcm` / `format-mf4` | 各自能力的里程碑未到 | DBC 显示 M3（**已落地**）；DCM 导入与数据集 M4；MF4 录制与离线重开 M5 | 对应能力缺失，不影响 M1 验证 |
 | `daemon` / `ui` | 没有 UI 就没有常驻进程的消费者 | M2 的 Web 最小曲线页 | CLI 已证明引擎可用，但产品形态缺失 |
 | `ui-tauri` 桌面壳 | 界面与 Web UI 完全同源，壳只解决"双击启动"这一件事 | 用户明确要单机双击形态（MVP 之后），见 [decisions.md](decisions.md#d-21-native-gui-决策逆转) | 本地使用须先起 daemon，体验差但功能不缺 |
 | 前置网关与自研 `gateway` | nginx / Caddy 已覆盖反代、认证与 TLS，daemon 侧零代码 | 车载盒子放不下静态二进制，或需 ACL 直接读工程配置，见 [13-deployment.md](13-deployment.md#自研精简网关的触发条件) | 只能用现成网关，部署门槛落在运维能力上 |
@@ -122,7 +122,7 @@ M1 只建九个：`diag`、`cal-core`、`xcp-proto`、`bus`、`bus-socketcan`、
 
 `cal-core` 在 M1 **只放基础类型**：地址、长度、句柄等 newtype，其余全部后置。IR（变量树、Curve/Map/轴）、`CalibrationSource` trait、quirk 扩展点要等真实输入源，M1 的 XCP 读写按裸地址进行。
 
-L1 的 `proto` 与 L4 的 `assembly` 当前为空档；其余 crate 与模块的到期条件见上表。
+L4 的 `assembly` 于 M3 落地（交叉校验），仍有大量职责待填；其余 crate 与模块的到期条件见上表。
 
 ## 接口一致性
 
