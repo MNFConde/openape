@@ -57,6 +57,18 @@ enum ProbeTarget {
     Bus(BusArgs),
     /// 探测 XCP 建链
     Xcp(XcpArgs),
+    /// 报描述文件里的变量，两份都给时做交叉校验
+    Source(SourceArgs),
+}
+
+#[derive(Debug, Parser)]
+struct SourceArgs {
+    /// ELF 文件
+    #[arg(long)]
+    elf: Option<std::path::PathBuf>,
+    /// A2L 文件
+    #[arg(long)]
+    a2l: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Parser)]
@@ -137,6 +149,11 @@ async fn probe(cli: &Cli, target: &ProbeTarget) -> Result<String, Fault> {
                 .await
             }
         },
+        // 描述文件是本地的，不经过 daemon：它描述的 ECU 可能与 daemon 那头
+        // 的会话不是同一台，借 daemon 读只会让两份数据的来源混在一起。
+        ProbeTarget::Source(args) => {
+            commands::probe_source(args.elf.as_deref(), args.a2l.as_deref(), cli.json)
+        }
     }
 }
 

@@ -264,7 +264,9 @@ fn write_loose_variable(
                 layout_name(variable.elem())
             )
             .ok();
-            if variable.dims().len() > 1 {
+            // 一维也要写：不写 MATRIX_DIM 的 VAL_BLK 读回来是个"没有维度的
+            // 矩阵"，会被加载器当成畸形对象跳过——导出件就此丢一条变量。
+            if !variable.dims().is_empty() {
                 let quick_first: Vec<String> =
                     variable.dims().iter().rev().map(u32::to_string).collect();
                 writeln!(out, "      MATRIX_DIM {}", quick_first.join(" ")).ok();

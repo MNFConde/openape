@@ -52,6 +52,21 @@ fn exported_text_is_accepted_by_a2lfile_in_strict_mode() {
 }
 
 #[test]
+fn one_dimensional_tables_survive_the_round_trip() {
+    // 一维 VAL_BLK 不写 MATRIX_DIM 时，读回来会被当成"没有维度的矩阵"
+    // 跳过——导出件看着没问题，变量却没回来。这条是那句"矩阵既没有
+    // MATRIX_DIM 也没有 AXIS_DESCR"报出来的。
+    let text = exported();
+    let reparsed = openape_format_a2l::load_str(&text, None).expect("导出件必须能读回");
+    let axis = reparsed
+        .tree()
+        .iter()
+        .find(|var| var.symbol().as_str() == "cal_axis_x")
+        .expect("一维轴数组必须在往返后仍然存在");
+    assert_eq!(axis.dims(), &[3]);
+}
+
+#[test]
 fn round_trip_keeps_addresses_and_dimensions() {
     // 导出再读回来，地址与维度不能变形——这是"往返一次信息还在"的证据。
     let text = exported();
@@ -121,6 +136,11 @@ fn export_matches_the_golden_file_byte_for_byte() {
         env!("CARGO_MANIFEST_DIR"),
         "/../../fixtures/a2l/elf-export-golden.a2l"
     );
+    let actual = exported();
+    if std::env::var("OPENAPE_WRITE_GOLDEN").is_ok() {
+        std::fs::write(path, &actual).expect("写 golden");
+        return;
+    }
     let expected = std::fs::read_to_string(path).expect("golden 必需入库");
-    assert_eq!(exported(), expected, "导出件与 golden 不一致");
+    assert_eq!(actual, expected, "导出件与 golden 不一致");
 }

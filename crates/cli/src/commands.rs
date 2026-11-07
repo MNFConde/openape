@@ -10,7 +10,9 @@ use openape_proto::{BusReport, ConnectReport};
 use openape_session::{Session, SessionConfig, list_channels, probe_channel};
 use tonic::transport::Channel;
 
-use crate::output::{connect_info, probe_report, read_report, render};
+use crate::output::{
+    CrossCheckReport, SourceReport, SourceVariable, connect_info, probe_report, read_report, render,
+};
 use crate::usage_fault;
 
 /// `probe bus`：列通道，可选探测一条。
@@ -229,6 +231,100 @@ pub fn render_read(json: bool, report: &openape_proto::ReadResponse) -> Result<S
     render(json, report, || {
         format!("{} {} = [{}]", report.address, report.len, report.data_hex)
     })
+}
+
+/// `probe source`：报一份或两份描述文件里的变量，并做交叉校验。
+///
+/// 不给文件时用内置的"什么都没有"错误而不是猜默认路径——用户手上可能有
+/// 十几份 A2L，猜错一份比报错更难查。
+pub fn probe_source(
+    elf: Option<&std::path::Path>,
+    a2l: Option<&std::path::Path>,
+    json: bool,
+) -> Result<String, Fault> {
+    if elf.is_none() && a2l.is_none() {
+        return Err(usage_fault(
+            "probe source 至少要给一个来源：--elf 或 --a2l".to_owned(),
+        ));
+    }
+    let mut notes = Vec::new();
+    let elf_tree = elf.map(|path| load_elf(path, &mut notes)).transpose()?;
+    let a2l_tree = a2l.map(|path| load_a2l(path, &mut notes)).transpose()?;
+
+    // 两份都给时以 ELF 为主：它描述的是编进 ECU 的那份二进制，A2L 可能过时。
+    let primary = elf_tree
+        .as_ref()
+        .or(a2l_tree.as_ref())
+        .expect("上面查过非空");
+    let report = SourceReport {
+        variables: primary.iter().map(source_variable).collect(),
+        cross_check: match (&elf_tree, &a2l_tree) {
+            (Some(elf), Some(a2l)) => Some(build_cross_check(elf, a2l)),
+            _ => None,
+        },
+        notes,
+    };
+    if json {
+        serde_json::to_string_pretty(&report)
+            .map_err(|err| usage_fault(format!("序列化失败：{err}")))
+    } else {
+        Ok(report.render())
+    }
+}
+
+fn load_elf(
+    path: &std::path::Path,
+    notes: &mut Vec<String>,
+) -> Result<openape_cal_core::VariableTree, Fault> {
+    let source = openape_format_elf::load(path).map_err(fault_of)?;
+    let (tree, elf_notes) = source.to_ir().map_err(fault_of)?;
+    notes.extend(elf_notes.iter().map(ToString::to_string));
+    Ok(tree)
+}
+
+fn load_a2l(
+    path: &std::path::Path,
+    notes: &mut Vec<String>,
+) -> Result<openape_cal_core::VariableTree, Fault> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|err| usage_fault(format!("读不了 {}：{err}", path.display())))?;
+    let source = openape_format_a2l::load_str(&text, None).map_err(fault_of)?;
+    notes.extend(source.notes().iter().map(ToString::to_string));
+    Ok(source.tree().clone())
+}
+
+fn build_cross_check(
+    elf: &openape_cal_core::VariableTree,
+    a2l: &openape_cal_core::VariableTree,
+) -> CrossCheckReport {
+    let report = openape_assembly::cross_check(elf, a2l);
+    CrossCheckReport {
+        conflicts: report.conflicts().iter().map(ToString::to_string).collect(),
+        only_in_elf: symbols(report.only_in_elf()),
+        only_in_a2l: symbols(report.only_in_a2l()),
+    }
+}
+
+fn symbols(list: &[openape_cal_core::Symbol]) -> Vec<String> {
+    list.iter()
+        .map(|symbol| symbol.as_str().to_owned())
+        .collect()
+}
+
+fn fault_of(error: impl std::fmt::Display) -> Fault {
+    usage_fault(error.to_string())
+}
+
+fn source_variable(variable: &openape_cal_core::Variable) -> SourceVariable {
+    SourceVariable {
+        symbol: variable.symbol().as_str().to_owned(),
+        address: variable.address().get(),
+        elem: format!("{:?}", variable.elem()),
+        dims: variable.dims().to_vec(),
+        role: variable.role().map(|role| format!("{role:?}")),
+        // 没有语义就是裸值：标出来，不填默认值。
+        raw: variable.semantics().is_empty(),
+    }
 }
 
 #[cfg(test)]
