@@ -153,3 +153,67 @@ async fn bad_addresses_and_lengths_are_rejected_before_touching_the_bus() {
         .expect_err("地址非法");
     assert!(err.message().contains("daemon 没有接管通道") || err.message().contains("地址"));
 }
+
+#[tokio::test]
+async fn variables_are_served_without_any_hardware() {
+    // 只看描述文件、不连 ECU 是合法用法：daemon 起来了就能画表格。
+    let elf = std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/elf/test.elf"
+    ));
+    let variables = boot::load_variables(Some(elf), None).expect("给了文件就该有清单");
+    let state = Arc::new(
+        openape_daemon::service::AppState::idle(Arc::new(Metrics::new())).with_variables(variables),
+    );
+    let service = OpenApeService::new(state);
+
+    let list = service
+        .list_variables(Request::new(proto::Empty {}))
+        .await
+        .expect("要能回答")
+        .into_inner();
+    assert!(list.loaded);
+    assert!(!list.variables.is_empty());
+    assert!(list.variables.iter().all(|entry| entry.raw));
+}
+
+#[tokio::test]
+async fn without_descriptors_the_list_says_not_loaded() {
+    // 「未加载」与「加载了但没变量」要能分开：界面据此提示去加 --elf。
+    let state = Arc::new(openape_daemon::service::AppState::idle(Arc::new(
+        Metrics::new(),
+    )));
+    let service = OpenApeService::new(state);
+    let list = service
+        .list_variables(Request::new(proto::Empty {}))
+        .await
+        .expect("要能回答")
+        .into_inner();
+    assert!(!list.loaded);
+    assert!(list.variables.is_empty());
+}
+
+#[tokio::test]
+async fn faults_are_the_diag_type_mapped_not_reinvented() {
+    // 界面上的故障必须能和日志里的同一条对上。这里从 `diag::Fault` 出发，
+    // 断言字段确实是从它映射来的，而不是在 daemon 里另写一套文案。
+    let state = openape_daemon::service::AppState::idle(Arc::new(Metrics::new()));
+    let fault = openape_diag::Fault::new(
+        openape_diag::FaultCode::new(openape_diag::Domain::Session, 1).expect("合法编号"),
+        openape_diag::Severity::Error,
+        "测试故障",
+    )
+    .with_hint("先做这个");
+    state.record_fault(&fault);
+
+    let service = OpenApeService::new(Arc::new(state));
+    let list = service
+        .list_faults(Request::new(proto::Empty {}))
+        .await
+        .expect("要能回答")
+        .into_inner();
+    assert_eq!(list.faults.len(), 1);
+    assert_eq!(list.faults[0].message, "测试故障");
+    assert_eq!(list.faults[0].hint, "先做这个");
+    assert!(list.faults[0].code.contains('S') || !list.faults[0].code.is_empty());
+}

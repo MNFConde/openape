@@ -327,6 +327,29 @@ export interface HealthStatus {
     version: string;
 }
 /**
+ * daemon 当前接管了什么。
+ *
+ * @generated from protobuf message openape.v1.SessionReport
+ */
+export interface SessionReport {
+    /**
+     * @generated from protobuf field: string channel = 1
+     */
+    channel: string;
+    /**
+     * @generated from protobuf field: bool linked = 2
+     */
+    linked: boolean;
+    /**
+     * @generated from protobuf field: openape.v1.ConnectInfo info = 3
+     */
+    info?: ConnectInfo;
+    /**
+     * @generated from protobuf field: bool capturing = 4
+     */
+    capturing: boolean;
+}
+/**
  * CLI 的结构化输出：通道列表 + 可选的一条探测结果。
  *
  * @generated from protobuf message openape.v1.BusReport
@@ -355,6 +378,97 @@ export interface ConnectReport {
      * @generated from protobuf field: openape.v1.ConnectInfo info = 2
      */
     info?: ConnectInfo;
+}
+/**
+ * 一个变量在界面上的样子。语义缺失时 `raw` 为真，界面标 [raw]，
+ * 不填默认值假装知道单位与换算（D-13）。
+ *
+ * @generated from protobuf message openape.v1.VariableEntry
+ */
+export interface VariableEntry {
+    /**
+     * @generated from protobuf field: string symbol = 1
+     */
+    symbol: string;
+    /**
+     * @generated from protobuf field: uint32 address = 2
+     */
+    address: number;
+    /**
+     * @generated from protobuf field: string elem = 3
+     */
+    elem: string;
+    /**
+     * @generated from protobuf field: repeated uint32 dims = 4
+     */
+    dims: number[];
+    /**
+     * 角色。空串表示尚未指定，由用户在界面上选。
+     *
+     * @generated from protobuf field: string role = 5
+     */
+    role: string;
+    /**
+     * @generated from protobuf field: bool raw = 6
+     */
+    raw: boolean;
+}
+/**
+ * @generated from protobuf message openape.v1.VariableList
+ */
+export interface VariableList {
+    /**
+     * @generated from protobuf field: repeated openape.v1.VariableEntry variables = 1
+     */
+    variables: VariableEntry[];
+    /**
+     * 加载期提示：被跳过的变量、降级的字段。
+     *
+     * @generated from protobuf field: repeated string notes = 2
+     */
+    notes: string[];
+    /**
+     * 没加载任何信息源时为空，界面据此说明"未加载描述文件"。
+     *
+     * @generated from protobuf field: bool loaded = 3
+     */
+    loaded: boolean;
+}
+/**
+ * 一条故障。字段与 `openape_diag::Fault` 一一对应，不再另造错误类型。
+ *
+ * @generated from protobuf message openape.v1.FaultEvent
+ */
+export interface FaultEvent {
+    /**
+     * @generated from protobuf field: string code = 1
+     */
+    code: string;
+    /**
+     * @generated from protobuf field: string severity = 2
+     */
+    severity: string;
+    /**
+     * @generated from protobuf field: string message = 3
+     */
+    message: string;
+    /**
+     * @generated from protobuf field: string hint = 4
+     */
+    hint: string;
+    /**
+     * @generated from protobuf field: uint64 occurred_at_us = 5
+     */
+    occurredAtUs: bigint;
+}
+/**
+ * @generated from protobuf message openape.v1.FaultList
+ */
+export interface FaultList {
+    /**
+     * @generated from protobuf field: repeated openape.v1.FaultEvent faults = 1
+     */
+    faults: FaultEvent[];
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class Empty$Type extends MessageType<Empty> {
@@ -1516,6 +1630,76 @@ class HealthStatus$Type extends MessageType<HealthStatus> {
  */
 export const HealthStatus = new HealthStatus$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class SessionReport$Type extends MessageType<SessionReport> {
+    constructor() {
+        super("openape.v1.SessionReport", [
+            { no: 1, name: "channel", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "linked", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "info", kind: "message", T: () => ConnectInfo },
+            { no: 4, name: "capturing", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SessionReport>): SessionReport {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.channel = "";
+        message.linked = false;
+        message.capturing = false;
+        if (value !== undefined)
+            reflectionMergePartial<SessionReport>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SessionReport): SessionReport {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string channel */ 1:
+                    message.channel = reader.string();
+                    break;
+                case /* bool linked */ 2:
+                    message.linked = reader.bool();
+                    break;
+                case /* openape.v1.ConnectInfo info */ 3:
+                    message.info = ConnectInfo.internalBinaryRead(reader, reader.uint32(), options, message.info);
+                    break;
+                case /* bool capturing */ 4:
+                    message.capturing = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SessionReport, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string channel = 1; */
+        if (message.channel !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.channel);
+        /* bool linked = 2; */
+        if (message.linked !== false)
+            writer.tag(2, WireType.Varint).bool(message.linked);
+        /* openape.v1.ConnectInfo info = 3; */
+        if (message.info)
+            ConnectInfo.internalBinaryWrite(message.info, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* bool capturing = 4; */
+        if (message.capturing !== false)
+            writer.tag(4, WireType.Varint).bool(message.capturing);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.SessionReport
+ */
+export const SessionReport = new SessionReport$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class BusReport$Type extends MessageType<BusReport> {
     constructor() {
         super("openape.v1.BusReport", [
@@ -1623,13 +1807,301 @@ class ConnectReport$Type extends MessageType<ConnectReport> {
  * @generated MessageType for protobuf message openape.v1.ConnectReport
  */
 export const ConnectReport = new ConnectReport$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class VariableEntry$Type extends MessageType<VariableEntry> {
+    constructor() {
+        super("openape.v1.VariableEntry", [
+            { no: 1, name: "symbol", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "address", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 3, name: "elem", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "dims", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 13 /*ScalarType.UINT32*/ },
+            { no: 5, name: "role", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "raw", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<VariableEntry>): VariableEntry {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.symbol = "";
+        message.address = 0;
+        message.elem = "";
+        message.dims = [];
+        message.role = "";
+        message.raw = false;
+        if (value !== undefined)
+            reflectionMergePartial<VariableEntry>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: VariableEntry): VariableEntry {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string symbol */ 1:
+                    message.symbol = reader.string();
+                    break;
+                case /* uint32 address */ 2:
+                    message.address = reader.uint32();
+                    break;
+                case /* string elem */ 3:
+                    message.elem = reader.string();
+                    break;
+                case /* repeated uint32 dims */ 4:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.dims.push(reader.uint32());
+                    else
+                        message.dims.push(reader.uint32());
+                    break;
+                case /* string role */ 5:
+                    message.role = reader.string();
+                    break;
+                case /* bool raw */ 6:
+                    message.raw = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: VariableEntry, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string symbol = 1; */
+        if (message.symbol !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.symbol);
+        /* uint32 address = 2; */
+        if (message.address !== 0)
+            writer.tag(2, WireType.Varint).uint32(message.address);
+        /* string elem = 3; */
+        if (message.elem !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.elem);
+        /* repeated uint32 dims = 4; */
+        if (message.dims.length) {
+            writer.tag(4, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.dims.length; i++)
+                writer.uint32(message.dims[i]);
+            writer.join();
+        }
+        /* string role = 5; */
+        if (message.role !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.role);
+        /* bool raw = 6; */
+        if (message.raw !== false)
+            writer.tag(6, WireType.Varint).bool(message.raw);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.VariableEntry
+ */
+export const VariableEntry = new VariableEntry$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class VariableList$Type extends MessageType<VariableList> {
+    constructor() {
+        super("openape.v1.VariableList", [
+            { no: 1, name: "variables", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => VariableEntry },
+            { no: 2, name: "notes", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "loaded", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<VariableList>): VariableList {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.variables = [];
+        message.notes = [];
+        message.loaded = false;
+        if (value !== undefined)
+            reflectionMergePartial<VariableList>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: VariableList): VariableList {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated openape.v1.VariableEntry variables */ 1:
+                    message.variables.push(VariableEntry.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated string notes */ 2:
+                    message.notes.push(reader.string());
+                    break;
+                case /* bool loaded */ 3:
+                    message.loaded = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: VariableList, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated openape.v1.VariableEntry variables = 1; */
+        for (let i = 0; i < message.variables.length; i++)
+            VariableEntry.internalBinaryWrite(message.variables[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated string notes = 2; */
+        for (let i = 0; i < message.notes.length; i++)
+            writer.tag(2, WireType.LengthDelimited).string(message.notes[i]);
+        /* bool loaded = 3; */
+        if (message.loaded !== false)
+            writer.tag(3, WireType.Varint).bool(message.loaded);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.VariableList
+ */
+export const VariableList = new VariableList$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class FaultEvent$Type extends MessageType<FaultEvent> {
+    constructor() {
+        super("openape.v1.FaultEvent", [
+            { no: 1, name: "code", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "severity", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "hint", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "occurred_at_us", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<FaultEvent>): FaultEvent {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.code = "";
+        message.severity = "";
+        message.message = "";
+        message.hint = "";
+        message.occurredAtUs = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<FaultEvent>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: FaultEvent): FaultEvent {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string code */ 1:
+                    message.code = reader.string();
+                    break;
+                case /* string severity */ 2:
+                    message.severity = reader.string();
+                    break;
+                case /* string message */ 3:
+                    message.message = reader.string();
+                    break;
+                case /* string hint */ 4:
+                    message.hint = reader.string();
+                    break;
+                case /* uint64 occurred_at_us */ 5:
+                    message.occurredAtUs = reader.uint64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: FaultEvent, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string code = 1; */
+        if (message.code !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.code);
+        /* string severity = 2; */
+        if (message.severity !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.severity);
+        /* string message = 3; */
+        if (message.message !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.message);
+        /* string hint = 4; */
+        if (message.hint !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.hint);
+        /* uint64 occurred_at_us = 5; */
+        if (message.occurredAtUs !== 0n)
+            writer.tag(5, WireType.Varint).uint64(message.occurredAtUs);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.FaultEvent
+ */
+export const FaultEvent = new FaultEvent$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class FaultList$Type extends MessageType<FaultList> {
+    constructor() {
+        super("openape.v1.FaultList", [
+            { no: 1, name: "faults", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => FaultEvent }
+        ]);
+    }
+    create(value?: PartialMessage<FaultList>): FaultList {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.faults = [];
+        if (value !== undefined)
+            reflectionMergePartial<FaultList>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: FaultList): FaultList {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated openape.v1.FaultEvent faults */ 1:
+                    message.faults.push(FaultEvent.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: FaultList, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated openape.v1.FaultEvent faults = 1; */
+        for (let i = 0; i < message.faults.length; i++)
+            FaultEvent.internalBinaryWrite(message.faults[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.FaultList
+ */
+export const FaultList = new FaultList$Type();
 /**
  * @generated ServiceType for protobuf service openape.v1.OpenApe
  */
 export const OpenApe = new ServiceType("openape.v1.OpenApe", [
     { name: "ListChannels", options: {}, I: Empty, O: ListChannelsResponse },
     { name: "ProbeChannel", options: {}, I: ProbeChannelRequest, O: ChannelProbe },
+    { name: "ReadMemory", options: {}, I: ReadRequest, O: ReadResponse },
+    { name: "GetSession", options: {}, I: Empty, O: SessionReport },
     { name: "Health", options: {}, I: Empty, O: HealthStatus },
     { name: "GetMetrics", options: {}, I: Empty, O: MetricsSnapshot },
-    { name: "StreamSamples", serverStreaming: true, options: {}, I: StreamRequest, O: DaqSample }
+    { name: "StreamSamples", serverStreaming: true, options: {}, I: StreamRequest, O: DaqSample },
+    { name: "ListVariables", options: {}, I: Empty, O: VariableList },
+    { name: "ListFaults", options: {}, I: Empty, O: FaultList }
 ]);

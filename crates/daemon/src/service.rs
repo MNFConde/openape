@@ -27,6 +27,10 @@ pub struct AppState {
     session: Option<tokio::sync::Mutex<Session>>,
     channel: Option<String>,
     info: Option<ConnectInfo>,
+    /// 已加载的变量清单。未加载描述文件时为空，界面据此说明原因。
+    variables: Option<Arc<proto::VariableList>>,
+    /// 最近的故障。只存 `openape_diag::Fault` 的映射结果，不另造类型。
+    faults: Arc<std::sync::Mutex<Vec<proto::FaultEvent>>>,
 }
 
 impl AppState {
@@ -39,6 +43,8 @@ impl AppState {
             session: None,
             channel: None,
             info: None,
+            variables: None,
+            faults: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -57,6 +63,8 @@ impl AppState {
             session: Some(tokio::sync::Mutex::new(session)),
             channel: Some(channel),
             info: Some(info),
+            variables: None,
+            faults: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -83,6 +91,37 @@ impl AppState {
     /// 采集泵。`None` 表示没有在采集。
     pub fn capture(&self) -> Option<&DaqCapture> {
         self.capture.as_ref()
+    }
+
+    /// 已加载的变量清单。
+    pub fn variables(&self) -> Option<&Arc<proto::VariableList>> {
+        self.variables.as_ref()
+    }
+
+    /// 最近的故障，按发生顺序。
+    pub fn faults(&self) -> Vec<proto::FaultEvent> {
+        self.faults
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+
+    /// 记一条故障。只收 `openape_diag::Fault` 的映射结果——daemon 不自造
+    /// 错误类型，否则界面上的故障与日志里的对不上。
+    pub fn record_fault(&self, fault: &openape_diag::Fault) {
+        const KEEP: usize = 64;
+        if let Ok(mut guard) = self.faults.lock() {
+            if guard.len() >= KEEP {
+                guard.remove(0);
+            }
+            guard.push(fault_event(fault));
+        }
+    }
+
+    /// 装上一份变量清单。
+    pub fn with_variables(mut self, variables: proto::VariableList) -> Self {
+        self.variables = Some(Arc::new(variables));
+        self
     }
 
     fn stream(&self) -> &DaqStream {
@@ -214,6 +253,30 @@ impl proto::open_ape_server::OpenApe for OpenApeService {
         }))
     }
 
+    async fn list_variables(
+        &self,
+        _request: Request<proto::Empty>,
+    ) -> Result<Response<proto::VariableList>, Status> {
+        let list = match self.state.variables() {
+            Some(list) => (**list).clone(),
+            None => proto::VariableList {
+                variables: Vec::new(),
+                notes: Vec::new(),
+                loaded: false,
+            },
+        };
+        Ok(Response::new(list))
+    }
+
+    async fn list_faults(
+        &self,
+        _request: Request<proto::Empty>,
+    ) -> Result<Response<proto::FaultList>, Status> {
+        Ok(Response::new(proto::FaultList {
+            faults: self.state.faults(),
+        }))
+    }
+
     async fn get_metrics(
         &self,
         _request: Request<proto::Empty>,
@@ -301,4 +364,25 @@ fn to_status(fault: Fault) -> Status {
         message.push_str(hint);
     }
     Status::failed_precondition(message)
+}
+
+/// 把 `openape_diag::Fault` 映射成契约里的形状。
+///
+/// 映射而不是另造：界面上的故障要能和日志里的同一条对上，字段偏离一点
+/// 就查不下去了。
+pub fn fault_event(fault: &openape_diag::Fault) -> proto::FaultEvent {
+    proto::FaultEvent {
+        code: fault.code().to_string(),
+        severity: format!("{:?}", fault.severity()),
+        message: fault.message().to_owned(),
+        hint: fault.hint().unwrap_or_default().to_owned(),
+        occurred_at_us: now_us(),
+    }
+}
+
+fn now_us() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_micros() as u64)
+        .unwrap_or(0)
 }

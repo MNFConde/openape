@@ -1,7 +1,8 @@
-// 最小曲线页：订阅 daemon 的样本流，画最后 10 秒。
+// 主页面：曲线 + 标定量表格 + 故障面板。
 //
-// 两条纪律在这里体现：地址一律相对（`location.origin`），不写死主机端口；
-// 只支持根路径部署（vite config 的 base 是 `/`）。
+// 三条纪律在这里体现：地址一律相对（`location.origin`），不写死主机端口；
+// 只支持根路径部署；故障只读 daemon 转发的 `diag::Fault`，界面不自己造
+// 错误文案——否则界面上的故障与日志里的对不上，查不下去。
 
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
@@ -29,6 +30,9 @@ function requireElement<T extends Element>(selector: string): T {
 
 const statusLine = requireElement<HTMLParagraphElement>('#status');
 const chartHost = requireElement<HTMLDivElement>('#chart');
+const variableBody = requireElement<HTMLTableSectionElement>('#variables');
+const variableNote = requireElement<HTMLParagraphElement>('#variables-note');
+const faultList = requireElement<HTMLUListElement>('#faults');
 
 const timestamps: number[] = [];
 const values: number[] = [];
@@ -62,7 +66,81 @@ function push(tsMs: number, value: number): void {
   plot.setData([timestamps, values]);
 }
 
-async function main(): Promise<void> {
+/**
+ * 画标定量表格。
+ *
+ * `raw` 的那几列要标 `[raw]`：没有单位与换算时，界面上看到的就是内存里
+ * 那几个字节，不填一个看着像单位的默认值。
+ */
+async function renderVariables(): Promise<void> {
+  const { response: list } = await client.listVariables({});
+  variableBody.replaceChildren();
+  if (!list.loaded) {
+    variableNote.textContent = '未加载描述文件：给 daemon 加 --elf 或 --a2l。';
+    return;
+  }
+  for (const entry of list.variables) {
+    const row = document.createElement('tr');
+
+    const symbol = document.createElement('td');
+    symbol.textContent = entry.symbol;
+    row.append(symbol);
+
+    const address = document.createElement('td');
+    address.textContent = `0x${entry.address.toString(16).toUpperCase().padStart(8, '0')}`;
+    row.append(address);
+
+    const shape = document.createElement('td');
+    const dims = entry.dims.length > 0 ? `[${entry.dims.join('][')}]` : '';
+    shape.textContent = `${entry.elem}${dims}`;
+    row.append(shape);
+
+    const role = document.createElement('td');
+    role.textContent = entry.role === '' ? '未指定' : entry.role;
+    row.append(role);
+
+    const semantics = document.createElement('td');
+    semantics.textContent = entry.raw ? '[raw]' : '';
+    semantics.className = entry.raw ? 'raw' : '';
+    row.append(semantics);
+
+    variableBody.append(row);
+  }
+  variableNote.textContent =
+    list.notes.length > 0 ? `提示：${list.notes.join('；')}` : '';
+}
+
+/**
+ * 画故障面板。
+ *
+ * 只把 daemon 给的字段摆出来，不自己判断严重度、不改写文案：故障的措辞
+ * 与分级归 diag 管，界面另说一套就跟日志对不上了。
+ */
+async function renderFaults(): Promise<void> {
+  const { response: list } = await client.listFaults({});
+  faultList.replaceChildren();
+  if (list.faults.length === 0) {
+    const empty = document.createElement('li');
+    empty.textContent = '暂无故障';
+    faultList.append(empty);
+    return;
+  }
+  for (const fault of list.faults) {
+    const item = document.createElement('li');
+    const head = document.createElement('strong');
+    head.textContent = `[${fault.severity}] ${fault.code}`;
+    item.append(head);
+    item.append(document.createTextNode(` ${fault.message}`));
+    if (fault.hint !== '') {
+      const hint = document.createElement('em');
+      hint.textContent = ` —— ${fault.hint}`;
+      item.append(hint);
+    }
+    faultList.append(item);
+  }
+}
+
+async function streamSamples(): Promise<void> {
   statusLine.textContent = '订阅样本流…';
   const call = client.streamSamples({});
   let count = 0;
@@ -81,6 +159,13 @@ async function main(): Promise<void> {
     }
   }
   statusLine.textContent = `流结束，共 ${count} 帧`;
+}
+
+async function main(): Promise<void> {
+  // 表格与故障面板先画：它们不依赖样本流，曲线连不上时也该看得见。
+  await renderVariables();
+  await renderFaults();
+  await streamSamples();
 }
 
 main().catch((err: unknown) => {

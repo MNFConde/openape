@@ -4,7 +4,7 @@
 //! 解析与 `serve`，那两件事没有分支可测，写不成测试也不该长。
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::Router;
@@ -15,6 +15,8 @@ use openape_cal_core::{Address, ByteLen};
 use openape_diag::{Domain, Fault, FaultCode, Metrics, Severity};
 use openape_session::{CaptureConfig, Session, SessionConfig};
 use openape_xcp::{DaqListSpec, DaqSignal};
+
+use openape_proto as proto;
 
 use crate::service::AppState;
 
@@ -43,6 +45,91 @@ pub struct Args {
     /// 采样信号，`地址:长度`（可重复），例如 `0x1000:2`。
     #[arg(long = "sample", value_parser = parse_signal)]
     pub samples: Vec<SampleSpec>,
+    /// ELF 文件。给界面提供变量清单与地址。
+    #[arg(long)]
+    pub elf: Option<PathBuf>,
+    /// A2L 文件。与 ELF 同时给时顺带做交叉校验，冲突进故障列表。
+    #[arg(long)]
+    pub a2l: Option<PathBuf>,
+}
+
+/// 加载变量清单。两个文件都不给时返回 `None`——界面据此说明"未加载描述
+/// 文件"，而不是显示一个空表格让人以为 ECU 没有变量。
+pub fn load_variables(elf: Option<&Path>, a2l: Option<&Path>) -> Option<proto::VariableList> {
+    if elf.is_none() && a2l.is_none() {
+        return None;
+    }
+    let mut notes = Vec::new();
+    let elf_tree = elf.and_then(|path| load_elf_tree(path, &mut notes));
+    let a2l_tree = a2l.and_then(|path| load_a2l_tree(path, &mut notes));
+    if let (Some(elf), Some(a2l)) = (&elf_tree, &a2l_tree) {
+        notes.extend(
+            openape_assembly::cross_check(elf, a2l)
+                .conflicts()
+                .iter()
+                .map(ToString::to_string),
+        );
+    }
+    let primary = elf_tree.as_ref().or(a2l_tree.as_ref());
+    Some(proto::VariableList {
+        variables: primary.map(entries).unwrap_or_default(),
+        notes,
+        loaded: primary.is_some(),
+    })
+}
+
+fn load_elf_tree(path: &Path, notes: &mut Vec<String>) -> Option<openape_cal_core::VariableTree> {
+    let source = match openape_format_elf::load(path) {
+        Ok(source) => source,
+        Err(err) => {
+            notes.push(format!("读 ELF 失败：{err}"));
+            return None;
+        }
+    };
+    let (tree, elf_notes) = match source.to_ir() {
+        Ok(pair) => pair,
+        Err(err) => {
+            notes.push(format!("ELF 进 IR 失败：{err}"));
+            return None;
+        }
+    };
+    notes.extend(elf_notes.iter().map(ToString::to_string));
+    Some(tree)
+}
+
+fn load_a2l_tree(path: &Path, notes: &mut Vec<String>) -> Option<openape_cal_core::VariableTree> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) => {
+            notes.push(format!("读不了 {}：{err}", path.display()));
+            return None;
+        }
+    };
+    let source = match openape_format_a2l::load_str(&text, None) {
+        Ok(source) => source,
+        Err(err) => {
+            notes.push(format!("读 A2L 失败：{err}"));
+            return None;
+        }
+    };
+    notes.extend(source.notes().iter().map(ToString::to_string));
+    Some(source.tree().clone())
+}
+
+fn entries(tree: &openape_cal_core::VariableTree) -> Vec<proto::VariableEntry> {
+    tree.iter()
+        .map(|variable| proto::VariableEntry {
+            symbol: variable.symbol().as_str().to_owned(),
+            address: variable.address().get(),
+            elem: format!("{:?}", variable.elem()),
+            dims: variable.dims().to_vec(),
+            role: variable
+                .role()
+                .map(|role| format!("{role:?}"))
+                .unwrap_or_default(),
+            raw: variable.semantics().is_empty(),
+        })
+        .collect()
 }
 
 /// 一路采样。
@@ -138,12 +225,19 @@ pub async fn open_session(
 
 /// 按参数决定状态：给了通道就接管，没给就只做健康与指标。
 pub async fn build_state(args: &Args, metrics: Arc<Metrics>) -> Result<Arc<AppState>, Fault> {
-    match args.channel.as_deref() {
-        Some(channel) => Ok(Arc::new(
-            open_session(channel, args.tx_id, args.rx_id, &args.samples, metrics).await?,
-        )),
-        None => Ok(Arc::new(AppState::idle(metrics))),
-    }
+    let state = match args.channel.as_deref() {
+        Some(channel) => {
+            open_session(channel, args.tx_id, args.rx_id, &args.samples, metrics).await?
+        }
+        None => AppState::idle(metrics),
+    };
+    // 变量清单与是否接管硬件无关：可以只看描述文件不连 ECU。
+    Ok(Arc::new(
+        match load_variables(args.elf.as_deref(), args.a2l.as_deref()) {
+            Some(variables) => state.with_variables(variables),
+            None => state,
+        },
+    ))
 }
 
 /// 组装好的路由与已绑定的监听口。
@@ -317,6 +411,77 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         assert!(!server.is_finished(), "服务不该自己退出");
         server.abort();
+    }
+
+    #[test]
+    fn unreadable_files_leave_a_note_instead_of_an_empty_table() {
+        // 文件给错是常事（路径写错、换了机器）。界面要能说"读 ELF 失败：
+        // 没有这个文件"，而不是画一张空表格让人以为 ECU 没有变量。
+        let missing = std::path::Path::new("/definitely/not/here.elf");
+        let list = load_variables(Some(missing), None).expect("给了文件就该有清单");
+        assert!(!list.loaded);
+        assert!(list.variables.is_empty());
+        assert!(
+            list.notes.iter().any(|note| note.contains("读 ELF 失败")),
+            "失败原因要留在提示里：{:?}",
+            list.notes
+        );
+    }
+
+    #[test]
+    fn unreadable_a2l_is_reported_too() {
+        let missing = std::path::Path::new("/definitely/not/here.a2l");
+        let list = load_variables(None, Some(missing)).expect("给了文件就该有清单");
+        assert!(!list.loaded);
+        assert!(
+            list.notes.iter().any(|note| note.contains("读不了")),
+            "失败原因要留在提示里：{:?}",
+            list.notes
+        );
+    }
+
+    #[test]
+    fn no_descriptor_files_means_not_loaded_not_empty() {
+        // 「未加载」与「加载了但没有变量」是两件事：界面上前者要提示去加
+        // --elf，后者要提示文件可能不对。
+        assert!(load_variables(None, None).is_none());
+    }
+
+    #[test]
+    fn elf_variables_reach_the_wire_with_raw_marked() {
+        let path = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/elf/test.elf"
+        ));
+        let list = load_variables(Some(path), None).expect("给了文件就该有清单");
+        assert!(list.loaded);
+        assert!(!list.variables.is_empty());
+        assert!(
+            list.variables.iter().all(|entry| entry.raw),
+            "仅 ELF 档每条都是裸值，不填默认语义"
+        );
+        assert!(
+            list.variables.iter().all(|entry| entry.role.is_empty()),
+            "角色留给用户，daemon 不替他判定"
+        );
+    }
+
+    #[test]
+    fn two_descriptors_in_agreement_produce_no_conflict_notes() {
+        let elf = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/elf/test.elf"
+        ));
+        let a2l = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/a2l/elf-export-golden.a2l"
+        ));
+        let list = load_variables(Some(elf), Some(a2l)).expect("给了文件就该有清单");
+        assert!(
+            !list.notes.iter().any(|note| note.contains("不一致")),
+            "同一来源的两份文件不该报冲突：{:?}",
+            list.notes
+        );
     }
 
     #[tokio::test]

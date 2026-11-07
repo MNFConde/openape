@@ -4,11 +4,16 @@
 import type { RpcTransport } from "@protobuf-ts/runtime-rpc";
 import type { ServiceInfo } from "@protobuf-ts/runtime-rpc";
 import { OpenApe } from "./openape";
+import type { FaultList } from "./openape";
+import type { VariableList } from "./openape";
 import type { DaqSample } from "./openape";
 import type { StreamRequest } from "./openape";
 import type { ServerStreamingCall } from "@protobuf-ts/runtime-rpc";
 import type { MetricsSnapshot } from "./openape";
 import type { HealthStatus } from "./openape";
+import type { SessionReport } from "./openape";
+import type { ReadResponse } from "./openape";
+import type { ReadRequest } from "./openape";
 import type { ChannelProbe } from "./openape";
 import type { ProbeChannelRequest } from "./openape";
 import { stackIntercept } from "@protobuf-ts/runtime-rpc";
@@ -31,6 +36,18 @@ export interface IOpenApeClient {
      */
     probeChannel(input: ProbeChannelRequest, options?: RpcOptions): UnaryCall<ProbeChannelRequest, ChannelProbe>;
     /**
+     * 读一段内存。daemon 接管硬件时由它代读，CLI 因此不必抢设备锁。
+     *
+     * @generated from protobuf rpc: ReadMemory
+     */
+    readMemory(input: ReadRequest, options?: RpcOptions): UnaryCall<ReadRequest, ReadResponse>;
+    /**
+     * daemon 的会话状态。CLI 用它回答"现在是谁拿着设备"。
+     *
+     * @generated from protobuf rpc: GetSession
+     */
+    getSession(input: Empty, options?: RpcOptions): UnaryCall<Empty, SessionReport>;
+    /**
      * @generated from protobuf rpc: Health
      */
     health(input: Empty, options?: RpcOptions): UnaryCall<Empty, HealthStatus>;
@@ -44,6 +61,18 @@ export interface IOpenApeClient {
      * @generated from protobuf rpc: StreamSamples
      */
     streamSamples(input: StreamRequest, options?: RpcOptions): ServerStreamingCall<StreamRequest, DaqSample>;
+    /**
+     * 当前加载的变量清单。界面用它画标定量表格。
+     *
+     * @generated from protobuf rpc: ListVariables
+     */
+    listVariables(input: Empty, options?: RpcOptions): UnaryCall<Empty, VariableList>;
+    /**
+     * 最近的故障。只读 `openape_diag::Fault`，daemon 不自造错误类型。
+     *
+     * @generated from protobuf rpc: ListFaults
+     */
+    listFaults(input: Empty, options?: RpcOptions): UnaryCall<Empty, FaultList>;
 }
 /**
  * daemon 对 CLI 与 UI 提供的服务。
@@ -71,17 +100,35 @@ export class OpenApeClient implements IOpenApeClient, ServiceInfo {
         return stackIntercept<ProbeChannelRequest, ChannelProbe>("unary", this._transport, method, opt, input);
     }
     /**
+     * 读一段内存。daemon 接管硬件时由它代读，CLI 因此不必抢设备锁。
+     *
+     * @generated from protobuf rpc: ReadMemory
+     */
+    readMemory(input: ReadRequest, options?: RpcOptions): UnaryCall<ReadRequest, ReadResponse> {
+        const method = this.methods[2], opt = this._transport.mergeOptions(options);
+        return stackIntercept<ReadRequest, ReadResponse>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * daemon 的会话状态。CLI 用它回答"现在是谁拿着设备"。
+     *
+     * @generated from protobuf rpc: GetSession
+     */
+    getSession(input: Empty, options?: RpcOptions): UnaryCall<Empty, SessionReport> {
+        const method = this.methods[3], opt = this._transport.mergeOptions(options);
+        return stackIntercept<Empty, SessionReport>("unary", this._transport, method, opt, input);
+    }
+    /**
      * @generated from protobuf rpc: Health
      */
     health(input: Empty, options?: RpcOptions): UnaryCall<Empty, HealthStatus> {
-        const method = this.methods[2], opt = this._transport.mergeOptions(options);
+        const method = this.methods[4], opt = this._transport.mergeOptions(options);
         return stackIntercept<Empty, HealthStatus>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: GetMetrics
      */
     getMetrics(input: Empty, options?: RpcOptions): UnaryCall<Empty, MetricsSnapshot> {
-        const method = this.methods[3], opt = this._transport.mergeOptions(options);
+        const method = this.methods[5], opt = this._transport.mergeOptions(options);
         return stackIntercept<Empty, MetricsSnapshot>("unary", this._transport, method, opt, input);
     }
     /**
@@ -90,7 +137,25 @@ export class OpenApeClient implements IOpenApeClient, ServiceInfo {
      * @generated from protobuf rpc: StreamSamples
      */
     streamSamples(input: StreamRequest, options?: RpcOptions): ServerStreamingCall<StreamRequest, DaqSample> {
-        const method = this.methods[4], opt = this._transport.mergeOptions(options);
+        const method = this.methods[6], opt = this._transport.mergeOptions(options);
         return stackIntercept<StreamRequest, DaqSample>("serverStreaming", this._transport, method, opt, input);
+    }
+    /**
+     * 当前加载的变量清单。界面用它画标定量表格。
+     *
+     * @generated from protobuf rpc: ListVariables
+     */
+    listVariables(input: Empty, options?: RpcOptions): UnaryCall<Empty, VariableList> {
+        const method = this.methods[7], opt = this._transport.mergeOptions(options);
+        return stackIntercept<Empty, VariableList>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * 最近的故障。只读 `openape_diag::Fault`，daemon 不自造错误类型。
+     *
+     * @generated from protobuf rpc: ListFaults
+     */
+    listFaults(input: Empty, options?: RpcOptions): UnaryCall<Empty, FaultList> {
+        const method = this.methods[8], opt = this._transport.mergeOptions(options);
+        return stackIntercept<Empty, FaultList>("unary", this._transport, method, opt, input);
     }
 }

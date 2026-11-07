@@ -12,6 +12,9 @@ name = "openaped"
 path = "src/main.rs"
 
 [dependencies]
+openape-assembly.workspace = true
+openape-format-a2l.workspace = true
+openape-format-elf.workspace = true
 openape-bus.workspace = true
 openape-bus-socketcan.workspace = true
 openape-cal-core.workspace = true

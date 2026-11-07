@@ -141,6 +141,39 @@ message ConnectReport {
   ConnectInfo info = 2;
 }
 
+// 一个变量在界面上的样子。语义缺失时 `raw` 为真，界面标 [raw]，
+// 不填默认值假装知道单位与换算（D-13）。
+message VariableEntry {
+  string symbol = 1;
+  uint32 address = 2;
+  string elem = 3;
+  repeated uint32 dims = 4;
+  // 角色。空串表示尚未指定，由用户在界面上选。
+  string role = 5;
+  bool raw = 6;
+}
+
+message VariableList {
+  repeated VariableEntry variables = 1;
+  // 加载期提示：被跳过的变量、降级的字段。
+  repeated string notes = 2;
+  // 没加载任何信息源时为空，界面据此说明"未加载描述文件"。
+  bool loaded = 3;
+}
+
+// 一条故障。字段与 `openape_diag::Fault` 一一对应，不再另造错误类型。
+message FaultEvent {
+  string code = 1;
+  string severity = 2;
+  string message = 3;
+  string hint = 4;
+  uint64 occurred_at_us = 5;
+}
+
+message FaultList {
+  repeated FaultEvent faults = 1;
+}
+
 // daemon 对 CLI 与 UI 提供的服务。
 service OpenApe {
   rpc ListChannels(Empty) returns (ListChannelsResponse);
@@ -153,4 +186,8 @@ service OpenApe {
   rpc GetMetrics(Empty) returns (MetricsSnapshot);
   // 采集样本流。慢消费者丢最旧，丢掉的量在指标里可查。
   rpc StreamSamples(StreamRequest) returns (stream DaqSample);
+  // 当前加载的变量清单。界面用它画标定量表格。
+  rpc ListVariables(Empty) returns (VariableList);
+  // 最近的故障。只读 `openape_diag::Fault`，daemon 不自造错误类型。
+  rpc ListFaults(Empty) returns (FaultList);
 }
