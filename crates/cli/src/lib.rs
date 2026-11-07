@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod calibration;
 pub mod commands;
 pub mod output;
 

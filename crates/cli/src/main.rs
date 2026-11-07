@@ -8,7 +8,7 @@
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use openape_cli::commands;
+use openape_cli::{calibration, commands};
 use openape_diag::{Fault, Verbosity, log};
 
 #[derive(Debug, Parser)]
@@ -49,6 +49,158 @@ enum Command {
     },
     /// 读一段 ECU 内存
     Read(ReadArgs),
+    /// 写一个标定量（单点写，带写前读回、量程校验、快照与审计）
+    Write(WriteArgs),
+    /// 标定页：查、切、对比
+    Page {
+        #[command(subcommand)]
+        action: PageAction,
+    },
+    /// 标定数据集：对比与回滚
+    Dataset {
+        #[command(subcommand)]
+        action: DatasetAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PageAction {
+    /// 查当前标定页
+    Get(CommonArgs),
+    /// 切标定页（切完读回确认）
+    Set(PageSetArgs),
+    /// 参考页与工作页的差异
+    Diff(PageDiffArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum DatasetAction {
+    /// 比较两份 dataset 文件
+    Diff {
+        /// 左侧文件
+        #[arg(long)]
+        left: std::path::PathBuf,
+        /// 右侧文件
+        #[arg(long)]
+        right: std::path::PathBuf,
+    },
+    /// 按快照回滚（逐项单点写，同样留痕）
+    Restore(WriteArgs),
+}
+
+/// 只连设备的公共参数。
+#[derive(Debug, Parser)]
+struct CommonArgs {
+    /// CAN 通道
+    #[arg(long)]
+    channel: String,
+    /// 命令帧标识符
+    #[arg(long, value_parser = parse_u32, default_value = "0x600")]
+    tx_id: u32,
+    /// 响应帧标识符
+    #[arg(long, value_parser = parse_u32, default_value = "0x601")]
+    rx_id: u32,
+    /// 单次等待响应毫秒数
+    #[arg(long, default_value_t = 200)]
+    timeout_ms: u64,
+}
+
+#[derive(Debug, Parser)]
+struct PageSetArgs {
+    /// 目标页号
+    #[arg(long)]
+    page: u8,
+    #[command(flatten)]
+    common: CommonArgs,
+}
+
+#[derive(Debug, Parser)]
+struct PageDiffArgs {
+    /// 参考页号
+    #[arg(long)]
+    reference: u8,
+    /// 工作页号
+    #[arg(long)]
+    working: u8,
+    /// ELF 文件；页上取样的变量来自它
+    #[arg(long)]
+    elf: Option<std::path::PathBuf>,
+    /// A2L 文件
+    #[arg(long)]
+    a2l: Option<std::path::PathBuf>,
+    #[command(flatten)]
+    common: CommonArgs,
+}
+
+#[derive(Debug, Parser)]
+struct WriteArgs {
+    /// CAN 通道
+    #[arg(long)]
+    channel: String,
+    /// 符号名。给 `--value` 时必需。
+    #[arg(long)]
+    symbol: Option<String>,
+    /// 起始地址。没有符号时必需。
+    #[arg(long, value_parser = parse_u32)]
+    address: Option<u32>,
+    /// 原样字节，十六进制
+    #[arg(long)]
+    data: Option<String>,
+    /// 物理值，按变量的元素类型与换算编码
+    #[arg(long)]
+    value: Option<f64>,
+    /// ELF 文件
+    #[arg(long)]
+    elf: Option<std::path::PathBuf>,
+    /// A2L 文件
+    #[arg(long)]
+    a2l: Option<std::path::PathBuf>,
+    /// 审计与快照目录
+    #[arg(long)]
+    state_dir: Option<std::path::PathBuf>,
+    /// 谁写入的，进审计
+    #[arg(long, default_value = "cli")]
+    actor: String,
+    /// 按快照回滚时用：快照文件路径
+    #[arg(long)]
+    snapshot: Option<std::path::PathBuf>,
+    /// 命令帧标识符
+    #[arg(long, value_parser = parse_u32, default_value = "0x600")]
+    tx_id: u32,
+    /// 响应帧标识符
+    #[arg(long, value_parser = parse_u32, default_value = "0x601")]
+    rx_id: u32,
+    /// 单次等待响应毫秒数
+    #[arg(long, default_value_t = 200)]
+    timeout_ms: u64,
+}
+
+impl WriteArgs {
+    fn session_options(&self) -> calibration::SessionOptions {
+        calibration::SessionOptions {
+            channel: self.channel.clone(),
+            tx_id: self.tx_id,
+            rx_id: self.rx_id,
+            timeout_ms: self.timeout_ms,
+        }
+    }
+
+    fn options(&self) -> calibration::WriteOptions {
+        calibration::WriteOptions {
+            session: self.session_options(),
+            symbol: self.symbol.clone(),
+            address: self.address,
+            data: self.data.clone(),
+            value: self.value,
+            elf: self.elf.clone(),
+            a2l: self.a2l.clone(),
+            state_dir: self
+                .state_dir
+                .clone()
+                .unwrap_or_else(|| std::env::temp_dir().join("openape")),
+            actor: self.actor.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -127,6 +279,78 @@ async fn run(cli: &Cli) -> Result<String, Fault> {
     match &cli.command {
         Command::Probe { target } => probe(cli, target).await,
         Command::Read(args) => read(cli, args).await,
+        Command::Write(args) => write(cli, args).await,
+        Command::Page { action } => page(cli, action).await,
+        Command::Dataset { action } => dataset(cli, action).await,
+    }
+}
+
+async fn write(cli: &Cli, args: &WriteArgs) -> Result<String, Fault> {
+    match cli.via_daemon.as_deref() {
+        Some(url) => calibration::write_via_daemon(url, &args.options(), cli.json).await,
+        None => calibration::write_direct(&args.options(), cli.json).await,
+    }
+}
+
+async fn page(cli: &Cli, action: &PageAction) -> Result<String, Fault> {
+    match action {
+        PageAction::Get(args) => {
+            let options = calibration::SessionOptions {
+                channel: args.channel.clone(),
+                tx_id: args.tx_id,
+                rx_id: args.rx_id,
+                timeout_ms: args.timeout_ms,
+            };
+            calibration::page_get(&options, cli.via_daemon.as_deref(), cli.json).await
+        }
+        PageAction::Set(args) => {
+            let options = calibration::SessionOptions {
+                channel: args.common.channel.clone(),
+                tx_id: args.common.tx_id,
+                rx_id: args.common.rx_id,
+                timeout_ms: args.common.timeout_ms,
+            };
+            calibration::page_set(&options, cli.via_daemon.as_deref(), args.page, cli.json).await
+        }
+        PageAction::Diff(args) => {
+            let mut options = calibration::WriteOptions {
+                session: calibration::SessionOptions {
+                    channel: args.common.channel.clone(),
+                    tx_id: args.common.tx_id,
+                    rx_id: args.common.rx_id,
+                    timeout_ms: args.common.timeout_ms,
+                },
+                symbol: None,
+                address: None,
+                data: None,
+                value: None,
+                elf: args.elf.clone(),
+                a2l: args.a2l.clone(),
+                state_dir: std::env::temp_dir().join("openape"),
+                actor: "cli".to_owned(),
+            };
+            options.actor = "cli".to_owned();
+            calibration::page_diff(
+                &options,
+                cli.via_daemon.as_deref(),
+                args.reference,
+                args.working,
+                cli.json,
+            )
+            .await
+        }
+    }
+}
+
+async fn dataset(cli: &Cli, action: &DatasetAction) -> Result<String, Fault> {
+    match action {
+        DatasetAction::Diff { left, right } => calibration::dataset_diff(left, right, cli.json),
+        DatasetAction::Restore(args) => {
+            let snapshot = args.snapshot.as_deref().ok_or_else(|| {
+                openape_cli::usage_fault("dataset restore 需要 --snapshot <文件>".to_owned())
+            })?;
+            calibration::dataset_restore(snapshot, &args.options(), cli.json).await
+        }
     }
 }
 

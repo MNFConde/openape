@@ -12,6 +12,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod descriptors;
+
+pub use descriptors::{LoadedVariables, load_variables};
+
 use openape_cal_core::{ElemType, Symbol, VariableTree};
 
 /// 冲突落在哪个字段上。

@@ -963,6 +963,7 @@ dependencies = [
  "openape-cal-core",
  "openape-format-a2l",
  "openape-format-elf",
+ "openape-proto",
  "thiserror",
 ]
 

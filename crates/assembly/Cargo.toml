@@ -9,8 +9,7 @@ authors.workspace = true
 
 [dependencies]
 openape-cal-core.workspace = true
-thiserror.workspace = true
-
-[dev-dependencies]
 openape-format-a2l.workspace = true
 openape-format-elf.workspace = true
+openape-proto.workspace = true
+thiserror.workspace = true

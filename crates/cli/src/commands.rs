@@ -130,7 +130,7 @@ pub const DAEMON_DEFAULT: &str = "http://127.0.0.1:47711";
 
 /// 经 daemon 探测通道：daemon 已经拿着设备锁，这里只是问它要答案。
 pub async fn probe_bus_via(url: &str, channel: Option<&str>, json: bool) -> Result<String, Fault> {
-    let mut client = connect(url).await?;
+    let mut client = connect_daemon(url).await?;
     let channels = client
         .list_channels(openape_proto::Empty {})
         .await
@@ -158,7 +158,7 @@ pub async fn read_via(url: &str, address: u32, len: u16, json: bool) -> Result<S
     if len == 0 {
         return Err(usage_fault("--len 必须大于 0".into()));
     }
-    let mut client = connect(url).await?;
+    let mut client = connect_daemon(url).await?;
     let report = client
         .read_memory(openape_proto::ReadRequest {
             address: format!("0x{address:08x}"),
@@ -172,7 +172,7 @@ pub async fn read_via(url: &str, address: u32, len: u16, json: bool) -> Result<S
 
 /// 经 daemon 看会话状态：它建好链了，就不必我们再连一次。
 pub async fn probe_xcp_via(url: &str, channel: &str, json: bool) -> Result<String, Fault> {
-    let mut client = connect(url).await?;
+    let mut client = connect_daemon(url).await?;
     let status = client
         .get_session(openape_proto::Empty {})
         .await
@@ -196,7 +196,8 @@ pub async fn probe_xcp_via(url: &str, channel: &str, json: bool) -> Result<Strin
     render_connect(json, &report)
 }
 
-async fn connect(url: &str) -> Result<OpenApeClient<Channel>, Fault> {
+/// 连到 daemon。`write`/`page` 那几条命令也走这里，避免两套连接逻辑。
+pub async fn connect_daemon(url: &str) -> Result<OpenApeClient<Channel>, Fault> {
     OpenApeClient::connect(url.to_owned())
         .await
         .map_err(|err| daemon_fault(format!("连不上 daemon {url}：{err}")))
