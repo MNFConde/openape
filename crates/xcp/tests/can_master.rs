@@ -6,9 +6,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use openape_bus::{Bus, BusCapabilities, BusError, CanFrame, CanId};
+use openape_bus::{Bus, BusCapabilities, BusError, CanFrame, CanId, FrameKinds};
 use openape_cal_core::{Address, ByteLen};
-use openape_diag::Domain;
+use openape_diag::{Domain, FaultCode};
+use openape_xcp::connection::seq;
 use openape_xcp::{CanXcpMaster, DaqListSpec, DaqSignal, XcpConfig, XcpConnection};
 use openape_xcp_proto::{ErrorCode, MAX_CTO, Response};
 
@@ -18,14 +19,28 @@ struct ScriptedBus {
     inbound: Mutex<VecDeque<CanFrame>>,
     sent: Mutex<Vec<CanFrame>>,
     sends: AtomicUsize,
+    capabilities: BusCapabilities,
 }
 
 impl ScriptedBus {
     fn new() -> Self {
+        Self::with_capabilities(BusCapabilities::CLASSIC_SOFT_TIMESTAMP)
+    }
+
+    /// 能发 CAN-FD 帧的总线：短写只有在它上面才装得下数据。
+    fn with_fd() -> Self {
+        Self::with_capabilities(BusCapabilities {
+            backends: FrameKinds::BOTH,
+            hardware_timestamp: false,
+        })
+    }
+
+    fn with_capabilities(capabilities: BusCapabilities) -> Self {
         Self {
             inbound: Mutex::new(VecDeque::new()),
             sent: Mutex::new(Vec::new()),
             sends: AtomicUsize::new(0),
+            capabilities,
         }
     }
 
@@ -58,7 +73,7 @@ impl Bus for ScriptedBus {
     }
 
     fn capabilities(&self) -> BusCapabilities {
-        BusCapabilities::CLASSIC_SOFT_TIMESTAMP
+        self.capabilities
     }
 
     async fn send(&self, frame: CanFrame) -> Result<(), BusError> {
@@ -149,7 +164,7 @@ async fn slave_error_code_becomes_a_classified_fault() {
     let mut master = master_with(&bus, 0);
 
     let fault = master.connect(0).await.expect_err("从站报错");
-    assert!(fault.message().contains("0x12"), "实际: {fault}");
+    assert!(fault.message().contains("0x22"), "实际: {fault}");
 }
 
 #[tokio::test]
@@ -522,4 +537,237 @@ async fn configure_daq_rejects_oversized_signal_before_touching_the_slave() {
 #[test]
 fn max_short_upload_len_matches_frame_budget() {
     assert_eq!(openape_xcp::MAX_SHORT_UPLOAD_LEN as usize, MAX_CTO - 1);
+}
+
+/// 经典 CAN 上的写对话：SET_MTA 一次，再按 6 字节一帧搬，最后读回。
+#[tokio::test]
+async fn write_splits_by_frame_capacity_and_reads_back() {
+    let bus = Arc::new(ScriptedBus::new());
+    bus.queue_response(Response::Ok {
+        payload: connect_ok_payload(),
+    });
+    bus.queue_response(Response::Ok { payload: vec![] }); // SET_MTA
+    bus.queue_response(Response::Ok { payload: vec![] }); // DOWNLOAD 6 字节
+    bus.queue_response(Response::Ok { payload: vec![] }); // DOWNLOAD 2 字节
+    bus.queue_response(Response::Ok { payload: vec![] }); // 读回：SET_MTA
+    bus.queue_response(Response::Ok {
+        payload: vec![1, 2, 3, 4, 5, 6, 7],
+    }); // 读回：UPLOAD 7
+    bus.queue_response(Response::Ok { payload: vec![8] }); // 读回：UPLOAD 1
+
+    let mut master = master_with(&bus, 0);
+    master.connect(0).await.expect("建链成功");
+    master
+        .write(Address::new(0x2000), &[1, 2, 3, 4, 5, 6, 7, 8])
+        .await
+        .expect("写入并读回一致");
+
+    let frames = bus.sent_frames();
+    let codes: Vec<u8> = frames.iter().map(|frame| frame.data[0]).collect();
+    assert_eq!(
+        codes,
+        vec![0xFF, 0xF6, 0xF0, 0xF0, 0xF6, 0xF5, 0xF5],
+        "先 SET_MTA 定位，再逐帧 DOWNLOAD，最后读回校验"
+    );
+    assert_eq!(
+        frames[2].data[1], 6,
+        "每帧搬 6 字节（整帧减去命令码与 len）"
+    );
+    assert_eq!(frames[3].data[1], 2, "最后一帧搬剩余 2 字节");
+    assert_eq!(frames[1].data[1], 0, "地址扩展字节为 0");
+}
+
+#[tokio::test]
+async fn write_that_does_not_read_back_names_the_differing_byte() {
+    let bus = Arc::new(ScriptedBus::new());
+    bus.queue_response(Response::Ok {
+        payload: connect_ok_payload(),
+    });
+    bus.queue_response(Response::Ok { payload: vec![] }); // SET_MTA
+    bus.queue_response(Response::Ok { payload: vec![] }); // DOWNLOAD
+    bus.queue_response(Response::Ok {
+        payload: vec![0x00, 0xFF],
+    }); // 读回值与写入值不同
+
+    let mut master = master_with(&bus, 0);
+    master.connect(0).await.expect("建链成功");
+    let fault = master
+        .write(Address::new(0x2000), &[0x00, 0x01])
+        .await
+        .expect_err("读回不一致要失败");
+
+    assert_eq!(
+        fault.code(),
+        FaultCode::new(Domain::Xcp, seq::VERIFY).expect("序号合法"),
+        "读回不一致是独立类别，不与协议错混在一起"
+    );
+    assert!(fault.message().contains("第 1 字节"), "实际: {fault}");
+    assert!(fault.hint().is_some(), "要给可操作建议");
+}
+
+#[tokio::test]
+async fn write_of_zero_bytes_is_refused_before_touching_the_bus() {
+    let bus = Arc::new(ScriptedBus::new());
+    bus.queue_response(Response::Ok {
+        payload: connect_ok_payload(),
+    });
+    let mut master = master_with(&bus, 0);
+    master.connect(0).await.expect("建链成功");
+
+    let fault = master
+        .write(Address::new(0x2000), &[])
+        .await
+        .expect_err("空写没有意义");
+    assert_eq!(
+        fault.code(),
+        FaultCode::new(Domain::Xcp, seq::WRITE).expect("序号合法")
+    );
+    assert_eq!(bus.send_count(), 1, "只在 CONNECT 上发过帧");
+}
+
+#[tokio::test]
+async fn short_write_is_used_when_the_frame_is_wide_enough() {
+    // 从站报 maxCto=64 且总线能发 CAN-FD：短写才装得下数据。
+    let bus = Arc::new(ScriptedBus::with_fd());
+    bus.queue_response(Response::Ok {
+        payload: vec![0x05, 0x00, 64, 0x00, 64, 0x00],
+    });
+    bus.queue_response(Response::Ok { payload: vec![] }); // SHORT_DOWNLOAD
+    bus.queue_response(Response::Ok { payload: vec![] }); // 读回：SET_MTA
+    bus.queue_response(Response::Ok {
+        payload: vec![0xAA; 7],
+    }); // 读回：UPLOAD 7
+    bus.queue_response(Response::Ok {
+        payload: vec![0xAA; 3],
+    }); // 读回：UPLOAD 3
+
+    let mut master = master_with(&bus, 0);
+    master.connect(0).await.expect("建链成功");
+    master
+        .write(Address::new(0x2000), &[0xAA; 10])
+        .await
+        .expect("宽帧上的短写");
+
+    let frames = bus.sent_frames();
+    assert_eq!(frames[1].data[0], 0xED, "宽帧上走 SHORT_DOWNLOAD");
+    assert_eq!(frames[1].data[1], 10, "len 等于写入字节数");
+    assert_eq!(
+        frames[1].data.len(),
+        18,
+        "命令头 8 字节加 10 字节数据，不补齐到 8 也不截断"
+    );
+    assert_eq!(frames[1].data[4], 0x00, "地址落在 byte4");
+}
+
+#[tokio::test]
+async fn access_locked_write_carries_the_unlock_hint() {
+    let bus = Arc::new(ScriptedBus::new());
+    bus.queue_response(Response::Ok {
+        payload: connect_ok_payload(),
+    });
+    bus.queue_response(Response::Err {
+        code: ErrorCode::AccessLocked as u8,
+    });
+
+    let mut master = master_with(&bus, 0);
+    master.connect(0).await.expect("建链成功");
+    let fault = master
+        .write(Address::new(0x2000), &[1])
+        .await
+        .expect_err("未解锁");
+    let hint = fault.hint().unwrap_or_default().to_string();
+    assert!(hint.contains("unlock"), "提示要指向解锁: {fault}");
+}
+
+#[tokio::test]
+async fn set_cal_page_verifies_the_readback() {
+    let bus = Arc::new(ScriptedBus::new());
+    bus.queue_response(Response::Ok {
+        payload: connect_ok_payload(),
+    });
+    bus.queue_response(Response::Ok { payload: vec![] }); // SET_CAL_PAGE
+    bus.queue_response(Response::Ok {
+        payload: vec![0x00, 0x00, 0x00],
+    }); // GET_CAL_PAGE：仍在页 0
+
+    let mut master = master_with(&bus, 0);
+    master.connect(0).await.expect("建链成功");
+    let fault = master.set_cal_page(1).await.expect_err("切换没生效");
+    assert_eq!(
+        fault.code(),
+        FaultCode::new(Domain::Xcp, seq::PAGE).expect("序号合法")
+    );
+    assert!(fault.message().contains("读回是页 0"), "实际: {fault}");
+
+    bus.queue_response(Response::Ok { payload: vec![] });
+    bus.queue_response(Response::Ok {
+        payload: vec![0x00, 0x00, 0x01],
+    });
+    master.set_cal_page(1).await.expect("读回一致就通过");
+}
+
+#[tokio::test]
+async fn unlock_walks_seed_key_and_reports_the_resource_bit() {
+    let bus = Arc::new(ScriptedBus::new());
+    bus.queue_response(Response::Ok {
+        payload: connect_ok_payload(),
+    });
+    bus.queue_response(Response::Ok {
+        payload: vec![4, 1, 2, 3, 4],
+    }); // GET_SEED：4 字节种子
+    bus.queue_response(Response::Ok {
+        payload: vec![0x01],
+    }); // UNLOCK：标定页资源位置位
+
+    let mut master = master_with(&bus, 0);
+    master.connect(0).await.expect("建链成功");
+    master.unlock().await.expect("示例算法应付得来");
+
+    let frames = bus.sent_frames();
+    assert_eq!(frames[1].data[..3], [0xF8, 0x00, 0x01], "GET_SEED 带资源位");
+    assert_eq!(
+        frames[2].data[..6],
+        [0xF7, 0x04, 0xFE, 0xFD, 0xFC, 0xFB],
+        "UNLOCK：长度加示例算法算出的密钥（种子取反）"
+    );
+}
+
+#[tokio::test]
+async fn unlock_failing_to_set_the_resource_bit_is_reported() {
+    let bus = Arc::new(ScriptedBus::new());
+    bus.queue_response(Response::Ok {
+        payload: connect_ok_payload(),
+    });
+    bus.queue_response(Response::Ok {
+        payload: vec![4, 1, 2, 3, 4],
+    });
+    bus.queue_response(Response::Ok {
+        payload: vec![0x00],
+    }); // 资源位没置起
+
+    let mut master = master_with(&bus, 0);
+    master.connect(0).await.expect("建链成功");
+    let fault = master.unlock().await.expect_err("资源位没起来");
+    assert_eq!(
+        fault.code(),
+        FaultCode::new(Domain::Xcp, seq::UNLOCK).expect("序号合法")
+    );
+    assert!(
+        fault.hint().is_some_and(|hint| hint.contains("算法")),
+        "{fault}"
+    );
+}
+
+#[tokio::test]
+async fn zero_length_seed_means_the_resource_is_already_open() {
+    let bus = Arc::new(ScriptedBus::new());
+    bus.queue_response(Response::Ok {
+        payload: connect_ok_payload(),
+    });
+    bus.queue_response(Response::Ok { payload: vec![0] });
+
+    let mut master = master_with(&bus, 0);
+    master.connect(0).await.expect("建链成功");
+    master.unlock().await.expect("已经解锁");
+    assert_eq!(bus.send_count(), 2, "不必再发 UNLOCK");
 }

@@ -8,6 +8,6 @@ pub mod can;
 pub mod connection;
 pub mod daq;
 
-pub use can::{CanXcpMaster, MAX_SHORT_UPLOAD_LEN, XcpConfig};
+pub use can::{CanXcpMaster, MAX_FD_FRAME, MAX_SHORT_UPLOAD_LEN, XcpConfig};
 pub use connection::{ConnectInfo, SessionStatus, XcpConnection};
 pub use daq::{DaqLayout, DaqListSpec, DaqSignal};

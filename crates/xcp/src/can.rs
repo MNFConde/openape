@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use openape_bus::{Bus, BusError, CanFrame, CanId};
 use openape_cal_core::{Address, ByteLen};
 use openape_diag::{Fault, Severity};
-use openape_xcp_proto::{Command, DecodeError, ErrorCode, MAX_CTO, OdtIds, Response};
+use openape_xcp_proto::{
+    Command, DecodeError, ErrorCode, MAX_CTO, OdtIds, Response, SHORT_IO_HEADER, SeedKey,
+};
 
 use crate::connection::{self, ConnectInfo, SessionStatus, XcpConnection, seq};
 use crate::daq::{self, DaqLayout, DaqListSpec};
@@ -16,8 +18,11 @@ use crate::daq::{self, DaqLayout, DaqListSpec};
 /// 单帧能带回的最大字节数：整帧减掉响应 PID，再没有别的开销。
 pub const MAX_SHORT_UPLOAD_LEN: u16 = (MAX_CTO - 1) as u16;
 
+/// CAN-FD 的单帧上限。
+pub const MAX_FD_FRAME: usize = 64;
+
 /// 会话参数。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct XcpConfig {
     /// 命令帧标识符（CRO）。
     pub command_id: CanId,
@@ -27,6 +32,11 @@ pub struct XcpConfig {
     pub timeout: Duration,
     /// 超时后的重发次数。
     pub retries: u8,
+    /// 解锁用的种子密钥算法。真实 ECU 的算法各不相同，默认是示例算法——
+    /// 对着不认识它的 ECU 必然一直锁着，这是预期行为而不是缺陷。
+    pub seed_key: std::sync::Arc<dyn SeedKey>,
+    /// 解锁的资源位。默认标定页（写入被它保护）。
+    pub unlock_resource: u8,
 }
 
 impl XcpConfig {
@@ -37,6 +47,8 @@ impl XcpConfig {
             response_id,
             timeout: Duration::from_millis(200),
             retries: 2,
+            seed_key: std::sync::Arc::new(openape_xcp_proto::ExampleSeedKey),
+            unlock_resource: openape_xcp_proto::resource::CAL_PAG,
         }
     }
 }
@@ -96,14 +108,34 @@ impl CanXcpMaster {
         Err(self.timeout_fault(code))
     }
 
-    /// 把命令编成要发出去的满帧。真 ECU 期望 8 字节填充。
+    /// 把命令编成要发出去的帧。真 ECU 期望帧宽补齐到经典上限；更宽的帧
+    /// （CAN FD 上的短写）保持编码出的长度，不能截断。
     fn command_frame(&self, command: &Command) -> Result<CanFrame, Fault> {
         let mut data = command
-            .encode()
+            .encode_max(self.frame_width())
             .map_err(|err| connection::fault(seq::CODEC, Severity::Error, err.to_string()))?;
-        data.resize(MAX_CTO, 0);
+        if data.len() < MAX_CTO {
+            data.resize(MAX_CTO, 0);
+        }
         CanFrame::new(self.config.command_id, data)
-            .ok_or_else(|| connection::fault(seq::CODEC, Severity::Error, "命令帧长超过 CAN 上限"))
+            .ok_or_else(|| connection::fault(seq::CODEC, Severity::Error, "命令帧长超过帧上限"))
+    }
+
+    /// 能用的单帧宽度：从站报的 `maxCto` 与总线帧形态取下限。
+    ///
+    /// 两侧各报各的上限：从站可能支持 FD 而当前后端只有经典 CAN，此时帧宽
+    /// 由后端说了算。
+    fn frame_width(&self) -> usize {
+        let from_slave = self
+            .session
+            .as_ref()
+            .map_or(MAX_CTO, |info| info.max_cto as usize);
+        let from_bus = if self.bus.capabilities().can_fd() {
+            MAX_FD_FRAME
+        } else {
+            MAX_CTO
+        };
+        from_slave.min(from_bus).max(1)
     }
 
     /// 等到一条属于本命令的响应。`None` 表示等到期限仍未收到（可重发）。
@@ -170,8 +202,18 @@ fn slave_error(code: u8) -> Fault {
         Some(known) => format!("从站返回错误 {code:#04x}（{known:?}）"),
         None => format!("从站返回未登记的错误码 {code:#04x}"),
     };
-    connection::fault(seq::SLAVE_ERROR, Severity::Error, text)
-        .with_hint("查看命令参数是否越界、目标段是否可写")
+    let fault = connection::fault(seq::SLAVE_ERROR, Severity::Error, text);
+    match ErrorCode::from_u8(code) {
+        Some(ErrorCode::AccessLocked) => {
+            fault.with_hint("该资源被种子密钥保护：先用 unlock 解锁，或确认密钥算法与该 ECU 匹配")
+        }
+        Some(ErrorCode::PageNotValid) => {
+            fault.with_hint("页号不被接受：合法页号见 GET_CAL_PAGE 的读回与 A2L 的页表")
+        }
+        Some(ErrorCode::AccessDenied) => fault.with_hint("该地址不可访问：确认地址落在标定段内"),
+        Some(ErrorCode::Sequence) => fault.with_hint("命令顺序不对：先取种子再交密钥"),
+        _ => fault.with_hint("查看命令参数是否越界、目标段是否可写"),
+    }
 }
 
 fn bus_fault(err: &BusError) -> Fault {
@@ -237,6 +279,143 @@ impl XcpConnection for CanXcpMaster {
         Ok(out)
     }
 
+    async fn write(&mut self, address: Address, data: &[u8]) -> Result<(), Fault> {
+        self.require_session()?;
+        let chunk = self.download_capacity()?;
+        if data.is_empty() {
+            return Err(connection::fault(
+                seq::WRITE,
+                Severity::Error,
+                format!("写入 {address} 的长度为 0"),
+            )
+            .with_hint("写 0 字节不会改变任何东西，检查标定量的长度来源"));
+        }
+
+        // 短写省掉 SET_MTA，但只在帧够宽时可用：经典 CAN 的固定头已占满一帧。
+        let short_capacity = self.frame_width().saturating_sub(SHORT_IO_HEADER);
+        if data.len() <= short_capacity {
+            self.transact(&Command::ShortDownload {
+                len: data.len() as u8,
+                address_extension: 0,
+                address: address.get(),
+                data: data.to_vec(),
+            })
+            .await?;
+        } else {
+            self.transact(&Command::SetMta {
+                address_extension: 0,
+                address: address.get(),
+            })
+            .await?;
+            for piece in data.chunks(chunk) {
+                self.transact(&Command::Download {
+                    len: piece.len() as u8,
+                    data: piece.to_vec(),
+                })
+                .await?;
+            }
+        }
+        self.verify(address, data).await
+    }
+
+    async fn cal_page(&mut self) -> Result<u8, Fault> {
+        self.require_session()?;
+        let payload = self
+            .transact(&Command::GetCalPage {
+                mode: 0,
+                segment: 0,
+            })
+            .await?;
+        payload.get(2).copied().ok_or_else(|| {
+            connection::fault(
+                seq::PAGE,
+                Severity::Error,
+                format!("GET_CAL_PAGE 响应只有 {} 字节，取不到页号", payload.len()),
+            )
+            .with_hint("页号在响应的第 3 字节（pyXCP 也读这一字节）")
+        })
+    }
+
+    async fn set_cal_page(&mut self, page: u8) -> Result<(), Fault> {
+        self.require_session()?;
+        self.transact(&Command::SetCalPage {
+            mode: 0,
+            segment: 0,
+            page,
+        })
+        .await?;
+        // 从站可能"接受命令但不切"，所以读回是唯一的判据。
+        let actual = self.cal_page().await?;
+        if actual != page {
+            return Err(connection::fault(
+                seq::PAGE,
+                Severity::Error,
+                format!("要求切到页 {page}，读回是页 {actual}"),
+            )
+            .with_hint("确认从站支持该页号；页表见 A2L 的 CALIBRATION_METHOD 或 GET_PAGE_INFO"));
+        }
+        Ok(())
+    }
+
+    async fn unlock(&mut self) -> Result<(), Fault> {
+        self.require_session()?;
+        let resource = self.config.unlock_resource;
+        let payload = self
+            .transact(&Command::GetSeed { mode: 0, resource })
+            .await?;
+        let seed_len = usize::from(*payload.first().ok_or_else(|| {
+            connection::fault(
+                seq::UNLOCK,
+                Severity::Error,
+                "GET_SEED 响应为空，取不到种子长度",
+            )
+        })?);
+        if seed_len == 0 {
+            // 标准约定：资源本来就解锁，种子长度为 0。
+            return Ok(());
+        }
+        let seed = payload.get(1..1 + seed_len).ok_or_else(|| {
+            connection::fault(
+                seq::UNLOCK,
+                Severity::Error,
+                format!(
+                    "GET_SEED 声明 {seed_len} 字节种子，响应只带回 {} 字节",
+                    payload.len().saturating_sub(1)
+                ),
+            )
+            .with_hint("种子超过单帧容量时要分段取，本版本只支持一段")
+        })?;
+        let key = self.config.seed_key.key(seed);
+        if key.is_empty() || key.len() > MAX_CTO - 2 {
+            return Err(connection::fault(
+                seq::UNLOCK,
+                Severity::Error,
+                format!(
+                    "密钥长度 {} 字节，单帧只能承载 {} 字节",
+                    key.len(),
+                    MAX_CTO - 2
+                ),
+            )
+            .with_hint("种子密钥算法要产出不超过 6 字节的密钥"));
+        }
+        let answer = self
+            .transact(&Command::Unlock {
+                len: key.len() as u8,
+                key,
+            })
+            .await?;
+        let status = answer.first().copied().unwrap_or(0);
+        if status & resource == 0 {
+            return Err(connection::fault(
+                seq::UNLOCK,
+                Severity::Error,
+                format!("UNLOCK 之后资源位 {resource:#04x} 仍未解锁（状态 {status:#04x}）"),
+            )
+            .with_hint("确认密钥算法与该 ECU 匹配：默认示例算法只对自研从站有效"));
+        }
+        Ok(())
+    }
+
     async fn configure_daq(&mut self, lists: &[DaqListSpec]) -> Result<DaqLayout, Fault> {
         let session = self.require_session()?;
         if session.resource & openape_xcp_proto::resource::DAQ == 0 {
@@ -267,6 +446,54 @@ impl XcpConnection for CanXcpMaster {
 }
 
 impl CanXcpMaster {
+    /// DOWNLOAD 一帧能带几字节：整帧减去命令码与长度字节。
+    fn download_capacity(&self) -> Result<usize, Fault> {
+        let width = self.frame_width();
+        let chunk = width.saturating_sub(2);
+        if chunk == 0 {
+            return Err(connection::fault(
+                seq::CODEC,
+                Severity::Error,
+                format!("单帧只有 {width} 字节，放不下写入数据"),
+            ));
+        }
+        Ok(chunk)
+    }
+
+    /// 写后读回。不一致时指出第一个差异字节的位置——"不一致"三个字不足以
+    /// 定位问题，位置才是。
+    async fn verify(&mut self, address: Address, expected: &[u8]) -> Result<(), Fault> {
+        let len = u16::try_from(expected.len())
+            .ok()
+            .and_then(ByteLen::new)
+            .ok_or_else(|| {
+                connection::fault(
+                    seq::WRITE,
+                    Severity::Error,
+                    format!("写入长度 {} 字节，超出单次可读范围", expected.len()),
+                )
+            })?;
+        let read_back = self.read(address, len).await?;
+        if read_back == expected {
+            return Ok(());
+        }
+        let at = (0..expected.len())
+            .find(|index| read_back.get(*index) != Some(&expected[*index]))
+            .unwrap_or(0);
+        let actual = read_back
+            .get(at)
+            .map_or_else(|| "响应提前结束".to_string(), |byte| format!("{byte:#04x}"));
+        Err(connection::fault(
+            seq::VERIFY,
+            Severity::Error,
+            format!(
+                "写后读回不一致：{address} 起第 {at} 字节应为 {:#04x}，读回 {actual}",
+                expected[at]
+            ),
+        )
+        .with_hint("确认该地址没有被 ECU 镜像或量程裁剪，且资源已解锁"))
+    }
+
     /// 按 list 逐个分配 ODT 与条目。
     async fn allocate_odts(
         &mut self,

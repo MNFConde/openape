@@ -46,6 +46,21 @@ pub trait XcpConnection: Send + Sync {
     /// 读一段内存。按地址短读，不动传输地址。
     async fn read(&mut self, address: Address, len: ByteLen) -> Result<Vec<u8>, Fault>;
 
+    /// 写一段内存：短写或按单帧容量分块，写完读回校验。
+    ///
+    /// 读回不一致即失败——写入是本软件唯一会改变 ECU 状态的操作，静默成功
+    /// 比报错危险得多。
+    async fn write(&mut self, address: Address, data: &[u8]) -> Result<(), Fault>;
+
+    /// 取当前标定页号。
+    async fn cal_page(&mut self) -> Result<u8, Fault>;
+
+    /// 切标定页，并读回确认切换生效。
+    async fn set_cal_page(&mut self, page: u8) -> Result<(), Fault>;
+
+    /// 完成资源保护解锁（GET_SEED → 算密钥 → UNLOCK）。
+    async fn unlock(&mut self) -> Result<(), Fault>;
+
     /// 配置并启动 DAQ，返回把 DTO 切回信号的布局。
     ///
     /// 走完 FREE_DAQ → 分配 → 写条目 → 设模式 → 启停，成功后从站开始按事件
@@ -75,6 +90,14 @@ pub mod seq {
     pub const TOO_LONG: u32 = 7;
     /// DAQ 配置被拒或从站不支持。
     pub const DAQ: u32 = 8;
+    /// 写入参数本身不合法（空写、超长）。
+    pub const WRITE: u32 = 9;
+    /// 写后读回与写入值不一致。
+    pub const VERIFY: u32 = 10;
+    /// 标定页号不被接受或切换未生效。
+    pub const PAGE: u32 = 11;
+    /// 解锁未通过。
+    pub const UNLOCK: u32 = 12;
 }
 
 /// 构造一条 XCP 域故障。序号固定在 [`seq`] 的常量里，构造不会失败。

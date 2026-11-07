@@ -298,11 +298,19 @@ impl Command {
         }
     }
 
-    /// 编码成整帧（PID + 命令码 + 参数）。超过 `MAX_CTO` 返回错误。
+    /// 编码成整帧（PID + 命令码 + 参数）。超过 [`MAX_CTO`] 返回错误。
     ///
     /// 圈复杂度等于命令表条数，与 [`Command::decode_command`] 同属刻意保留的
     /// 协议分派，不再拆分。
     pub fn encode(&self) -> Result<Vec<u8>, EncodeError> {
+        self.encode_max(MAX_CTO)
+    }
+
+    /// 按调用方的单帧上限编码。
+    ///
+    /// 帧上限属于传输层：经典 CAN 是 8，CAN-FD 到 64。布局只有一份，上限由
+    /// 用它的那一侧传入——写死 8 会让宽帧上的短写永远发不出去。
+    pub fn encode_max(&self, max_cto: usize) -> Result<Vec<u8>, EncodeError> {
         // 命令码只有 `code()` 一处来源；这里不再逐个硬编码，否则改一处漏一处。
         let code = self.code() as u8;
         let bytes = match self {
@@ -443,10 +451,10 @@ impl Command {
                 Encoder::with_command(code).u8(*len).bytes(key).finish()
             }
         };
-        if bytes.len() > MAX_CTO {
+        if bytes.len() > max_cto {
             return Err(EncodeError::TooLong {
                 len: bytes.len(),
-                max: MAX_CTO,
+                max: max_cto,
             });
         }
         Ok(bytes)

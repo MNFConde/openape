@@ -27,6 +27,12 @@ pub const MAX_CTO: usize = 8;
 /// 载荷最大字节数：整帧减去 PID。
 pub const MAX_CTO_PAYLOAD: usize = MAX_CTO - 1;
 
+/// 短读写的固定头长度：命令码、长度、保留、地址扩展、4 字节地址。
+///
+/// 数据从第 8 字节起，所以经典 CAN 一帧装不下数据——短写只在更宽的帧上可用。
+/// master 与从站都按这个常数算容量，不各写一份。
+pub const SHORT_IO_HEADER: usize = 8;
+
 /// PID：命令与正响应共用。
 pub const PID_CMD_RES: u8 = 0xFF;
 /// PID：错误响应。

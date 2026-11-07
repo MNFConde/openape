@@ -65,12 +65,9 @@ impl Session {
     pub fn open(config: SessionConfig) -> Result<Self, Fault> {
         let lock = DeviceLock::acquire(openape_bus_socketcan::BACKEND, &config.channel)?;
         let bus: Arc<dyn Bus> = Arc::new(SocketCanBus::open(config.channel.clone())?);
-        let xcp_config = XcpConfig {
-            command_id: config.command_id,
-            response_id: config.response_id,
-            timeout: config.timeout,
-            retries: config.retries,
-        };
+        let mut xcp_config = XcpConfig::new(config.command_id, config.response_id);
+        xcp_config.timeout = config.timeout;
+        xcp_config.retries = config.retries;
         let master = CanXcpMaster::new(bus.clone(), xcp_config);
         Ok(Self {
             bus,
