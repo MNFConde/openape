@@ -11,11 +11,16 @@
 #![forbid(unsafe_code)]
 
 mod config;
+mod dataset;
 mod ir;
 mod notice;
+mod time;
 mod types;
 
 pub use config::{ConfigError, ProjectConfig, SCHEMA_VERSION};
+pub use dataset::{
+    DATASET_SCHEMA_VERSION, Dataset, DatasetError, Difference, Entry, SourceMode, diff,
+};
 
 pub use ir::{
     Axis, AxisBinding, AxisKind, AxisSpec, BadId, BadRange, BadSymbol, BindingError, BindingSpec,
@@ -23,4 +28,5 @@ pub use ir::{
     Scale, Semantics, Severity, Symbol, Unit, ValueKind, ValueSpec, Variable, VariableTree,
 };
 pub use notice::{Notice, NoticeSeverity};
+pub use time::Timestamp;
 pub use types::{Address, ByteLen, Handle, ZeroLen};
