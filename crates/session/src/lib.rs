@@ -11,6 +11,7 @@ pub mod daq_stream;
 pub mod dbc_observer;
 pub mod engine;
 pub mod lock;
+pub mod pages;
 pub mod seq;
 pub mod write;
 
@@ -20,4 +21,5 @@ pub use daq_stream::{DaqSample, DaqStats, DaqStream, DaqStreamReader};
 pub use dbc_observer::{CanObserver, DecodedFrame, DecodedSignal};
 pub use engine::{ChannelProbe, Session, SessionConfig, list_channels, probe_channel};
 pub use lock::DeviceLock;
+pub use pages::calibration_variables;
 pub use write::{RangeVerdict, WriteContext, Written, persist_snapshot, read_snapshot};

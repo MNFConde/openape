@@ -10,11 +10,11 @@ use openape_bus::Bus;
 use openape_bus_socketcan::SocketCanBus;
 use openape_bus_socketcan::testing::VcanGuard;
 use openape_cal_core::{
-    Address, ByteLen, ElemType, Range, Semantics, SourceMode, Symbol, Variable,
+    Address, ByteLen, ElemType, Range, Semantics, SourceMode, Symbol, Variable, VariableTree,
 };
 use openape_session::{RangeVerdict, Session, SessionConfig, WriteContext, read_snapshot};
 use openape_sim_ecu::{SimEcu, SimEcuConfig};
-use openape_xcp_proto::ExampleSeedKey;
+use openape_xcp_proto::{Command, ExampleSeedKey};
 
 fn variable(name: &str, address: u32) -> Variable {
     Variable::new(
@@ -22,6 +22,17 @@ fn variable(name: &str, address: u32) -> Variable {
         Address::new(address),
         ElemType::U16,
     )
+}
+
+/// 从站内部切页用的命令帧：poke 只写活动页，摆两页的值要先切页。
+fn switch_page(page: u8) -> Vec<u8> {
+    Command::SetCalPage {
+        mode: 0,
+        segment: 0,
+        page,
+    }
+    .encode()
+    .expect("一帧放得下")
 }
 
 /// 每个用例一个目录：并行跑时共用目录会让审计条数互相污染。
@@ -144,6 +155,75 @@ async fn out_of_range_write_is_refused_before_it_reaches_the_ecu() {
         .await
         .expect("没量程就不拦");
     assert_eq!(written.range, RangeVerdict::Unchecked);
+
+    let _ = session.disconnect().await;
+    slave.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn page_diff_lists_only_differences_and_copy_needs_an_explicit_list() {
+    let Some(vcan) = VcanGuard::create("z") else {
+        return;
+    };
+
+    let bus: Arc<dyn Bus> = Arc::new(SocketCanBus::open(vcan.name()).expect("从站总线"));
+    let mut ecu = SimEcu::new(SimEcuConfig::default_ids());
+    // 页 0（参考页）：kp=1, ki=2；页 1（工作页）：kp=1, ki=9。
+    // poke 只写活动页，所以靠从站的 SET_CAL_PAGE 在两页之间摆值。
+    ecu.poke(0x1000, &[0x00, 0x01]);
+    ecu.poke(0x1002, &[0x00, 0x02]);
+    ecu.handle(&switch_page(1));
+    ecu.poke(0x1000, &[0x00, 0x01]);
+    ecu.poke(0x1002, &[0x00, 0x09]);
+    ecu.handle(&switch_page(0));
+    let slave = tokio::spawn(openape_sim_ecu::serve(ecu, bus));
+
+    let dir = tempdir("pages");
+    let context = WriteContext::open(&dir, "test:actor", SourceMode::WithA2l).expect("上下文");
+    let mut session = Session::open(SessionConfig::new(vcan.name())).expect("打开会话");
+    session.connect(0).await.expect("建链");
+
+    let tree = VariableTree::new(vec![variable("cal.kp", 0x1000), variable("cal.ki", 0x1002)])
+        .expect("无重复");
+    let differences = session
+        .diff_pages(&tree, 0, 1, SourceMode::WithA2l)
+        .await
+        .expect("能对比");
+    let names: Vec<&str> = differences
+        .iter()
+        .map(|difference| difference.symbol().as_str())
+        .collect();
+    assert_eq!(names, vec!["cal.ki"], "只列差异地址");
+
+    // 空列表复制被拒：没有整页覆盖入口。
+    let reference = session
+        .page_dataset(&tree, 0, SourceMode::WithA2l)
+        .await
+        .expect("参考页取样");
+    let err = session
+        .copy_to_working_page(&tree, &reference, 1, &[], &context)
+        .await
+        .expect_err("空列表不许复制");
+    assert!(err.hint().is_some(), "{err}");
+
+    let approved = [Symbol::new("cal.ki").expect("合法符号")];
+    session
+        .copy_to_working_page(&tree, &reference, 1, &approved, &context)
+        .await
+        .expect("逐项复制成功");
+
+    session.set_cal_page(1).await.expect("切到工作页核对");
+    let copied = session
+        .read(Address::new(0x1002), ByteLen::TWO)
+        .await
+        .expect("读回");
+    assert_eq!(copied, vec![0x00, 0x02], "工作页的 ki 已与参考页一致");
+    session.set_cal_page(0).await.expect("切回参考页");
+    let kept = session
+        .read(Address::new(0x1002), ByteLen::TWO)
+        .await
+        .expect("读回");
+    assert_eq!(kept, vec![0x00, 0x02], "参考页没被改动");
 
     let _ = session.disconnect().await;
     slave.abort();
