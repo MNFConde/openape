@@ -59,6 +59,10 @@ pub enum CommandCode {
     StartStopSynch = 0xDD,
     /// 清空 DAQ list 的条目。
     ClearDaqList = 0xE3,
+    /// 提交密钥。
+    Unlock = 0xF7,
+    /// 取种子。
+    GetSeed = 0xF8,
 }
 
 impl CommandCode {
@@ -89,6 +93,8 @@ impl CommandCode {
             0xDE => Self::StartStopDaqList,
             0xDD => Self::StartStopSynch,
             0xE3 => Self::ClearDaqList,
+            0xF7 => Self::Unlock,
+            0xF8 => Self::GetSeed,
             _ => return None,
         })
     }
@@ -242,6 +248,20 @@ pub enum Command {
         /// DAQ list 编号。
         daq_list: u16,
     },
+    /// 取种子。`mode` 为 0 起新序列、1 续接；`resource` 是被保护资源位。
+    GetSeed {
+        /// 0 起新序列，1 续接。
+        mode: u8,
+        /// 资源位（标定/DAQ/刷写各一位）。
+        resource: u8,
+    },
+    /// 提交密钥。`len` 是本次连同后续还要发的密钥总字节数。
+    Unlock {
+        /// 剩余密钥总字节数。
+        len: u8,
+        /// 本段密钥，长度等于 [`Command::unlock_segment_len`]。
+        key: Vec<u8>,
+    },
 }
 
 impl Command {
@@ -273,6 +293,8 @@ impl Command {
             Self::StartStopDaqList { .. } => CommandCode::StartStopDaqList,
             Self::StartStopSynch { .. } => CommandCode::StartStopSynch,
             Self::ClearDaqList { .. } => CommandCode::ClearDaqList,
+            Self::GetSeed { .. } => CommandCode::GetSeed,
+            Self::Unlock { .. } => CommandCode::Unlock,
         }
     }
 
@@ -407,6 +429,19 @@ impl Command {
                 .finish(),
             Self::StartStopSynch { mode } => Encoder::with_command(code).u8(*mode).finish(),
             Self::ClearDaqList { daq_list } => Encoder::with_command(code).u16(*daq_list).finish(),
+            Self::GetSeed { mode, resource } => {
+                Encoder::with_command(code).u8(*mode).u8(*resource).finish()
+            }
+            Self::Unlock { len, key } => {
+                let expected = Self::unlock_segment_len(*len);
+                if key.len() != expected {
+                    return Err(EncodeError::LenMismatch {
+                        declared: expected as u8,
+                        actual: key.len(),
+                    });
+                }
+                Encoder::with_command(code).u8(*len).bytes(key).finish()
+            }
         };
         if bytes.len() > MAX_CTO {
             return Err(EncodeError::TooLong {
@@ -485,7 +520,33 @@ impl Command {
             CommandCode::ClearDaqList => Ok(Self::ClearDaqList {
                 daq_list: decoder.u16()?,
             }),
+            CommandCode::GetSeed => Ok(Self::GetSeed {
+                mode: decoder.u8()?,
+                resource: decoder.u8()?,
+            }),
+            CommandCode::Unlock => Self::decode_unlock(decoder),
         }
+    }
+
+    /// 一段 UNLOCK 能带多少密钥字节：整帧上限减去命令码与长度字节，且不超过
+    /// 声明的剩余总长。
+    ///
+    /// 标准里 `len` 记的是"连同后续还要发"的总字节数，所以拆段发时每段都拿
+    /// 总长当判据，只有最后一段会短于帧容量。
+    pub const fn unlock_segment_len(len: u8) -> usize {
+        let capacity = MAX_CTO - 2;
+        if (len as usize) < capacity {
+            len as usize
+        } else {
+            capacity
+        }
+    }
+
+    fn decode_unlock(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
+        let len = decoder.u8()?;
+        // 帧尾常被填充零补满，所以取几字节由 `len` 与帧容量共同决定。
+        let key = decoder.take(Self::unlock_segment_len(len))?.to_vec();
+        Ok(Self::Unlock { len, key })
     }
 
     fn decode_write_daq(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
@@ -716,6 +777,14 @@ mod tests {
             },
             Command::StartStopSynch { mode: 1 },
             Command::ClearDaqList { daq_list: 2 },
+            Command::GetSeed {
+                mode: 0,
+                resource: 1,
+            },
+            Command::Unlock {
+                len: 2,
+                key: vec![0x11, 0x22],
+            },
         ];
         for command in commands {
             let encoded = command.encode().expect("DAQ 命令都放得下一帧");
@@ -818,6 +887,88 @@ mod tests {
                 address_extension: 1,
                 address: 0x1002,
             })
+        );
+    }
+
+    #[test]
+    fn seed_and_unlock_match_the_reference_slave_layout() {
+        // 参考从站（xcplib）：GET_SEED 的 mode 在 byte1、resource 在 byte2；
+        // UNLOCK 的剩余长度在 byte1、密钥从 byte2 起。
+        assert_eq!(
+            Command::GetSeed {
+                mode: 0,
+                resource: 1
+            }
+            .encode()
+            .expect("一帧放得下"),
+            vec![0xF8, 0x00, 0x01]
+        );
+        assert_eq!(
+            Command::Unlock {
+                len: 4,
+                key: vec![0xFE, 0xFF, 0xFF, 0xFF],
+            }
+            .encode()
+            .expect("一帧放得下"),
+            vec![0xF7, 0x04, 0xFE, 0xFF, 0xFF, 0xFF]
+        );
+        let padded = [0xF7, 0x04, 0xFE, 0xFF, 0xFF, 0xFF, 0x00, 0x00];
+        assert_eq!(
+            Command::decode(&padded),
+            Ok(Command::Unlock {
+                len: 4,
+                key: vec![0xFE, 0xFF, 0xFF, 0xFF],
+            }),
+            "帧尾填充零不算密钥"
+        );
+    }
+
+    #[test]
+    fn unlock_segment_is_capped_by_the_frame_width() {
+        // 经典 CAN 一段最多 6 字节密钥；声明的总长比容量大时按容量发。
+        assert_eq!(Command::unlock_segment_len(4), 4);
+        assert_eq!(Command::unlock_segment_len(6), 6);
+        assert_eq!(Command::unlock_segment_len(12), MAX_CTO - 2);
+        assert_eq!(
+            Command::Unlock {
+                len: 12,
+                key: vec![0; MAX_CTO - 2],
+            }
+            .encode()
+            .expect("按容量切段就放得下"),
+            [vec![0xF7, 0x0C], vec![0; MAX_CTO - 2]].concat()
+        );
+    }
+
+    #[test]
+    fn unlock_rejects_a_segment_of_the_wrong_length() {
+        // 声明的总长比帧容量小：本段就必须正好这个长度。
+        let err = Command::Unlock {
+            len: 3,
+            key: vec![0x01, 0x02],
+        }
+        .encode()
+        .expect_err("少一字节");
+        assert_eq!(
+            err,
+            EncodeError::LenMismatch {
+                declared: 3,
+                actual: 2
+            }
+        );
+        // 声明的总长超出容量：本段必须按容量切，不能一次全塞。
+        let err = Command::Unlock {
+            len: 12,
+            key: vec![0; MAX_CTO - 1],
+        }
+        .encode()
+        .expect_err("超容量的段要切开发");
+        assert_eq!(
+            err,
+            EncodeError::LenMismatch {
+                declared: (MAX_CTO - 2) as u8,
+                actual: MAX_CTO - 1
+            }
         );
     }
 
@@ -925,6 +1076,20 @@ mod tests {
                 },
                 CommandCode::SetCalPage,
             ),
+            (
+                Command::GetSeed {
+                    mode: 0,
+                    resource: 1,
+                },
+                CommandCode::GetSeed,
+            ),
+            (
+                Command::Unlock {
+                    len: 1,
+                    key: vec![0],
+                },
+                CommandCode::Unlock,
+            ),
         ];
         for (command, expected) in pairs {
             assert_eq!(command.code(), expected, "{command:?}");
@@ -949,6 +1114,8 @@ mod tests {
             (0xF4, CommandCode::ShortUpload),
             (0xF0, CommandCode::Download),
             (0xED, CommandCode::ShortDownload),
+            (0xF7, CommandCode::Unlock),
+            (0xF8, CommandCode::GetSeed),
             (0xEA, CommandCode::GetCalPage),
             (0xEB, CommandCode::SetCalPage),
         ];

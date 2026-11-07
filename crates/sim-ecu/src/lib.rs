@@ -276,6 +276,9 @@ impl SimEcu {
                 ok(code, vec![])
             }
             Command::ClearDaqList { daq_list } => reply(code, self.daq.clear_list(daq_list)),
+            // 资源保护是可选命令：没配置密钥算法就从站不认它，别假装成功。
+            // 默认示例算法与解锁状态机见 M4-03。
+            Command::GetSeed { .. } | Command::Unlock { .. } => err(ErrorCode::CmdUnknown),
         }
     }
 

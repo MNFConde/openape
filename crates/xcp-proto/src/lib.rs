@@ -9,15 +9,17 @@
 //! 1. 响应是 `[PID, 数据]`，**不回显命令码**。早期实现以为标准要求回显，
 //!    给响应加了命令码字节，实测抓帧证明那是错的：`FF 11 11` 就是两字节
 //!    数据响应。
-//! 2. spike 把 `ERR_CMD_UNKNOWN` 记成 `0x22`，标准是 `0x10`（`0x22` 是
-//!    `ERR_ACCESS_LOCKED`）。本 crate 按标准表。
+//! 2. spike 把 `ERR_CMD_UNKNOWN` 记成 `0x22`，标准是 `0x20`（`0x22` 是
+//!    `ERR_OUT_OF_RANGE`）。本 crate 按标准表。
 
 #![forbid(unsafe_code)]
 
 mod codec;
 mod command;
+pub mod protection;
 
 pub use command::{Command, CommandCode};
+pub use protection::{ExampleSeedKey, SeedKey};
 
 /// CAN 传输层单帧上限（`maxCto`）。超过要走块传输，M1 未实现。
 pub const MAX_CTO: usize = 8;
@@ -122,24 +124,54 @@ pub mod resource {
     pub const DAQ: u8 = 0x04;
 }
 
-/// 错误码。数值按 ASAM 标准表。
+/// 错误码。数值按 ASAM XCP 标准表（与 pyXCP 的 `XcpError` 逐条对照一致）。
+///
+/// 订正记录（2026-11-07）：此前本表把 `ERR_CMD_UNKNOWN` 记成 `0x10`、页号错误
+/// 记成 `0x23`，是早期按"标准是 0x10"的臆断落的值。实际标准是 0x20 段：
+/// `ERR_CMD_UNKNOWN` `0x20`、`ERR_OUT_OF_RANGE` `0x22`、`ERR_ACCESS_LOCKED`
+/// `0x25`、`ERR_PAGE_NOT_VALID` `0x26`。真 ECU 回 `0x25` 时按旧表会被当成
+/// 未登记错误码，解锁流程因此永远不触发。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum ErrorCode {
     /// 同步中，命令暂不可执行。
     CmdSynch = 0x00,
     /// 从站忙。
-    CmdBusy = 0x01,
+    CmdBusy = 0x10,
     /// DAQ 正在运行。
-    DaqActive = 0x02,
+    DaqActive = 0x11,
+    /// 刷写正在运行。
+    PgmActive = 0x12,
     /// 命令不存在。
-    CmdUnknown = 0x10,
+    CmdUnknown = 0x20,
     /// 命令语法错误。
-    CmdSyntax = 0x11,
+    CmdSyntax = 0x21,
     /// 参数越界。
-    OutOfRange = 0x12,
+    OutOfRange = 0x22,
+    /// 目标内存写保护。
+    WriteProtected = 0x23,
+    /// 目标内存不可访问。
+    AccessDenied = 0x24,
+    /// 需要先完成种子密钥解锁。
+    AccessLocked = 0x25,
     /// 页号无效。
-    PageNotValid = 0x23,
+    PageNotValid = 0x26,
+    /// 页模式无效。
+    ModeNotValid = 0x27,
+    /// 段号无效。
+    SegmentNotValid = 0x28,
+    /// 命令顺序错误（例如没取种子就发密钥）。
+    Sequence = 0x29,
+    /// DAQ 配置无效。
+    DaqConfig = 0x2A,
+    /// 内存溢出。
+    MemoryOverflow = 0x30,
+    /// 从站内部错误。
+    Generic = 0x31,
+    /// 从站校验失败。
+    Verify = 0x32,
+    /// 资源暂时不可访问（例如正被别的会话占用）。
+    ResourceTemporaryNotAccessible = 0x33,
 }
 
 impl ErrorCode {
@@ -147,12 +179,24 @@ impl ErrorCode {
     pub const fn from_u8(byte: u8) -> Option<Self> {
         Some(match byte {
             0x00 => Self::CmdSynch,
-            0x01 => Self::CmdBusy,
-            0x02 => Self::DaqActive,
-            0x10 => Self::CmdUnknown,
-            0x11 => Self::CmdSyntax,
-            0x12 => Self::OutOfRange,
-            0x23 => Self::PageNotValid,
+            0x10 => Self::CmdBusy,
+            0x11 => Self::DaqActive,
+            0x12 => Self::PgmActive,
+            0x20 => Self::CmdUnknown,
+            0x21 => Self::CmdSyntax,
+            0x22 => Self::OutOfRange,
+            0x23 => Self::WriteProtected,
+            0x24 => Self::AccessDenied,
+            0x25 => Self::AccessLocked,
+            0x26 => Self::PageNotValid,
+            0x27 => Self::ModeNotValid,
+            0x28 => Self::SegmentNotValid,
+            0x29 => Self::Sequence,
+            0x2A => Self::DaqConfig,
+            0x30 => Self::MemoryOverflow,
+            0x31 => Self::Generic,
+            0x32 => Self::Verify,
+            0x33 => Self::ResourceTemporaryNotAccessible,
             _ => return None,
         })
     }
@@ -304,7 +348,7 @@ mod tests {
             code: ErrorCode::OutOfRange as u8,
         }
         .encode();
-        assert_eq!(frame, vec![0xFE, 0x12]);
+        assert_eq!(frame, vec![0xFE, 0x22]);
     }
 
     #[test]
@@ -390,14 +434,27 @@ mod tests {
 
     #[test]
     fn error_code_table_covers_every_known_value() {
+        // 整表与 pyXCP 的 XcpError 对照（标准 ASAM 表），改这里等于改协议。
         let table = [
             (0x00, ErrorCode::CmdSynch),
-            (0x01, ErrorCode::CmdBusy),
-            (0x02, ErrorCode::DaqActive),
-            (0x10, ErrorCode::CmdUnknown),
-            (0x11, ErrorCode::CmdSyntax),
-            (0x12, ErrorCode::OutOfRange),
-            (0x23, ErrorCode::PageNotValid),
+            (0x10, ErrorCode::CmdBusy),
+            (0x11, ErrorCode::DaqActive),
+            (0x12, ErrorCode::PgmActive),
+            (0x20, ErrorCode::CmdUnknown),
+            (0x21, ErrorCode::CmdSyntax),
+            (0x22, ErrorCode::OutOfRange),
+            (0x23, ErrorCode::WriteProtected),
+            (0x24, ErrorCode::AccessDenied),
+            (0x25, ErrorCode::AccessLocked),
+            (0x26, ErrorCode::PageNotValid),
+            (0x27, ErrorCode::ModeNotValid),
+            (0x28, ErrorCode::SegmentNotValid),
+            (0x29, ErrorCode::Sequence),
+            (0x2A, ErrorCode::DaqConfig),
+            (0x30, ErrorCode::MemoryOverflow),
+            (0x31, ErrorCode::Generic),
+            (0x32, ErrorCode::Verify),
+            (0x33, ErrorCode::ResourceTemporaryNotAccessible),
         ];
         for (byte, code) in table {
             assert_eq!(ErrorCode::from_u8(byte), Some(code), "{byte:#04x}");
@@ -406,9 +463,9 @@ mod tests {
     }
 
     #[test]
-    fn standard_error_codes_differ_from_spike_values() {
-        // spike 把未知命令记成 0x22；标准 0x22 是 ERR_ACCESS_LOCKED。
-        assert_eq!(ErrorCode::from_u8(0x10), Some(ErrorCode::CmdUnknown));
-        assert_eq!(ErrorCode::from_u8(0x22), None, "0x22 不在本表内，不猜");
+    fn locked_access_has_its_own_code() {
+        // 解锁流程靠这个码触发：认不出来就永远不知道该去解锁。
+        assert_eq!(ErrorCode::from_u8(0x25), Some(ErrorCode::AccessLocked));
+        assert_eq!(ErrorCode::AccessLocked as u8, 0x25);
     }
 }
