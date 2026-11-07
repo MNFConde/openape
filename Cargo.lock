@@ -1017,6 +1017,7 @@ version = "0.1.0"
 dependencies = [
  "a2lfile",
  "openape-cal-core",
+ "openape-format-elf",
  "serde",
  "serde_json",
  "thiserror",

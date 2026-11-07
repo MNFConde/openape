@@ -15,6 +15,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+openape-format-elf.workspace = true
 
 [lints]
 workspace = true
