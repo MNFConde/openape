@@ -8,6 +8,7 @@
 | `dbc/` | CAN 数据库夹具（`typical.dbc`：Intel/Motorola、有符号、带单位） | M3-08 |
 | `config/` | 轴绑定 golden 的工程配置（`axis-binding-golden.toml`）与期望 IR 快照（`.ir.json`） | M3-06 |
 | `a2l/` | 轴绑定导出的 golden A2L 片段（`axis-binding-golden.a2l`）与档二 golden（`elf-export-golden.a2l`：`test.elf` 全量导出） | M0-5 RFC 第 8 节 / M3-05 |
+| `cdf/` | CDF 档二 golden 三件套：输入样本（`minimal.cdf`）、变量名配置（`golden.names.toml`）、期望导入结果（`golden.import.json`） | M4-06 / M4-07 |
 
 ## ELF 夹具：产物入库，源码随改随编
 
@@ -38,3 +39,27 @@ rm -f *.o
 `a2l/axis-binding-golden.a2l` 是 [10-axis-binding-rfc](../docs/10-axis-binding-rfc.md) 第 8 节的期望导出结果，用 `a2lfile` 严格模式校验（`load(path, None, true)`）应为零警告。
 
 `a2l/elf-export-golden.a2l` 是 `elf/test.elf` 走完"抽 DWARF → 进 IR → 指定角色 → 空轴绑定导出"后的完整输出，由 `crates/format-a2l/tests/elf_to_a2l.rs` 做字节级比对。改了导出格式或换了夹具，这条 golden 必须一起更新，并在提交里说明是哪一种。
+
+## CDF 夹具：样本自造，期望结果逐年可重生成
+
+`cdf/minimal.cdf` **是本项目手写的**，不是从工具链导出的真实文件。原因有两条：ASAM 官网的 CDF 2.1.0 下载只对会员开放，公开可得的是 2.0.0 的 XSD，而该 XSD 的版权属 ASAM、不能进本仓（[D-24](../docs/decisions.md#d-24-数据集对接格式改判-cdf)）；许可干净的公开样例文件也没找到。手写的样本版权清楚，还能随手改造成坏样本去测报错路径。
+
+样本覆盖标量、字符串（`VT`）、曲线、二维 map、结构体成员（嵌套 `SW-INSTANCE`）、带单位与不带单位，以及一个"合法但我们不解析"的 `SW-CS-HISTORY`——它用来钉住"给提示而不是拒"这条行为。
+
+三件套互为约束：
+
+| 文件 | 角色 |
+|---|---|
+| `cdf/minimal.cdf` | 输入 |
+| `cdf/golden.names.toml` | 配置：我们这边的变量名清单，刻意让"对上 / 只在 CDF / 只在我们这边"三桶都非空 |
+| `cdf/golden.import.json` | 期望：解析结果 + 三桶对齐，字节级比对 |
+
+重新生成（改了样本、改了投影字段、或改了提示文案时）：
+
+```bash
+OPENAPE_WRITE_GOLDEN=1 cargo test -p openape-format-cdf --test golden
+```
+
+没有这个开关时只比对不写。改了期望要在提交里说明是哪一种改动（样本／投影／提示），否则"改实现顺手改 golden"会让比对失去意义。
+
+**已知边界**：`format-cdf` 按 CDF 2.0.0 实现，2.1.0 与 2.0.0 的差异未验证；真实工具链导出的文件到手后，应先跑一遍解析、把元素集表里的漏项补齐，再考虑补进 fixtures。

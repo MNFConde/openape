@@ -61,8 +61,9 @@
 [x] M4-05 feat(cal-core)：dataset 模型与 JSON 读写（版本字段 + 模式标记：仅 ELF / 带 A2L）→ 验收：旧版可读、两档数值混比被拒、diff 输出排序稳定
 [x] M4-06 feat(format-cdf)：crate 成立 + CDF 只读解析（XML 值表 + 按 A2L 名映射 + 元素集校验）→ 验收：坏文件给可操作提示，不 panic，越出 schema 即拒绝
     改判说明（2026-11-07）：原定 DCM，因 ASAM MCD-1 DCM 已退役、规范与样本都拿不到而改判 CDF（D-24）
-    完成说明（2026-11-07）：**按 CDF 2.0.0 实现**——官网现行 2.1.0 的下载只对 ASAM 会员开放，公开可得的是 2.0.0 的 XSD；该 XSD 头部版权归 ASAM，故 schema 不入库，"越出 schema 即拒绝"由元素集常量表校验承担（属性忽略）。样本为自造（`fixtures/minimal.cdf`，覆盖标量/字符串/曲线/map/结构体成员），真实样本待有干净的许可来源再补。2.0.0 与 2.1.0 的差异未验证
-[ ] M4-07 test：CDF 档二 golden 三件套入库（与实现同批，不先于被测对象）→ 验收：纯重构零 diff
+    完成说明（2026-11-07）：**按 CDF 2.0.0 实现**——官网现行 2.1.0 的下载只对 ASAM 会员开放，公开可得的是 2.0.0 的 XSD；该 XSD 头部版权归 ASAM，故 schema 不入库，"越出 schema 即拒绝"由元素集常量表校验承担（属性忽略）。样本为自造（`fixtures/cdf/minimal.cdf`，覆盖标量/字符串/曲线/map/结构体成员），真实样本待有干净的许可来源再补。2.0.0 与 2.1.0 的差异未验证
+[x] M4-07 test：CDF 档二 golden 三件套入库（与实现同批，不先于被测对象）→ 验收：纯重构零 diff
+    完成说明（2026-11-07）：三件套落到 `fixtures/cdf/`——输入 `minimal.cdf`、配置 `golden.names.toml`（三桶刻意都非空）、期望 `golden.import.json`（解析结果 + 对齐 + 提示的字节级投影）。落在 `crates/format-cdf/tests/golden.rs`，`OPENAPE_WRITE_GOLDEN=1` 才写、平时只比。做过一次变异核验：吞掉一条读入提示即红灯，说明比对不是空的。
 [x] M4-08 feat(session)：写入编排——单点写 + 写前读回 + 写前快照 + 写后校验 + 审计日志（谁/何时/写前写后值）→ 验收：每次写入落快照与审计各一条，整表批量入口不存在（D-13）
 [x] M4-09 feat(session)：A2L 量程写入前校验 → 验收：越界被拒并报 min/max 与实际值；无 A2L 时不校验但标 [raw]
 [x] M4-10 feat(session)：页切换 + 参考页与工作页 diff 及复制 → 验收：diff 只列差异地址，复制前需显式确认
