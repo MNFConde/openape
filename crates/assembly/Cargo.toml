@@ -8,7 +8,11 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+openape-bus.workspace = true
+openape-bus-socketcan.workspace = true
+openape-bus-zlg.workspace = true
 openape-cal-core.workspace = true
+openape-diag.workspace = true
 openape-format-a2l.workspace = true
 openape-format-elf.workspace = true
 openape-proto.workspace = true

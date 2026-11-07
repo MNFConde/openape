@@ -12,6 +12,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod backend;
 pub mod descriptors;
 
 pub use descriptors::{LoadedVariables, load_variables};

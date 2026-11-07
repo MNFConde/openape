@@ -960,7 +960,11 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 name = "openape-assembly"
 version = "0.1.0"
 dependencies = [
+ "openape-bus",
+ "openape-bus-socketcan",
+ "openape-bus-zlg",
  "openape-cal-core",
+ "openape-diag",
  "openape-format-a2l",
  "openape-format-elf",
  "openape-proto",
@@ -988,6 +992,16 @@ dependencies = [
  "openape-diag",
  "socketcan",
  "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "openape-bus-zlg"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "openape-bus",
+ "openape-diag",
  "tokio",
 ]
 

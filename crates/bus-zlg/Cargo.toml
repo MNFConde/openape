@@ -1,0 +1,19 @@
+[package]
+name = "openape-bus-zlg"
+description = "周立功 CAN-FD 卡后端（仅 Windows）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+openape-bus.workspace = true
+openape-diag.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true
