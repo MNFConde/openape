@@ -12,5 +12,9 @@ openape-cal-core.workspace = true
 roxmltree.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+toml.workspace = true
+
 [lints]
 workspace = true

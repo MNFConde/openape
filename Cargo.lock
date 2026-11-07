@@ -1098,7 +1098,9 @@ version = "0.1.0"
 dependencies = [
  "openape-cal-core",
  "roxmltree",
+ "serde_json",
  "thiserror",
+ "toml",
 ]
 
 [[package]]

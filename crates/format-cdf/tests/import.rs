@@ -1,9 +1,15 @@
 //! 用入库的样本走一遍"读文件 → 按名对齐"，验收口径来自 M4-06。
 
+use std::path::{Path, PathBuf};
+
 use openape_format_cdf::{Category, Scalar, parse_file};
 
+fn fixtures() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/cdf")
+}
+
 fn sample() -> openape_format_cdf::CdfDocument {
-    parse_file("fixtures/minimal.cdf").expect("入库样本必须能读")
+    parse_file(fixtures().join("minimal.cdf")).expect("入库样本必须能读")
 }
 
 #[test]
@@ -73,7 +79,7 @@ fn assign_against_a2l_names_splits_three_ways() {
 
 #[test]
 fn missing_file_gives_actionable_error() {
-    let err = parse_file("fixtures/does-not-exist.cdf").expect_err("文件不存在要报错");
+    let err = parse_file(fixtures().join("does-not-exist.cdf")).expect_err("文件不存在要报错");
     let message = err.to_string();
     assert!(
         message.contains("does-not-exist.cdf"),

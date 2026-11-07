@@ -1,0 +1,112 @@
+{
+  "assignment": {
+    "cdf_only": [
+      "tq_offset",
+      "map_ign",
+      "label_text"
+    ],
+    "matched": [
+      [
+        "n_max",
+        "n_max"
+      ],
+      [
+        "kf_curve",
+        "kf_curve"
+      ],
+      [
+        "ctrl.gain",
+        "ctrl.gain"
+      ]
+    ],
+    "name_only": [
+      "not_in_cdf"
+    ]
+  },
+  "entries": [
+    {
+      "category": "VALUE",
+      "dims": [],
+      "line": 24,
+      "path": "n_max",
+      "system": "Engine",
+      "unit": "rpm",
+      "values": [
+        6500.0
+      ]
+    },
+    {
+      "category": "VALUE",
+      "dims": [],
+      "line": 39,
+      "path": "tq_offset",
+      "system": "Engine",
+      "unit": "Nm",
+      "values": [
+        -0.5
+      ]
+    },
+    {
+      "category": "CURVE",
+      "dims": [
+        3
+      ],
+      "line": 49,
+      "path": "kf_curve",
+      "system": "Engine",
+      "unit": null,
+      "values": [
+        1.0,
+        1.5,
+        2.0
+      ]
+    },
+    {
+      "category": "MAP",
+      "dims": [
+        2,
+        2
+      ],
+      "line": 63,
+      "path": "map_ign",
+      "system": "Engine",
+      "unit": "degCA",
+      "values": [
+        10.0,
+        12.0,
+        14.0,
+        16.0
+      ]
+    },
+    {
+      "category": "ASCII",
+      "dims": [],
+      "line": 80,
+      "path": "label_text",
+      "system": "Engine",
+      "unit": null,
+      "values": [
+        "OpenAPE"
+      ]
+    },
+    {
+      "category": "VALUE",
+      "dims": [],
+      "line": 92,
+      "path": "ctrl.gain",
+      "system": "Engine",
+      "unit": null,
+      "values": [
+        1.25
+      ]
+    }
+  ],
+  "notes": [
+    {
+      "message": "有 SW-CS-HISTORY（版次历史），本次只读当前取值，这部分未导入（第 33 行）",
+      "severity": "Info",
+      "subject": "n_max"
+    }
+  ],
+  "schema_version": 1
+}

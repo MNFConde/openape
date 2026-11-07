@@ -1,0 +1,13 @@
+# CDF 档二 golden 的变量名配置（M4-07）
+#
+# 这些名字模拟"我们这边"的变量清单：A2L 的标定量名与 ELF 的符号名都是扁平的，
+# CDF 的结构体成员则是点路径。三份名单刻意各留一条不重合的：
+#
+# - matched：CDF 与我们都有的
+# - cdf_only：CDF 有、我们没有（tq_offset / map_ign / label_text）
+# - name_only：我们有、CDF 没给值（not_in_cdf）
+#
+# 三桶都要非空——否则这份 golden 只证明了"能读"，证明不了"能对上"。
+schema_version = 1
+
+names = ["n_max", "kf_curve", "ctrl.gain", "not_in_cdf"]
