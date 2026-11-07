@@ -1,0 +1,21 @@
+{
+  "name": "openape-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "gen": "PATH=\"$PWD/node_modules/.bin:$PATH\" protoc --ts_out src/generated --proto_path ../crates/proto/proto ../crates/proto/proto/openape/v1/openape.proto",
+    "build": "tsc --noEmit && vite build",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "@protobuf-ts/grpcweb-transport": "^2.9.4",
+    "@protobuf-ts/runtime": "^2.9.4",
+    "@protobuf-ts/runtime-rpc": "^2.9.4",
+    "uplot": "^1.6.31"
+  },
+  "devDependencies": {
+    "@protobuf-ts/plugin": "^2.9.4",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}

@@ -35,7 +35,7 @@
 [x] M2-10 feat(session)：DAQ 环形缓冲 + 事件流出口 + 丢帧/背压计数 → 验收：慢消费者不拖垮采集，背压可观测
 [x] M2-11 feat(proto)：proto crate 成立（gRPC schema + build.rs，含 DTC 扩展位占位）+ CLI 输出结构迁入、本地结构下线 → 验收：CLI --json 与 gRPC 共用同一类型（prost `type_attribute` 挂 serde、字段保持 snake_case、地址用 string）；版本取 00 总纲的 spike 基线
 [x] M2-12 feat(daemon)：axum 单端口同时托管静态页与 grpc-web（D-05 三约束：GrpcWebLayer、accept_http1、Body 双向转换）→ 验收：浏览器 server-streaming 20 帧回归通过；默认仅绑 127.0.0.1，`--listen` 显式开放，`GET /healthz` 可用（D-22）
-[ ] M2-13 feat(ui)：Web 最小曲线页（Vite + TS + uPlot + grpc-web client）→ 验收：vcan 上实时曲线可见；API 走同源相对路径，产物不入库，提供 `script/frontend-check.sh` 但不挂提交钩子
+[x] M2-13 feat(ui)：Web 最小曲线页（Vite + TS + uPlot + grpc-web client）→ 验收：vcan 上实时曲线可见；API 走同源相对路径，产物不入库，提供 `script/frontend-check.sh` 但不挂提交钩子
 [ ] M2-14 feat(cli)：--via-daemon 经本地 gRPC 复用运行中的会话 → 验收：daemon 持有硬件时 CLI 探测不抢锁
 [ ] M2-15 docs：复核 pyXCP 两处非标准行为（GET_CAL_PAGE 响应补齐、WRITE_DAQ 指针自增）并落 D-12 更正 → 验收：结论带 ASAM 条款或实测证据
 
