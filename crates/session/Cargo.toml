@@ -16,5 +16,8 @@ openape-xcp.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 
+[dev-dependencies]
+async-trait.workspace = true
+
 [lints]
 workspace = true

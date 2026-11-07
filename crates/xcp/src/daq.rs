@@ -65,22 +65,25 @@ pub struct DaqLayout {
 }
 
 impl DaqLayout {
-    /// 登记一个 ODT。重复编号会覆盖——编号由 [`openape_xcp_proto::OdtIds`]
-    /// 统一分配，重复说明调用方算错了。
-    pub(crate) fn insert(&mut self, pid: u8, signals: &[DaqSignal]) {
+    /// 登记一个 ODT：按信号顺序给出各段字节数。重复编号会覆盖——编号由
+    /// [`openape_xcp_proto::OdtIds`] 统一分配，重复说明调用方算错了。
+    pub fn insert_odt(&mut self, pid: u8, lens: &[ByteLen]) {
         let mut offset = 0;
-        let slices = signals
+        let slices = lens
             .iter()
-            .map(|signal| {
-                let slice = Slice {
-                    offset,
-                    len: signal.len,
-                };
-                offset += usize::from(signal.len.get());
+            .map(|len| {
+                let slice = Slice { offset, len: *len };
+                offset += usize::from(len.get());
                 slice
             })
             .collect();
         self.odts.insert(pid, slices);
+    }
+
+    /// 从信号表登记，等价于按长度调用 [`Self::insert_odt`]。
+    pub(crate) fn insert(&mut self, pid: u8, signals: &[DaqSignal]) {
+        let lens: Vec<ByteLen> = signals.iter().map(|signal| signal.len).collect();
+        self.insert_odt(pid, &lens);
     }
 
     /// 按绝对 ODT 编号切一帧 DTO。编号不认识或载荷不足时返回 `None`。

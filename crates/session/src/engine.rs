@@ -10,8 +10,9 @@ use openape_bus::{Bus, BusCapabilities, CanFrame, CanId};
 use openape_bus_socketcan::SocketCanBus;
 use openape_cal_core::{Address, ByteLen};
 use openape_diag::{Domain, Fault, FaultCode, Severity};
-use openape_xcp::{CanXcpMaster, ConnectInfo, XcpConfig, XcpConnection};
+use openape_xcp::{CanXcpMaster, ConnectInfo, DaqLayout, DaqListSpec, XcpConfig, XcpConnection};
 
+use crate::capture::{self, CaptureConfig, DaqCapture};
 use crate::lock::DeviceLock;
 
 /// 会话参数。
@@ -97,6 +98,29 @@ impl Session {
     /// 读一段内存。
     pub async fn read(&mut self, address: Address, len: ByteLen) -> Result<Vec<u8>, Fault> {
         self.master.read(address, len).await
+    }
+
+    /// 配置并启动 DAQ。从站随后按事件通道周期发帧。
+    pub async fn configure_daq(&mut self, lists: &[DaqListSpec]) -> Result<DaqLayout, Fault> {
+        self.master.configure_daq(lists).await
+    }
+
+    /// 起采集泵：把总线上的 DTO 帧推进样本缓冲。
+    ///
+    /// 采集期间本会话是总线的唯一读者，命令事务要让路（[`crate::capture`] 的
+    /// 模块文档说明了原因）。
+    pub fn start_capture(&self, layout: DaqLayout) -> DaqCapture {
+        self.start_capture_with(layout, CaptureConfig::default())
+    }
+
+    /// 同 [`Self::start_capture`]，可指定缓冲容量。
+    pub fn start_capture_with(&self, layout: DaqLayout, config: CaptureConfig) -> DaqCapture {
+        capture::spawn(
+            Arc::clone(&self.bus),
+            self.master.config().response_id,
+            layout,
+            config.capacity,
+        )
     }
 
     /// 断链。

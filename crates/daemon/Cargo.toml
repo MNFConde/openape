@@ -1,0 +1,39 @@
+[package]
+name = "openape-daemon"
+description = "常驻外壳：session + gRPC 服务 + 静态托管"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "openaped"
+path = "src/main.rs"
+
+[dependencies]
+openape-bus.workspace = true
+openape-cal-core.workspace = true
+openape-diag.workspace = true
+openape-proto.workspace = true
+openape-session.workspace = true
+openape-xcp.workspace = true
+axum.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tonic.workspace = true
+tonic-web.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+openape-bus-socketcan.workspace = true
+openape-sim-ecu.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
