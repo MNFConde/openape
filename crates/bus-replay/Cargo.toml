@@ -1,0 +1,12 @@
+[package]
+name = "openape-bus-replay"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+openape-bus.workspace = true
+ablf.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

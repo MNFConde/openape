@@ -22,6 +22,7 @@ openape-xcp-proto = { path = "crates/xcp-proto" }
 openape-proto = { path = "crates/proto" }
 openape-bus = { path = "crates/bus" }
 openape-bus-socketcan = { path = "crates/bus-socketcan" }
+openape-bus-replay = { path = "crates/bus-replay" }
 openape-bus-zlg = { path = "crates/bus-zlg" }
 openape-xcp = { path = "crates/xcp" }
 openape-assembly = { path = "crates/assembly" }
@@ -31,6 +32,7 @@ openape-daemon = { path = "crates/daemon" }
 openape-cli = { path = "crates/cli" }
 
 # 外部依赖：版本只在此处钉
+ablf = "0.2"
 async-trait = "0.1"
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }

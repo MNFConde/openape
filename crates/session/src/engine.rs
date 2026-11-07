@@ -48,14 +48,21 @@ pub struct Session {
     bus: Arc<dyn Bus>,
     master: CanXcpMaster,
     channel: String,
-    _lock: DeviceLock,
+    /// 设备锁。回放后端不碰硬件，不拿锁（None）。
+    _lock: Option<DeviceLock>,
 }
 
 impl std::fmt::Debug for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Session")
             .field("channel", &self.channel)
-            .field("lock", &self._lock.path().display().to_string())
+            .field(
+                "lock",
+                &self
+                    ._lock
+                    .as_ref()
+                    .map(|lock| lock.path().display().to_string()),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -73,7 +80,22 @@ impl Session {
             bus,
             master,
             channel: config.channel,
-            _lock: lock,
+            _lock: Some(lock),
+        })
+    }
+
+    /// 用调用方给的总线开会话——回放后端走这里：不碰硬件、不拿设备锁，
+    /// 上层采集与实时是同一条代码路径（M5-10）。
+    pub fn open_with_bus(config: SessionConfig, bus: Arc<dyn Bus>) -> Result<Self, Fault> {
+        let mut xcp_config = XcpConfig::new(config.command_id, config.response_id);
+        xcp_config.timeout = config.timeout;
+        xcp_config.retries = config.retries;
+        let master = CanXcpMaster::new(bus.clone(), xcp_config);
+        Ok(Self {
+            bus,
+            master,
+            channel: config.channel,
+            _lock: None,
         })
     }
 

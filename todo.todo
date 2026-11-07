@@ -94,6 +94,7 @@
 [ ] M5-08 docs/test：真机复验——复测 M4 遗留的「未验」项（H-01–H-17 与写入类检查点）→ 验收：12 号记录表无「未验」残留
 [ ] M5-09 feat(bus-socketcan)：CAN-FD 收发与能力位，经典帧不回归 → 验收：H-02 能力位与驱动一致，FD 帧双向收发通
 [ ] M5-10 feat(bus-replay)：BLF / ASC 日志回放后端（按用户请求触发）→ 验收：回放与实时走同一条采集通路
+    进度（2026-11-08，部分完成）：bus-replay crate 落地——asc 自实现（fixtures/replay/sample.asc 自造样本入库，认不出的行跳过、帧行解析失败报行号）、blf 经 ablf 0.2（MIT/Apache clean-room，容器解析归它，本 crate 只转语义；真实 BLF 样本许可不干净未核对，见三道门）、ReplayBus 实现 Bus trait（按日志时间真实节奏回放，锁不跨 await，放完报关闭）+ ReplayBus 时序测试。session::Session::open_with_bus 落地（回放不拿设备锁，Bus 层同一性已证）。缺口：daemon --replay 接线未做——回放总线上无从站，XCP connect 必败，正确接线是「日志 DTO 帧过滤后进 DaqStream 观察通路」，涉及 DaqStream 日志时间戳 vs 墙钟的语义决策，留下一轮做。
 [ ] M5-11 feat(bus-socketcand)：socketcand 客户端（按用户请求触发）→ 验收：能力位按服务端如实上报，上层零分支
 [ ] M5-12 feat(xcp)：XCP-on-Ethernet 传输（经 XcpConnection，UDP 先行）→ 验收：与 xcp-lite 从站互通，CONNECT 与 DAQ 跑通
 [ ] M5-13 feat(ui-tauri)：桌面壳与 daemon sidecar（仅 Windows，D-21）→ 验收：双击启动可用，sidecar 生命周期与崩溃重启正确
