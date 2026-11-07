@@ -412,6 +412,261 @@ export interface VariableEntry {
      * @generated from protobuf field: bool raw = 6
      */
     raw: boolean;
+    /**
+     * 量程。带 A2L 时有值，界面用它提示"可写范围"。
+     *
+     * @generated from protobuf field: openape.v1.RangeCheck range = 7
+     */
+    range?: RangeCheck;
+}
+/**
+ * 一段量程与它的实际物理值。
+ *
+ * @generated from protobuf message openape.v1.RangeCheck
+ */
+export interface RangeCheck {
+    /**
+     * @generated from protobuf field: double min = 1
+     */
+    min: number;
+    /**
+     * @generated from protobuf field: double max = 2
+     */
+    max: number;
+    /**
+     * 本次写入的物理值。仅写入结果里出现，列表里为 0。
+     *
+     * @generated from protobuf field: double physical = 3
+     */
+    physical: number;
+}
+/**
+ * 写一个标定量。一次只接一个符号一个值——整表写入的入口不提供（D-13）。
+ *
+ * @generated from protobuf message openape.v1.WriteRequest
+ */
+export interface WriteRequest {
+    /**
+     * 地址用字符串：JS 的 number 只精确到 2^53。
+     *
+     * @generated from protobuf field: string address = 1
+     */
+    address: string;
+    /**
+     * @generated from protobuf field: uint32 len = 2
+     */
+    len: number;
+    /**
+     * @generated from protobuf field: string data_hex = 3
+     */
+    dataHex: string;
+    /**
+     * 符号名。有变量清单时按它取长度、量程与元素类型。
+     *
+     * @generated from protobuf field: string symbol = 4
+     */
+    symbol: string;
+    /**
+     * 谁发起的，进审计。
+     *
+     * @generated from protobuf field: string actor = 5
+     */
+    actor: string;
+}
+/**
+ * @generated from protobuf message openape.v1.WriteResponse
+ */
+export interface WriteResponse {
+    /**
+     * @generated from protobuf field: string channel = 1
+     */
+    channel: string;
+    /**
+     * @generated from protobuf field: string symbol = 2
+     */
+    symbol: string;
+    /**
+     * @generated from protobuf field: string address = 3
+     */
+    address: string;
+    /**
+     * @generated from protobuf field: string before_hex = 4
+     */
+    beforeHex: string;
+    /**
+     * @generated from protobuf field: string after_hex = 5
+     */
+    afterHex: string;
+    /**
+     * 写前快照文件路径。回滚用它，不必再回读。
+     *
+     * @generated from protobuf field: string snapshot_path = 6
+     */
+    snapshotPath: string;
+    /**
+     * 是否做过量程校验。仅 ELF 档为 false，界面标 [raw]。
+     *
+     * @generated from protobuf field: bool range_checked = 7
+     */
+    rangeChecked: boolean;
+    /**
+     * @generated from protobuf field: openape.v1.RangeCheck range = 8
+     */
+    range?: RangeCheck;
+    /**
+     * 审计时刻（ISO-8601 UTC）。
+     *
+     * @generated from protobuf field: string audited_at = 9
+     */
+    auditedAt: string;
+    /**
+     * @generated from protobuf field: uint32 len = 10
+     */
+    len: number;
+}
+/**
+ * 当前标定页。
+ *
+ * @generated from protobuf message openape.v1.CalPageResponse
+ */
+export interface CalPageResponse {
+    /**
+     * @generated from protobuf field: string channel = 1
+     */
+    channel: string;
+    /**
+     * @generated from protobuf field: uint32 page = 2
+     */
+    page: number;
+}
+/**
+ * @generated from protobuf message openape.v1.SetCalPageRequest
+ */
+export interface SetCalPageRequest {
+    /**
+     * @generated from protobuf field: uint32 page = 1
+     */
+    page: number;
+}
+/**
+ * 两页对比。取样范围是变量清单里的标定量，观测量不上页。
+ *
+ * @generated from protobuf message openape.v1.PageDiffRequest
+ */
+export interface PageDiffRequest {
+    /**
+     * @generated from protobuf field: uint32 reference_page = 1
+     */
+    referencePage: number;
+    /**
+     * @generated from protobuf field: uint32 working_page = 2
+     */
+    workingPage: number;
+}
+/**
+ * 一条页间差异。哪一侧缺失由 `in_*` 说明，空字符串与"值为空"因此不混淆。
+ *
+ * @generated from protobuf message openape.v1.Difference
+ */
+export interface Difference {
+    /**
+     * @generated from protobuf field: string symbol = 1
+     */
+    symbol: string;
+    /**
+     * @generated from protobuf field: string address = 2
+     */
+    address: string;
+    /**
+     * @generated from protobuf field: string reference_hex = 3
+     */
+    referenceHex: string;
+    /**
+     * @generated from protobuf field: string working_hex = 4
+     */
+    workingHex: string;
+    /**
+     * @generated from protobuf field: bool in_reference = 5
+     */
+    inReference: boolean;
+    /**
+     * @generated from protobuf field: bool in_working = 6
+     */
+    inWorking: boolean;
+}
+/**
+ * @generated from protobuf message openape.v1.PageDiffResponse
+ */
+export interface PageDiffResponse {
+    /**
+     * @generated from protobuf field: uint32 reference_page = 1
+     */
+    referencePage: number;
+    /**
+     * @generated from protobuf field: uint32 working_page = 2
+     */
+    workingPage: number;
+    /**
+     * @generated from protobuf field: repeated openape.v1.Difference differences = 3
+     */
+    differences: Difference[];
+}
+/**
+ * 一条审计记录。字段与 session 的审计日志一一对应，查询不走另一条路。
+ *
+ * @generated from protobuf message openape.v1.AuditEntry
+ */
+export interface AuditEntry {
+    /**
+     * @generated from protobuf field: string at = 1
+     */
+    at: string;
+    /**
+     * @generated from protobuf field: string actor = 2
+     */
+    actor: string;
+    /**
+     * @generated from protobuf field: string symbol = 3
+     */
+    symbol: string;
+    /**
+     * @generated from protobuf field: string address = 4
+     */
+    address: string;
+    /**
+     * @generated from protobuf field: string before_hex = 5
+     */
+    beforeHex: string;
+    /**
+     * @generated from protobuf field: string after_hex = 6
+     */
+    afterHex: string;
+    /**
+     * 输入档：elf_only 或 with_a2l。两档数值不可混比。
+     *
+     * @generated from protobuf field: string mode = 7
+     */
+    mode: string;
+}
+/**
+ * @generated from protobuf message openape.v1.AuditList
+ */
+export interface AuditList {
+    /**
+     * @generated from protobuf field: repeated openape.v1.AuditEntry entries = 1
+     */
+    entries: AuditEntry[];
+}
+/**
+ * 解锁被保护的资源（GET_SEED + UNLOCK）。成功才返回。
+ *
+ * @generated from protobuf message openape.v1.UnlockResponse
+ */
+export interface UnlockResponse {
+    /**
+     * @generated from protobuf field: string channel = 1
+     */
+    channel: string;
 }
 /**
  * @generated from protobuf message openape.v1.VariableList
@@ -1816,7 +2071,8 @@ class VariableEntry$Type extends MessageType<VariableEntry> {
             { no: 3, name: "elem", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 4, name: "dims", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 13 /*ScalarType.UINT32*/ },
             { no: 5, name: "role", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 6, name: "raw", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+            { no: 6, name: "raw", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 7, name: "range", kind: "message", T: () => RangeCheck }
         ]);
     }
     create(value?: PartialMessage<VariableEntry>): VariableEntry {
@@ -1858,6 +2114,9 @@ class VariableEntry$Type extends MessageType<VariableEntry> {
                 case /* bool raw */ 6:
                     message.raw = reader.bool();
                     break;
+                case /* openape.v1.RangeCheck range */ 7:
+                    message.range = RangeCheck.internalBinaryRead(reader, reader.uint32(), options, message.range);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1892,6 +2151,9 @@ class VariableEntry$Type extends MessageType<VariableEntry> {
         /* bool raw = 6; */
         if (message.raw !== false)
             writer.tag(6, WireType.Varint).bool(message.raw);
+        /* openape.v1.RangeCheck range = 7; */
+        if (message.range)
+            RangeCheck.internalBinaryWrite(message.range, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -1902,6 +2164,762 @@ class VariableEntry$Type extends MessageType<VariableEntry> {
  * @generated MessageType for protobuf message openape.v1.VariableEntry
  */
 export const VariableEntry = new VariableEntry$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RangeCheck$Type extends MessageType<RangeCheck> {
+    constructor() {
+        super("openape.v1.RangeCheck", [
+            { no: 1, name: "min", kind: "scalar", T: 1 /*ScalarType.DOUBLE*/ },
+            { no: 2, name: "max", kind: "scalar", T: 1 /*ScalarType.DOUBLE*/ },
+            { no: 3, name: "physical", kind: "scalar", T: 1 /*ScalarType.DOUBLE*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RangeCheck>): RangeCheck {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.min = 0;
+        message.max = 0;
+        message.physical = 0;
+        if (value !== undefined)
+            reflectionMergePartial<RangeCheck>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RangeCheck): RangeCheck {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* double min */ 1:
+                    message.min = reader.double();
+                    break;
+                case /* double max */ 2:
+                    message.max = reader.double();
+                    break;
+                case /* double physical */ 3:
+                    message.physical = reader.double();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RangeCheck, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* double min = 1; */
+        if (message.min !== 0)
+            writer.tag(1, WireType.Bit64).double(message.min);
+        /* double max = 2; */
+        if (message.max !== 0)
+            writer.tag(2, WireType.Bit64).double(message.max);
+        /* double physical = 3; */
+        if (message.physical !== 0)
+            writer.tag(3, WireType.Bit64).double(message.physical);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.RangeCheck
+ */
+export const RangeCheck = new RangeCheck$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class WriteRequest$Type extends MessageType<WriteRequest> {
+    constructor() {
+        super("openape.v1.WriteRequest", [
+            { no: 1, name: "address", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "len", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 3, name: "data_hex", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "symbol", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "actor", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<WriteRequest>): WriteRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.address = "";
+        message.len = 0;
+        message.dataHex = "";
+        message.symbol = "";
+        message.actor = "";
+        if (value !== undefined)
+            reflectionMergePartial<WriteRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WriteRequest): WriteRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string address */ 1:
+                    message.address = reader.string();
+                    break;
+                case /* uint32 len */ 2:
+                    message.len = reader.uint32();
+                    break;
+                case /* string data_hex */ 3:
+                    message.dataHex = reader.string();
+                    break;
+                case /* string symbol */ 4:
+                    message.symbol = reader.string();
+                    break;
+                case /* string actor */ 5:
+                    message.actor = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: WriteRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string address = 1; */
+        if (message.address !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.address);
+        /* uint32 len = 2; */
+        if (message.len !== 0)
+            writer.tag(2, WireType.Varint).uint32(message.len);
+        /* string data_hex = 3; */
+        if (message.dataHex !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.dataHex);
+        /* string symbol = 4; */
+        if (message.symbol !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.symbol);
+        /* string actor = 5; */
+        if (message.actor !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.actor);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.WriteRequest
+ */
+export const WriteRequest = new WriteRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class WriteResponse$Type extends MessageType<WriteResponse> {
+    constructor() {
+        super("openape.v1.WriteResponse", [
+            { no: 1, name: "channel", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "symbol", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "address", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "before_hex", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "after_hex", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "snapshot_path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "range_checked", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 8, name: "range", kind: "message", T: () => RangeCheck },
+            { no: 9, name: "audited_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 10, name: "len", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<WriteResponse>): WriteResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.channel = "";
+        message.symbol = "";
+        message.address = "";
+        message.beforeHex = "";
+        message.afterHex = "";
+        message.snapshotPath = "";
+        message.rangeChecked = false;
+        message.auditedAt = "";
+        message.len = 0;
+        if (value !== undefined)
+            reflectionMergePartial<WriteResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: WriteResponse): WriteResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string channel */ 1:
+                    message.channel = reader.string();
+                    break;
+                case /* string symbol */ 2:
+                    message.symbol = reader.string();
+                    break;
+                case /* string address */ 3:
+                    message.address = reader.string();
+                    break;
+                case /* string before_hex */ 4:
+                    message.beforeHex = reader.string();
+                    break;
+                case /* string after_hex */ 5:
+                    message.afterHex = reader.string();
+                    break;
+                case /* string snapshot_path */ 6:
+                    message.snapshotPath = reader.string();
+                    break;
+                case /* bool range_checked */ 7:
+                    message.rangeChecked = reader.bool();
+                    break;
+                case /* openape.v1.RangeCheck range */ 8:
+                    message.range = RangeCheck.internalBinaryRead(reader, reader.uint32(), options, message.range);
+                    break;
+                case /* string audited_at */ 9:
+                    message.auditedAt = reader.string();
+                    break;
+                case /* uint32 len */ 10:
+                    message.len = reader.uint32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: WriteResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string channel = 1; */
+        if (message.channel !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.channel);
+        /* string symbol = 2; */
+        if (message.symbol !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.symbol);
+        /* string address = 3; */
+        if (message.address !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.address);
+        /* string before_hex = 4; */
+        if (message.beforeHex !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.beforeHex);
+        /* string after_hex = 5; */
+        if (message.afterHex !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.afterHex);
+        /* string snapshot_path = 6; */
+        if (message.snapshotPath !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.snapshotPath);
+        /* bool range_checked = 7; */
+        if (message.rangeChecked !== false)
+            writer.tag(7, WireType.Varint).bool(message.rangeChecked);
+        /* openape.v1.RangeCheck range = 8; */
+        if (message.range)
+            RangeCheck.internalBinaryWrite(message.range, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* string audited_at = 9; */
+        if (message.auditedAt !== "")
+            writer.tag(9, WireType.LengthDelimited).string(message.auditedAt);
+        /* uint32 len = 10; */
+        if (message.len !== 0)
+            writer.tag(10, WireType.Varint).uint32(message.len);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.WriteResponse
+ */
+export const WriteResponse = new WriteResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CalPageResponse$Type extends MessageType<CalPageResponse> {
+    constructor() {
+        super("openape.v1.CalPageResponse", [
+            { no: 1, name: "channel", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "page", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CalPageResponse>): CalPageResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.channel = "";
+        message.page = 0;
+        if (value !== undefined)
+            reflectionMergePartial<CalPageResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CalPageResponse): CalPageResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string channel */ 1:
+                    message.channel = reader.string();
+                    break;
+                case /* uint32 page */ 2:
+                    message.page = reader.uint32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CalPageResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string channel = 1; */
+        if (message.channel !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.channel);
+        /* uint32 page = 2; */
+        if (message.page !== 0)
+            writer.tag(2, WireType.Varint).uint32(message.page);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.CalPageResponse
+ */
+export const CalPageResponse = new CalPageResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SetCalPageRequest$Type extends MessageType<SetCalPageRequest> {
+    constructor() {
+        super("openape.v1.SetCalPageRequest", [
+            { no: 1, name: "page", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SetCalPageRequest>): SetCalPageRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.page = 0;
+        if (value !== undefined)
+            reflectionMergePartial<SetCalPageRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SetCalPageRequest): SetCalPageRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint32 page */ 1:
+                    message.page = reader.uint32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SetCalPageRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint32 page = 1; */
+        if (message.page !== 0)
+            writer.tag(1, WireType.Varint).uint32(message.page);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.SetCalPageRequest
+ */
+export const SetCalPageRequest = new SetCalPageRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PageDiffRequest$Type extends MessageType<PageDiffRequest> {
+    constructor() {
+        super("openape.v1.PageDiffRequest", [
+            { no: 1, name: "reference_page", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 2, name: "working_page", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<PageDiffRequest>): PageDiffRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.referencePage = 0;
+        message.workingPage = 0;
+        if (value !== undefined)
+            reflectionMergePartial<PageDiffRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PageDiffRequest): PageDiffRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint32 reference_page */ 1:
+                    message.referencePage = reader.uint32();
+                    break;
+                case /* uint32 working_page */ 2:
+                    message.workingPage = reader.uint32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PageDiffRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint32 reference_page = 1; */
+        if (message.referencePage !== 0)
+            writer.tag(1, WireType.Varint).uint32(message.referencePage);
+        /* uint32 working_page = 2; */
+        if (message.workingPage !== 0)
+            writer.tag(2, WireType.Varint).uint32(message.workingPage);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.PageDiffRequest
+ */
+export const PageDiffRequest = new PageDiffRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Difference$Type extends MessageType<Difference> {
+    constructor() {
+        super("openape.v1.Difference", [
+            { no: 1, name: "symbol", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "address", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "reference_hex", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "working_hex", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "in_reference", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "in_working", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<Difference>): Difference {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.symbol = "";
+        message.address = "";
+        message.referenceHex = "";
+        message.workingHex = "";
+        message.inReference = false;
+        message.inWorking = false;
+        if (value !== undefined)
+            reflectionMergePartial<Difference>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Difference): Difference {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string symbol */ 1:
+                    message.symbol = reader.string();
+                    break;
+                case /* string address */ 2:
+                    message.address = reader.string();
+                    break;
+                case /* string reference_hex */ 3:
+                    message.referenceHex = reader.string();
+                    break;
+                case /* string working_hex */ 4:
+                    message.workingHex = reader.string();
+                    break;
+                case /* bool in_reference */ 5:
+                    message.inReference = reader.bool();
+                    break;
+                case /* bool in_working */ 6:
+                    message.inWorking = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Difference, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string symbol = 1; */
+        if (message.symbol !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.symbol);
+        /* string address = 2; */
+        if (message.address !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.address);
+        /* string reference_hex = 3; */
+        if (message.referenceHex !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.referenceHex);
+        /* string working_hex = 4; */
+        if (message.workingHex !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.workingHex);
+        /* bool in_reference = 5; */
+        if (message.inReference !== false)
+            writer.tag(5, WireType.Varint).bool(message.inReference);
+        /* bool in_working = 6; */
+        if (message.inWorking !== false)
+            writer.tag(6, WireType.Varint).bool(message.inWorking);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.Difference
+ */
+export const Difference = new Difference$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PageDiffResponse$Type extends MessageType<PageDiffResponse> {
+    constructor() {
+        super("openape.v1.PageDiffResponse", [
+            { no: 1, name: "reference_page", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 2, name: "working_page", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 3, name: "differences", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => Difference }
+        ]);
+    }
+    create(value?: PartialMessage<PageDiffResponse>): PageDiffResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.referencePage = 0;
+        message.workingPage = 0;
+        message.differences = [];
+        if (value !== undefined)
+            reflectionMergePartial<PageDiffResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PageDiffResponse): PageDiffResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint32 reference_page */ 1:
+                    message.referencePage = reader.uint32();
+                    break;
+                case /* uint32 working_page */ 2:
+                    message.workingPage = reader.uint32();
+                    break;
+                case /* repeated openape.v1.Difference differences */ 3:
+                    message.differences.push(Difference.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PageDiffResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint32 reference_page = 1; */
+        if (message.referencePage !== 0)
+            writer.tag(1, WireType.Varint).uint32(message.referencePage);
+        /* uint32 working_page = 2; */
+        if (message.workingPage !== 0)
+            writer.tag(2, WireType.Varint).uint32(message.workingPage);
+        /* repeated openape.v1.Difference differences = 3; */
+        for (let i = 0; i < message.differences.length; i++)
+            Difference.internalBinaryWrite(message.differences[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.PageDiffResponse
+ */
+export const PageDiffResponse = new PageDiffResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuditEntry$Type extends MessageType<AuditEntry> {
+    constructor() {
+        super("openape.v1.AuditEntry", [
+            { no: 1, name: "at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "actor", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "symbol", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "address", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "before_hex", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "after_hex", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "mode", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AuditEntry>): AuditEntry {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.at = "";
+        message.actor = "";
+        message.symbol = "";
+        message.address = "";
+        message.beforeHex = "";
+        message.afterHex = "";
+        message.mode = "";
+        if (value !== undefined)
+            reflectionMergePartial<AuditEntry>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuditEntry): AuditEntry {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string at */ 1:
+                    message.at = reader.string();
+                    break;
+                case /* string actor */ 2:
+                    message.actor = reader.string();
+                    break;
+                case /* string symbol */ 3:
+                    message.symbol = reader.string();
+                    break;
+                case /* string address */ 4:
+                    message.address = reader.string();
+                    break;
+                case /* string before_hex */ 5:
+                    message.beforeHex = reader.string();
+                    break;
+                case /* string after_hex */ 6:
+                    message.afterHex = reader.string();
+                    break;
+                case /* string mode */ 7:
+                    message.mode = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuditEntry, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string at = 1; */
+        if (message.at !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.at);
+        /* string actor = 2; */
+        if (message.actor !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.actor);
+        /* string symbol = 3; */
+        if (message.symbol !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.symbol);
+        /* string address = 4; */
+        if (message.address !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.address);
+        /* string before_hex = 5; */
+        if (message.beforeHex !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.beforeHex);
+        /* string after_hex = 6; */
+        if (message.afterHex !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.afterHex);
+        /* string mode = 7; */
+        if (message.mode !== "")
+            writer.tag(7, WireType.LengthDelimited).string(message.mode);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.AuditEntry
+ */
+export const AuditEntry = new AuditEntry$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuditList$Type extends MessageType<AuditList> {
+    constructor() {
+        super("openape.v1.AuditList", [
+            { no: 1, name: "entries", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => AuditEntry }
+        ]);
+    }
+    create(value?: PartialMessage<AuditList>): AuditList {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.entries = [];
+        if (value !== undefined)
+            reflectionMergePartial<AuditList>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuditList): AuditList {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated openape.v1.AuditEntry entries */ 1:
+                    message.entries.push(AuditEntry.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuditList, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated openape.v1.AuditEntry entries = 1; */
+        for (let i = 0; i < message.entries.length; i++)
+            AuditEntry.internalBinaryWrite(message.entries[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.AuditList
+ */
+export const AuditList = new AuditList$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UnlockResponse$Type extends MessageType<UnlockResponse> {
+    constructor() {
+        super("openape.v1.UnlockResponse", [
+            { no: 1, name: "channel", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UnlockResponse>): UnlockResponse {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.channel = "";
+        if (value !== undefined)
+            reflectionMergePartial<UnlockResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UnlockResponse): UnlockResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string channel */ 1:
+                    message.channel = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UnlockResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string channel = 1; */
+        if (message.channel !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.channel);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message openape.v1.UnlockResponse
+ */
+export const UnlockResponse = new UnlockResponse$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class VariableList$Type extends MessageType<VariableList> {
     constructor() {
@@ -2103,5 +3121,11 @@ export const OpenApe = new ServiceType("openape.v1.OpenApe", [
     { name: "GetMetrics", options: {}, I: Empty, O: MetricsSnapshot },
     { name: "StreamSamples", serverStreaming: true, options: {}, I: StreamRequest, O: DaqSample },
     { name: "ListVariables", options: {}, I: Empty, O: VariableList },
-    { name: "ListFaults", options: {}, I: Empty, O: FaultList }
+    { name: "ListFaults", options: {}, I: Empty, O: FaultList },
+    { name: "WriteMemory", options: {}, I: WriteRequest, O: WriteResponse },
+    { name: "GetCalPage", options: {}, I: Empty, O: CalPageResponse },
+    { name: "SetCalPage", options: {}, I: SetCalPageRequest, O: CalPageResponse },
+    { name: "DiffPages", options: {}, I: PageDiffRequest, O: PageDiffResponse },
+    { name: "ListAudit", options: {}, I: Empty, O: AuditList },
+    { name: "Unlock", options: {}, I: Empty, O: UnlockResponse }
 ]);

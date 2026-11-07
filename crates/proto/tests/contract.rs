@@ -85,3 +85,61 @@ fn the_generated_client_and_messages_are_named_as_expected() {
     let json = serde_json::to_value(&sample).expect("可序列化");
     assert_eq!(json["payload"], serde_json::json!([1, 2]));
 }
+
+#[test]
+fn write_shapes_keep_addresses_as_strings_and_audit_fields_queryable() {
+    let request = proto::WriteRequest {
+        address: "0x00001000".to_owned(),
+        len: 2,
+        data_hex: "aabb".to_owned(),
+        symbol: "cal.kp".to_owned(),
+        actor: "cli:alice".to_owned(),
+    };
+    let json = serde_json::to_value(&request).expect("可序列化");
+    assert_eq!(json["address"], "0x00001000");
+    assert_eq!(json["symbol"], "cal.kp");
+
+    // 快照与审计字段直接可查：客户端不再自己拼字符串。
+    let response = proto::WriteResponse {
+        symbol: "cal.kp".to_owned(),
+        snapshot_path: "/var/openape/snapshots/1-cal_kp.json".to_owned(),
+        range_checked: true,
+        range: Some(proto::RangeCheck {
+            min: 0.0,
+            max: 10.0,
+            physical: 5.0,
+        }),
+        audited_at: "2026-11-07T00:00:00.000Z".to_owned(),
+        ..proto::WriteResponse::default()
+    };
+    let json = serde_json::to_value(&response).expect("可序列化");
+    assert_eq!(json["range"]["max"], 10.0);
+    assert_eq!(json["range_checked"], true);
+    assert!(
+        json["audited_at"]
+            .as_str()
+            .is_some_and(|at| at.ends_with('Z'))
+    );
+}
+
+#[test]
+fn page_diff_says_which_side_is_missing() {
+    let diff = proto::PageDiffResponse {
+        reference_page: 0,
+        working_page: 1,
+        differences: vec![proto::Difference {
+            symbol: "cal.kp".to_owned(),
+            address: "0x00001000".to_owned(),
+            reference_hex: "0001".to_owned(),
+            working_hex: String::new(),
+            in_reference: true,
+            in_working: false,
+        }],
+    };
+    let json = serde_json::to_value(&diff).expect("可序列化");
+    assert_eq!(json["differences"][0]["in_working"], false);
+    assert_eq!(
+        json["differences"][0]["working_hex"], "",
+        "空串与缺失的区分靠 in_* 布尔，不靠长度"
+    );
+}

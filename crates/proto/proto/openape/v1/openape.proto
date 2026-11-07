@@ -151,6 +151,97 @@ message VariableEntry {
   // 角色。空串表示尚未指定，由用户在界面上选。
   string role = 5;
   bool raw = 6;
+  // 量程。带 A2L 时有值，界面用它提示"可写范围"。
+  RangeCheck range = 7;
+}
+
+// 一段量程与它的实际物理值。
+message RangeCheck {
+  double min = 1;
+  double max = 2;
+  // 本次写入的物理值。仅写入结果里出现，列表里为 0。
+  double physical = 3;
+}
+
+// 写一个标定量。一次只接一个符号一个值——整表写入的入口不提供（D-13）。
+message WriteRequest {
+  // 地址用字符串：JS 的 number 只精确到 2^53。
+  string address = 1;
+  uint32 len = 2;
+  string data_hex = 3;
+  // 符号名。有变量清单时按它取长度、量程与元素类型。
+  string symbol = 4;
+  // 谁发起的，进审计。
+  string actor = 5;
+}
+
+message WriteResponse {
+  string channel = 1;
+  string symbol = 2;
+  string address = 3;
+  string before_hex = 4;
+  string after_hex = 5;
+  // 写前快照文件路径。回滚用它，不必再回读。
+  string snapshot_path = 6;
+  // 是否做过量程校验。仅 ELF 档为 false，界面标 [raw]。
+  bool range_checked = 7;
+  RangeCheck range = 8;
+  // 审计时刻（ISO-8601 UTC）。
+  string audited_at = 9;
+  uint32 len = 10;
+}
+
+// 当前标定页。
+message CalPageResponse {
+  string channel = 1;
+  uint32 page = 2;
+}
+
+message SetCalPageRequest {
+  uint32 page = 1;
+}
+
+// 两页对比。取样范围是变量清单里的标定量，观测量不上页。
+message PageDiffRequest {
+  uint32 reference_page = 1;
+  uint32 working_page = 2;
+}
+
+// 一条页间差异。哪一侧缺失由 `in_*` 说明，空字符串与"值为空"因此不混淆。
+message Difference {
+  string symbol = 1;
+  string address = 2;
+  string reference_hex = 3;
+  string working_hex = 4;
+  bool in_reference = 5;
+  bool in_working = 6;
+}
+
+message PageDiffResponse {
+  uint32 reference_page = 1;
+  uint32 working_page = 2;
+  repeated Difference differences = 3;
+}
+
+// 一条审计记录。字段与 session 的审计日志一一对应，查询不走另一条路。
+message AuditEntry {
+  string at = 1;
+  string actor = 2;
+  string symbol = 3;
+  string address = 4;
+  string before_hex = 5;
+  string after_hex = 6;
+  // 输入档：elf_only 或 with_a2l。两档数值不可混比。
+  string mode = 7;
+}
+
+message AuditList {
+  repeated AuditEntry entries = 1;
+}
+
+// 解锁被保护的资源（GET_SEED + UNLOCK）。成功才返回。
+message UnlockResponse {
+  string channel = 1;
 }
 
 message VariableList {
@@ -190,4 +281,16 @@ service OpenApe {
   rpc ListVariables(Empty) returns (VariableList);
   // 最近的故障。只读 `openape_diag::Fault`，daemon 不自造错误类型。
   rpc ListFaults(Empty) returns (FaultList);
+  // 写一个标定量。带写前读回、量程校验、快照与审计；daemon 持硬件时代写。
+  rpc WriteMemory(WriteRequest) returns (WriteResponse);
+  // 当前标定页。
+  rpc GetCalPage(Empty) returns (CalPageResponse);
+  // 切标定页，切完读回确认。
+  rpc SetCalPage(SetCalPageRequest) returns (CalPageResponse);
+  // 两页差异，只列有差异的地址。
+  rpc DiffPages(PageDiffRequest) returns (PageDiffResponse);
+  // 审计日志。写入与回滚都留痕，界面与 CLI 都查这同一份。
+  rpc ListAudit(Empty) returns (AuditList);
+  // 解锁被保护的资源。解锁是写入的前提，单独成一条命令便于排障。
+  rpc Unlock(Empty) returns (UnlockResponse);
 }

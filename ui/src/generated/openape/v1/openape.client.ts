@@ -4,6 +4,14 @@
 import type { RpcTransport } from "@protobuf-ts/runtime-rpc";
 import type { ServiceInfo } from "@protobuf-ts/runtime-rpc";
 import { OpenApe } from "./openape";
+import type { UnlockResponse } from "./openape";
+import type { AuditList } from "./openape";
+import type { PageDiffResponse } from "./openape";
+import type { PageDiffRequest } from "./openape";
+import type { SetCalPageRequest } from "./openape";
+import type { CalPageResponse } from "./openape";
+import type { WriteResponse } from "./openape";
+import type { WriteRequest } from "./openape";
 import type { FaultList } from "./openape";
 import type { VariableList } from "./openape";
 import type { DaqSample } from "./openape";
@@ -73,6 +81,42 @@ export interface IOpenApeClient {
      * @generated from protobuf rpc: ListFaults
      */
     listFaults(input: Empty, options?: RpcOptions): UnaryCall<Empty, FaultList>;
+    /**
+     * 写一个标定量。带写前读回、量程校验、快照与审计；daemon 持硬件时代写。
+     *
+     * @generated from protobuf rpc: WriteMemory
+     */
+    writeMemory(input: WriteRequest, options?: RpcOptions): UnaryCall<WriteRequest, WriteResponse>;
+    /**
+     * 当前标定页。
+     *
+     * @generated from protobuf rpc: GetCalPage
+     */
+    getCalPage(input: Empty, options?: RpcOptions): UnaryCall<Empty, CalPageResponse>;
+    /**
+     * 切标定页，切完读回确认。
+     *
+     * @generated from protobuf rpc: SetCalPage
+     */
+    setCalPage(input: SetCalPageRequest, options?: RpcOptions): UnaryCall<SetCalPageRequest, CalPageResponse>;
+    /**
+     * 两页差异，只列有差异的地址。
+     *
+     * @generated from protobuf rpc: DiffPages
+     */
+    diffPages(input: PageDiffRequest, options?: RpcOptions): UnaryCall<PageDiffRequest, PageDiffResponse>;
+    /**
+     * 审计日志。写入与回滚都留痕，界面与 CLI 都查这同一份。
+     *
+     * @generated from protobuf rpc: ListAudit
+     */
+    listAudit(input: Empty, options?: RpcOptions): UnaryCall<Empty, AuditList>;
+    /**
+     * 解锁被保护的资源。解锁是写入的前提，单独成一条命令便于排障。
+     *
+     * @generated from protobuf rpc: Unlock
+     */
+    unlock(input: Empty, options?: RpcOptions): UnaryCall<Empty, UnlockResponse>;
 }
 /**
  * daemon 对 CLI 与 UI 提供的服务。
@@ -157,5 +201,59 @@ export class OpenApeClient implements IOpenApeClient, ServiceInfo {
     listFaults(input: Empty, options?: RpcOptions): UnaryCall<Empty, FaultList> {
         const method = this.methods[8], opt = this._transport.mergeOptions(options);
         return stackIntercept<Empty, FaultList>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * 写一个标定量。带写前读回、量程校验、快照与审计；daemon 持硬件时代写。
+     *
+     * @generated from protobuf rpc: WriteMemory
+     */
+    writeMemory(input: WriteRequest, options?: RpcOptions): UnaryCall<WriteRequest, WriteResponse> {
+        const method = this.methods[9], opt = this._transport.mergeOptions(options);
+        return stackIntercept<WriteRequest, WriteResponse>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * 当前标定页。
+     *
+     * @generated from protobuf rpc: GetCalPage
+     */
+    getCalPage(input: Empty, options?: RpcOptions): UnaryCall<Empty, CalPageResponse> {
+        const method = this.methods[10], opt = this._transport.mergeOptions(options);
+        return stackIntercept<Empty, CalPageResponse>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * 切标定页，切完读回确认。
+     *
+     * @generated from protobuf rpc: SetCalPage
+     */
+    setCalPage(input: SetCalPageRequest, options?: RpcOptions): UnaryCall<SetCalPageRequest, CalPageResponse> {
+        const method = this.methods[11], opt = this._transport.mergeOptions(options);
+        return stackIntercept<SetCalPageRequest, CalPageResponse>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * 两页差异，只列有差异的地址。
+     *
+     * @generated from protobuf rpc: DiffPages
+     */
+    diffPages(input: PageDiffRequest, options?: RpcOptions): UnaryCall<PageDiffRequest, PageDiffResponse> {
+        const method = this.methods[12], opt = this._transport.mergeOptions(options);
+        return stackIntercept<PageDiffRequest, PageDiffResponse>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * 审计日志。写入与回滚都留痕，界面与 CLI 都查这同一份。
+     *
+     * @generated from protobuf rpc: ListAudit
+     */
+    listAudit(input: Empty, options?: RpcOptions): UnaryCall<Empty, AuditList> {
+        const method = this.methods[13], opt = this._transport.mergeOptions(options);
+        return stackIntercept<Empty, AuditList>("unary", this._transport, method, opt, input);
+    }
+    /**
+     * 解锁被保护的资源。解锁是写入的前提，单独成一条命令便于排障。
+     *
+     * @generated from protobuf rpc: Unlock
+     */
+    unlock(input: Empty, options?: RpcOptions): UnaryCall<Empty, UnlockResponse> {
+        const method = this.methods[14], opt = this._transport.mergeOptions(options);
+        return stackIntercept<Empty, UnlockResponse>("unary", this._transport, method, opt, input);
     }
 }

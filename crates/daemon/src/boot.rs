@@ -13,7 +13,7 @@ use clap::Parser;
 use openape_bus::CanId;
 use openape_cal_core::{Address, ByteLen};
 use openape_diag::{Domain, Fault, FaultCode, Metrics, Severity};
-use openape_session::{CaptureConfig, Session, SessionConfig};
+use openape_session::{CaptureConfig, Session, SessionConfig, WriteContext};
 use openape_xcp::{DaqListSpec, DaqSignal};
 
 use openape_proto as proto;
@@ -51,11 +51,28 @@ pub struct Args {
     /// A2L 文件。与 ELF 同时给时顺带做交叉校验，冲突进故障列表。
     #[arg(long)]
     pub a2l: Option<PathBuf>,
+    /// 审计日志与写前快照的目录。默认临时目录下的 `openape`。
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
+}
+
+/// 加载出来的描述信息：给界面的清单，加上服务自己用的变量树与输入档。
+///
+/// 两者出自同一次解析：分开解析会让"界面显示的地址"与"实际写入的地址"有
+/// 机会不一致。
+#[derive(Debug, Clone)]
+pub struct LoadedVariables {
+    /// 给界面的清单。
+    pub list: proto::VariableList,
+    /// 变量树。写入按符号查长度、量程与元素类型都靠它。
+    pub tree: Option<openape_cal_core::VariableTree>,
+    /// 输入档。只有 A2L 才算带语义。
+    pub mode: openape_cal_core::SourceMode,
 }
 
 /// 加载变量清单。两个文件都不给时返回 `None`——界面据此说明"未加载描述
 /// 文件"，而不是显示一个空表格让人以为 ECU 没有变量。
-pub fn load_variables(elf: Option<&Path>, a2l: Option<&Path>) -> Option<proto::VariableList> {
+pub fn load_variables(elf: Option<&Path>, a2l: Option<&Path>) -> Option<LoadedVariables> {
     if elf.is_none() && a2l.is_none() {
         return None;
     }
@@ -71,10 +88,20 @@ pub fn load_variables(elf: Option<&Path>, a2l: Option<&Path>) -> Option<proto::V
         );
     }
     let primary = elf_tree.as_ref().or(a2l_tree.as_ref());
-    Some(proto::VariableList {
-        variables: primary.map(entries).unwrap_or_default(),
-        notes,
-        loaded: primary.is_some(),
+    // 只有 A2L 带语义；单独的 ELF 一律按 raw 对待（D-13）。
+    let mode = if a2l_tree.is_some() {
+        openape_cal_core::SourceMode::WithA2l
+    } else {
+        openape_cal_core::SourceMode::ElfOnly
+    };
+    Some(LoadedVariables {
+        list: proto::VariableList {
+            variables: primary.map(entries).unwrap_or_default(),
+            notes,
+            loaded: primary.is_some(),
+        },
+        tree: primary.cloned(),
+        mode,
     })
 }
 
@@ -128,6 +155,11 @@ fn entries(tree: &openape_cal_core::VariableTree) -> Vec<proto::VariableEntry> {
                 .map(|role| format!("{role:?}"))
                 .unwrap_or_default(),
             raw: variable.semantics().is_empty(),
+            range: variable.semantics().range().map(|range| proto::RangeCheck {
+                min: range.min(),
+                max: range.max(),
+                physical: 0.0,
+            }),
         })
         .collect()
 }
@@ -232,12 +264,38 @@ pub async fn build_state(args: &Args, metrics: Arc<Metrics>) -> Result<Arc<AppSt
         None => AppState::idle(metrics),
     };
     // 变量清单与是否接管硬件无关：可以只看描述文件不连 ECU。
-    Ok(Arc::new(
-        match load_variables(args.elf.as_deref(), args.a2l.as_deref()) {
-            Some(variables) => state.with_variables(variables),
-            None => state,
-        },
-    ))
+    let state = match load_variables(args.elf.as_deref(), args.a2l.as_deref()) {
+        Some(loaded) => {
+            let mode = loaded.mode;
+            let tree = loaded.tree;
+            let state = state.with_variables(loaded.list);
+            match tree {
+                Some(tree) => state.with_tree(tree, mode),
+                None => state,
+            }
+        }
+        None => state,
+    };
+    // 写入上下文与清单无关：没有清单也能按地址 raw 写。
+    let context = WriteContext::open(&state_dir(args), "daemon", state_mode(&state))?;
+    Ok(Arc::new(state.with_write_context(context)))
+}
+
+/// 审计与快照放在哪里。默认走临时目录：这两类数据是过程记录，不该混进
+/// 用户的工程目录。
+pub fn state_dir(args: &Args) -> PathBuf {
+    args.state_dir
+        .clone()
+        .unwrap_or_else(|| std::env::temp_dir().join("openape"))
+}
+
+/// 当前状态的输入档：有变量树且有 A2L 才算带语义。
+fn state_mode(state: &AppState) -> openape_cal_core::SourceMode {
+    if state.tree().is_some() {
+        openape_cal_core::SourceMode::WithA2l
+    } else {
+        openape_cal_core::SourceMode::ElfOnly
+    }
 }
 
 /// 组装好的路由与已绑定的监听口。
@@ -419,12 +477,15 @@ mod tests {
         // 没有这个文件"，而不是画一张空表格让人以为 ECU 没有变量。
         let missing = std::path::Path::new("/definitely/not/here.elf");
         let list = load_variables(Some(missing), None).expect("给了文件就该有清单");
-        assert!(!list.loaded);
-        assert!(list.variables.is_empty());
+        assert!(!list.list.loaded);
+        assert!(list.list.variables.is_empty());
         assert!(
-            list.notes.iter().any(|note| note.contains("读 ELF 失败")),
+            list.list
+                .notes
+                .iter()
+                .any(|note| note.contains("读 ELF 失败")),
             "失败原因要留在提示里：{:?}",
-            list.notes
+            list.list.notes
         );
     }
 
@@ -432,11 +493,11 @@ mod tests {
     fn unreadable_a2l_is_reported_too() {
         let missing = std::path::Path::new("/definitely/not/here.a2l");
         let list = load_variables(None, Some(missing)).expect("给了文件就该有清单");
-        assert!(!list.loaded);
+        assert!(!list.list.loaded);
         assert!(
-            list.notes.iter().any(|note| note.contains("读不了")),
+            list.list.notes.iter().any(|note| note.contains("读不了")),
             "失败原因要留在提示里：{:?}",
-            list.notes
+            list.list.notes
         );
     }
 
@@ -454,14 +515,17 @@ mod tests {
             "/../../fixtures/elf/test.elf"
         ));
         let list = load_variables(Some(path), None).expect("给了文件就该有清单");
-        assert!(list.loaded);
-        assert!(!list.variables.is_empty());
+        assert!(list.list.loaded);
+        assert!(!list.list.variables.is_empty());
         assert!(
-            list.variables.iter().all(|entry| entry.raw),
+            list.list.variables.iter().all(|entry| entry.raw),
             "仅 ELF 档每条都是裸值，不填默认语义"
         );
         assert!(
-            list.variables.iter().all(|entry| entry.role.is_empty()),
+            list.list
+                .variables
+                .iter()
+                .all(|entry| entry.role.is_empty()),
             "角色留给用户，daemon 不替他判定"
         );
     }
@@ -478,9 +542,9 @@ mod tests {
         ));
         let list = load_variables(Some(elf), Some(a2l)).expect("给了文件就该有清单");
         assert!(
-            !list.notes.iter().any(|note| note.contains("不一致")),
+            !list.list.notes.iter().any(|note| note.contains("不一致")),
             "同一来源的两份文件不该报冲突：{:?}",
-            list.notes
+            list.list.notes
         );
     }
 

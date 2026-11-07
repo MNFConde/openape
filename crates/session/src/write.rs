@@ -71,6 +71,15 @@ impl WriteContext {
     pub fn mode(&self) -> SourceMode {
         self.mode
     }
+
+    /// 换一个发起人。审计要记"谁"，而谁由每个请求带进来，不能在建上下文时
+    /// 就固定下来。
+    pub fn with_actor(&self, actor: impl Into<String>) -> Self {
+        Self {
+            actor: actor.into(),
+            ..self.clone()
+        }
+    }
 }
 
 /// 一次写入的结果。

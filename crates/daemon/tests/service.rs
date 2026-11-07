@@ -161,9 +161,10 @@ async fn variables_are_served_without_any_hardware() {
         env!("CARGO_MANIFEST_DIR"),
         "/../../fixtures/elf/test.elf"
     ));
-    let variables = boot::load_variables(Some(elf), None).expect("给了文件就该有清单");
+    let loaded = boot::load_variables(Some(elf), None).expect("给了文件就该有清单");
     let state = Arc::new(
-        openape_daemon::service::AppState::idle(Arc::new(Metrics::new())).with_variables(variables),
+        openape_daemon::service::AppState::idle(Arc::new(Metrics::new()))
+            .with_variables(loaded.list),
     );
     let service = OpenApeService::new(state);
 
@@ -216,4 +217,140 @@ async fn faults_are_the_diag_type_mapped_not_reinvented() {
     assert_eq!(list.faults[0].message, "测试故障");
     assert_eq!(list.faults[0].hint, "先做这个");
     assert!(list.faults[0].code.contains('S') || !list.faults[0].code.is_empty());
+}
+
+/// 建一份带变量树与写入上下文的状态：`--elf` / `--a2l` 那条启动路径的等价物。
+async fn state_with_descriptors(
+    channel: &str,
+    elf: &std::path::Path,
+) -> Arc<openape_daemon::service::AppState> {
+    let loaded = boot::load_variables(Some(elf), None).expect("给了文件就该有清单");
+    let dir = std::env::temp_dir().join(format!(
+        "openape-daemon-write-{}-{:02x}",
+        std::process::id(),
+        channel.len()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let context = openape_session::WriteContext::open(&dir, "daemon", loaded.mode).expect("上下文");
+    // 采集列表必给：daemon 接管通道时一定要有采样项，写命令不靠它。
+    let samples = [SampleSpec {
+        address: 0x2000,
+        len: 2,
+    }];
+    let state = boot::open_session(channel, 0x600, 0x601, &samples, Arc::new(Metrics::new()))
+        .await
+        .expect("启动应成功")
+        .with_variables(loaded.list);
+    let state = match loaded.tree {
+        Some(tree) => state.with_tree(tree, loaded.mode),
+        None => state,
+    };
+    Arc::new(state.with_write_context(context))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn write_memory_goes_through_the_daemon_and_leaves_an_audit_record() {
+    let Some(vcan) = VcanGuard::create("dw") else {
+        eprintln!("跳过：本机没有可用的 vcan");
+        return;
+    };
+    let channel = vcan.name().to_owned();
+
+    let bus = Arc::new(SocketCanBus::open(&channel).expect("能打开 vcan"));
+    let mut ecu = SimEcu::new(SimEcuConfig::default_ids());
+    ecu.poke(0x1000, &[0x00, 0x01, 0x00, 0x02]);
+    let slave = tokio::spawn(openape_sim_ecu::serve(ecu, bus));
+
+    // fixtures/elf/test.elf 里的第一条标定量是 u16，够做一次按符号写。
+    let elf = std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/elf/test.elf"
+    ));
+    let state = state_with_descriptors(&channel, elf).await;
+    let service = OpenApeService::new(Arc::clone(&state));
+
+    let list = service
+        .list_variables(Request::new(proto::Empty {}))
+        .await
+        .expect("要能回答")
+        .into_inner();
+    let entry = list
+        .variables
+        .iter()
+        .find(|entry| entry.elem == "U16")
+        .expect("ELF 里应有 u16 变量")
+        .clone();
+
+    let response = service
+        .write_memory(Request::new(proto::WriteRequest {
+            address: format!("0x{:08x}", entry.address),
+            len: 2,
+            data_hex: "beef".to_owned(),
+            symbol: entry.symbol.clone(),
+            actor: "test:alice".to_owned(),
+        }))
+        .await
+        .expect("daemon 代写应成功")
+        .into_inner();
+
+    assert_eq!(response.symbol, entry.symbol);
+    assert_eq!(response.len, 2);
+    assert!(!response.snapshot_path.is_empty(), "要留下写前快照");
+    assert!(!response.range_checked, "仅 ELF 档没有量程，标 raw");
+    assert!(response.audited_at.ends_with('Z'), "审计时刻是 ISO-8601");
+
+    let audit = service
+        .list_audit(Request::new(proto::Empty {}))
+        .await
+        .expect("审计可查")
+        .into_inner();
+    assert_eq!(audit.entries.len(), 1);
+    assert_eq!(audit.entries[0].actor, "test:alice");
+    assert_eq!(audit.entries[0].mode, "elf_only");
+    assert_eq!(audit.entries[0].after_hex, "be ef");
+
+    slave.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn write_memory_refuses_a_symbol_that_is_not_at_that_address() {
+    let Some(vcan) = VcanGuard::create("dx") else {
+        eprintln!("跳过：本机没有可用的 vcan");
+        return;
+    };
+    let channel = vcan.name().to_owned();
+    let bus = Arc::new(SocketCanBus::open(&channel).expect("能打开 vcan"));
+    let slave = tokio::spawn(openape_sim_ecu::serve(
+        SimEcu::new(SimEcuConfig::default_ids()),
+        bus,
+    ));
+
+    let elf = std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/elf/test.elf"
+    ));
+    let state = state_with_descriptors(&channel, elf).await;
+    let service = OpenApeService::new(state);
+
+    let list = service
+        .list_variables(Request::new(proto::Empty {}))
+        .await
+        .expect("要能回答")
+        .into_inner();
+    let entry = list.variables.first().expect("应有变量").clone();
+
+    let err = service
+        .write_memory(Request::new(proto::WriteRequest {
+            address: "0x00004000".to_owned(),
+            len: 2,
+            data_hex: "0001".to_owned(),
+            symbol: entry.symbol.clone(),
+            actor: String::new(),
+        }))
+        .await
+        .expect_err("符号与地址不符要拒绝");
+    assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    assert!(err.message().contains("首地址"), "{err}");
+
+    slave.abort();
 }

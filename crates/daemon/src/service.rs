@@ -5,10 +5,10 @@
 
 use std::sync::Arc;
 
-use openape_cal_core::{Address, ByteLen};
+use openape_cal_core::{Address, ByteLen, SourceMode, Symbol, Variable, VariableTree, hex};
 use openape_diag::{Fault, Metrics};
 use openape_proto as proto;
-use openape_session::{CaptureConfig, DaqCapture, DaqStream, Session, list_channels};
+use openape_session::{CaptureConfig, DaqCapture, DaqStream, Session, WriteContext, list_channels};
 use openape_xcp::ConnectInfo;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
@@ -29,6 +29,12 @@ pub struct AppState {
     info: Option<ConnectInfo>,
     /// 已加载的变量清单。未加载描述文件时为空，界面据此说明原因。
     variables: Option<Arc<proto::VariableList>>,
+    /// 变量树。写入按符号查长度、量程与元素类型靠它；界面清单是它的投影。
+    tree: Option<Arc<VariableTree>>,
+    /// 输入档。两档数值不可混比，页对比要用同一个标记。
+    mode: SourceMode,
+    /// 写入上下文：审计日志与快照目录。
+    write_context: Option<WriteContext>,
     /// 最近的故障。只存 `openape_diag::Fault` 的映射结果，不另造类型。
     faults: Arc<std::sync::Mutex<Vec<proto::FaultEvent>>>,
 }
@@ -44,6 +50,9 @@ impl AppState {
             channel: None,
             info: None,
             variables: None,
+            tree: None,
+            mode: SourceMode::ElfOnly,
+            write_context: None,
             faults: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
@@ -64,6 +73,9 @@ impl AppState {
             channel: Some(channel),
             info: Some(info),
             variables: None,
+            tree: None,
+            mode: SourceMode::ElfOnly,
+            write_context: None,
             faults: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
@@ -124,10 +136,87 @@ impl AppState {
         self
     }
 
+    /// 装上变量树与输入档。写入按符号查长度、量程与元素类型都靠它。
+    pub fn with_tree(mut self, tree: VariableTree, mode: SourceMode) -> Self {
+        self.tree = Some(Arc::new(tree));
+        self.mode = mode;
+        self
+    }
+
+    /// 装上写入上下文（审计日志与快照目录）。
+    pub fn with_write_context(mut self, context: WriteContext) -> Self {
+        self.write_context = Some(context);
+        self
+    }
+
+    /// 变量树。
+    pub fn tree(&self) -> Option<&Arc<VariableTree>> {
+        self.tree.as_ref()
+    }
+
+    /// 写入上下文。
+    pub fn write_context(&self) -> Option<&WriteContext> {
+        self.write_context.as_ref()
+    }
+
+    /// 取会话；没接管硬件时给出可操作的拒绝。
+    fn require_session(&self) -> Result<&tokio::sync::Mutex<Session>, Status> {
+        self.session.as_ref().ok_or_else(|| {
+            Status::failed_precondition(
+                "daemon 没有接管通道，无法代做这条命令；直接连设备，或重启 daemon 并带上 --channel",
+            )
+        })
+    }
+
+    /// 让采集泵让开接收端。守卫存活期间泵是停的，丢弃即恢复——不靠调用方
+    /// 记得写恢复，那条路径出错就会永久停采。
+    fn pause_capture(&self) -> CapturePause<'_> {
+        let capture = self.capture.as_ref();
+        if let Some(capture) = capture {
+            capture.set_paused(true);
+        }
+        CapturePause { capture }
+    }
+
+    /// 审计日志记录。
+    fn audit_entries(&self) -> Vec<proto::AuditEntry> {
+        let Some(context) = self.write_context.as_ref() else {
+            return Vec::new();
+        };
+        context
+            .audit()
+            .records()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|record| proto::AuditEntry {
+                at: record.at.to_string(),
+                actor: record.actor,
+                symbol: record.symbol.to_string(),
+                address: record.address.to_string(),
+                before_hex: spaced_hex(&record.before),
+                after_hex: spaced_hex(&record.after),
+                mode: mode_label(record.mode).to_owned(),
+            })
+            .collect()
+    }
+
     fn stream(&self) -> &DaqStream {
         match self.capture.as_ref() {
             Some(capture) => capture.stream(),
             None => &self.idle,
+        }
+    }
+}
+
+/// 采集暂停守卫。丢弃即恢复。
+struct CapturePause<'a> {
+    capture: Option<&'a DaqCapture>,
+}
+
+impl Drop for CapturePause<'_> {
+    fn drop(&mut self) {
+        if let Some(capture) = self.capture {
+            capture.set_paused(false);
         }
     }
 }
@@ -296,6 +385,159 @@ impl proto::open_ape_server::OpenApe for OpenApeService {
 
     type StreamSamplesStream = ReceiverStream<Result<proto::DaqSample, Status>>;
 
+    async fn write_memory(
+        &self,
+        request: Request<proto::WriteRequest>,
+    ) -> Result<Response<proto::WriteResponse>, Status> {
+        let request = request.into_inner();
+        let context = self.state.write_context().cloned().ok_or_else(|| {
+            Status::failed_precondition(
+                "daemon 没有写入上下文（未加载描述文件也没给 --state-dir），无法记录快照与审计",
+            )
+        })?;
+        let actor = if request.actor.trim().is_empty() {
+            "daemon".to_owned()
+        } else {
+            request.actor.trim().to_owned()
+        };
+        let address = parse_address(&request.address)?;
+        let data = parse_hex_bytes(&request.data_hex)?;
+        let target = resolve_target(self.state.tree(), &request.symbol, address, data.len())?;
+        if target.address() != address {
+            return Err(Status::invalid_argument(format!(
+                "符号 {} 在 {address} 上不存在：它记录的首地址是 {}",
+                target.symbol(),
+                target.address()
+            )));
+        }
+
+        let _pause = self.state.pause_capture();
+        let session = self.state.require_session()?;
+        let mut guard = session.lock().await;
+        let written = guard
+            .write_one(&target, &data, &context.with_actor(actor))
+            .await
+            .map_err(to_status)?;
+        drop(guard);
+
+        let (range_checked, range) = match written.range {
+            openape_session::RangeVerdict::Within { physical, min, max } => {
+                (true, Some(proto::RangeCheck { min, max, physical }))
+            }
+            openape_session::RangeVerdict::Unchecked => (false, None),
+        };
+        Ok(Response::new(proto::WriteResponse {
+            channel: self.state.channel().unwrap_or_default().to_owned(),
+            symbol: written.symbol.to_string(),
+            address: written.address.to_string(),
+            before_hex: spaced_hex(&written.before),
+            after_hex: spaced_hex(&written.after),
+            snapshot_path: written.snapshot.display().to_string(),
+            range_checked,
+            range,
+            audited_at: written.audit.at.to_string(),
+            len: u32::try_from(written.after.len()).unwrap_or(u32::MAX),
+        }))
+    }
+
+    async fn get_cal_page(
+        &self,
+        _request: Request<proto::Empty>,
+    ) -> Result<Response<proto::CalPageResponse>, Status> {
+        let _pause = self.state.pause_capture();
+        let session = self.state.require_session()?;
+        let mut guard = session.lock().await;
+        let page = guard.cal_page().await.map_err(to_status)?;
+        drop(guard);
+        Ok(Response::new(proto::CalPageResponse {
+            channel: self.state.channel().unwrap_or_default().to_owned(),
+            page: u32::from(page),
+        }))
+    }
+
+    async fn set_cal_page(
+        &self,
+        request: Request<proto::SetCalPageRequest>,
+    ) -> Result<Response<proto::CalPageResponse>, Status> {
+        let page = u8::try_from(request.into_inner().page)
+            .map_err(|_| Status::invalid_argument("页号超出 0..=255"))?;
+        let _pause = self.state.pause_capture();
+        let session = self.state.require_session()?;
+        let mut guard = session.lock().await;
+        guard.set_cal_page(page).await.map_err(to_status)?;
+        let actual = guard.cal_page().await.map_err(to_status)?;
+        drop(guard);
+        Ok(Response::new(proto::CalPageResponse {
+            channel: self.state.channel().unwrap_or_default().to_owned(),
+            page: u32::from(actual),
+        }))
+    }
+
+    async fn diff_pages(
+        &self,
+        request: Request<proto::PageDiffRequest>,
+    ) -> Result<Response<proto::PageDiffResponse>, Status> {
+        let request = request.into_inner();
+        let tree = self.state.tree().cloned().ok_or_else(|| {
+            Status::failed_precondition(
+                "没有变量清单，页对比无从取样：启动 daemon 时给 --elf 或 --a2l",
+            )
+        })?;
+        let reference = u8::try_from(request.reference_page)
+            .map_err(|_| Status::invalid_argument("参考页号超出 0..=255"))?;
+        let working = u8::try_from(request.working_page)
+            .map_err(|_| Status::invalid_argument("工作页号超出 0..=255"))?;
+        let mode = self.state.mode;
+
+        let _pause = self.state.pause_capture();
+        let session = self.state.require_session()?;
+        let mut guard = session.lock().await;
+        let differences = guard
+            .diff_pages(&tree, reference, working, mode)
+            .await
+            .map_err(to_status)?;
+        drop(guard);
+
+        Ok(Response::new(proto::PageDiffResponse {
+            reference_page: u32::from(reference),
+            working_page: u32::from(working),
+            differences: differences
+                .into_iter()
+                .map(|difference| proto::Difference {
+                    symbol: difference.symbol().to_string(),
+                    address: difference.address().to_string(),
+                    reference_hex: difference.left().map_or_else(String::new, spaced_hex),
+                    working_hex: difference.right().map_or_else(String::new, spaced_hex),
+                    in_reference: difference.left().is_some(),
+                    in_working: difference.right().is_some(),
+                })
+                .collect(),
+        }))
+    }
+
+    async fn list_audit(
+        &self,
+        _request: Request<proto::Empty>,
+    ) -> Result<Response<proto::AuditList>, Status> {
+        Ok(Response::new(proto::AuditList {
+            entries: self.state.audit_entries(),
+        }))
+    }
+
+    async fn unlock(
+        &self,
+        _request: Request<proto::Empty>,
+    ) -> Result<Response<proto::UnlockResponse>, Status> {
+        let _pause = self.state.pause_capture();
+        let session = self.state.require_session()?;
+        let mut guard = session.lock().await;
+        guard.unlock().await.map_err(to_status)?;
+        drop(guard);
+        Ok(Response::new(proto::UnlockResponse {
+            channel: self.state.channel().unwrap_or_default().to_owned(),
+        }))
+    }
+
     async fn stream_samples(
         &self,
         _request: Request<proto::StreamRequest>,
@@ -354,6 +596,68 @@ fn parse_address(raw: &str) -> Result<Address, Status> {
     parsed
         .map(Address::new)
         .map_err(|_| Status::invalid_argument(format!("地址 {raw} 不是 32 位整数")))
+}
+
+/// 十六进制字节串。空格可有可无，`0x` 前缀不接受——那是地址的写法。
+fn parse_hex_bytes(raw: &str) -> Result<Vec<u8>, Status> {
+    let compact: String = raw.chars().filter(|ch| !ch.is_whitespace()).collect();
+    let bytes = hex::decode(&compact)
+        .ok_or_else(|| Status::invalid_argument(format!("数据 {raw:?} 不是十六进制字节串")))?;
+    if bytes.is_empty() {
+        return Err(Status::invalid_argument(
+            "数据为空：写 0 字节不会改变任何东西",
+        ));
+    }
+    Ok(bytes)
+}
+
+/// 字节串对外统一写作 `de ad be ef`：与既有 `ReadResponse` 一致。
+fn spaced_hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// 输入档的对外标记。
+fn mode_label(mode: SourceMode) -> &'static str {
+    match mode {
+        SourceMode::ElfOnly => "elf_only",
+        SourceMode::WithA2l => "with_a2l",
+    }
+}
+
+/// 决定这次写的是哪个变量。
+///
+/// 有清单就按符号查（长度、量程、元素类型都以清单为准）；没有符号时按地址
+/// 与长度造一条 `u8` 数组形状的临时变量——那是 raw 写入，量程不校验，界面
+/// 会标 `[raw]`。
+fn resolve_target(
+    tree: Option<&Arc<VariableTree>>,
+    symbol: &str,
+    address: Address,
+    len: usize,
+) -> Result<Variable, Status> {
+    let len_u16 = u16::try_from(len)
+        .ok()
+        .and_then(ByteLen::new)
+        .ok_or_else(|| Status::invalid_argument(format!("长度 {len} 不合法")))?;
+    if let (Some(tree), false) = (tree, symbol.trim().is_empty()) {
+        let symbol = Symbol::new(symbol.trim())
+            .ok_or_else(|| Status::invalid_argument(format!("符号 {symbol:?} 不合法")))?;
+        return tree
+            .get(&symbol)
+            .cloned()
+            .ok_or_else(|| Status::invalid_argument(format!("变量清单里没有 {symbol}")));
+    }
+    let fallback = Symbol::new(symbol.trim())
+        .or_else(|| Symbol::new("raw"))
+        .ok_or_else(|| Status::invalid_argument(format!("符号 {symbol:?} 不合法")))?;
+    let dims = u32::from(len_u16.get());
+    Variable::new(fallback, address, openape_cal_core::ElemType::U8)
+        .with_dims(vec![dims])
+        .ok_or_else(|| Status::invalid_argument("长度不合法"))
 }
 
 /// 把域故障翻成 gRPC 状态。消息带上原始提示，客户端不必再查表。
