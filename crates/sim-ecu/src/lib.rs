@@ -65,6 +65,8 @@ pub struct SimEcu {
     daq: DaqState,
     /// 资源保护算法。`None` 表示不保护，是自研从站的默认形态。
     protection: Option<Arc<dyn SeedKey>>,
+    /// 怪癖扩展点（D-06）。默认是全规范的空声明——没有怪的 ECU 不碰它。
+    quirks: Box<dyn openape_cal_core::quirk::Quirks>,
     /// 已发出、尚未用掉的种子。`None` 表示没取过或已被用掉。
     pending_seed: Option<Vec<u8>>,
     /// 取过几次种子。种子随次数变化，重放上一次的密钥不会成功。
@@ -84,10 +86,19 @@ impl SimEcu {
             running: false,
             daq: DaqState::default(),
             protection: None,
+            quirks: Box::new(openape_cal_core::quirk::QuirkConfig::default().quirks()),
             pending_seed: None,
             seed_counter: 0,
             unlocked: false,
         }
+    }
+
+    /// 注入怪癖（M5-07）：把一份声明式配置填进从站行为。注入路径与
+    /// master 侧消费同一份 [`openape_cal_core::quirk::QuirkConfig`]——
+    /// 类 ECU 差异在两侧都只是配置，不改代码。
+    pub fn with_quirks(mut self, config: openape_cal_core::quirk::QuirkConfig) -> Self {
+        self.quirks = Box::new(config.quirks());
+        self
     }
 
     /// 启用资源保护。解锁前写入一律被拒——这是真 ECU 的常态，缓冲器等由
@@ -144,6 +155,11 @@ impl SimEcu {
             let start = entry.address as usize;
             let end = start.checked_add(usize::from(entry.size))?;
             data.extend_from_slice(memory.get(start..end)?);
+        }
+        if self.quirks.pad_dtos() && data.len() < 8 {
+            // 怪癖：DTO 补齐到 max_cto，缺的字节按配置填。master 按条目
+            // 切载荷，填充落在条目区外，不影响解析。
+            data.resize(8, self.quirks.dto_padding());
         }
         CanFrame::new(id, data)
     }
@@ -238,8 +254,17 @@ impl SimEcu {
                     err(ErrorCode::OutOfRange)
                 }
             }
-            // pyXCP 取 response[2]（PID 与保留位之后），单字节标准响应它读不到第 3 字节
-            Command::GetCalPage { .. } => ok(code, vec![0x00, 0x00, self.page as u8]),
+            // pyXCP 取 response[2]（PID 与保留位之后），单字节标准响应它读不到第 3 字节。
+            // 回显格式是怪癖点：标准带两个保留字节，短响应只回页号（M5-07）。
+            Command::GetCalPage { .. } => {
+                let response = match self.quirks.page_echo() {
+                    openape_cal_core::quirk::PageEcho::Standard => {
+                        vec![0x00, 0x00, self.page as u8]
+                    }
+                    openape_cal_core::quirk::PageEcho::Short => vec![self.page as u8],
+                };
+                ok(code, response)
+            }
             Command::SetCalPage { page, segment, .. } => {
                 if segment != 0 || page as usize >= PAGE_COUNT {
                     return err(ErrorCode::PageNotValid);
@@ -542,6 +567,32 @@ mod tests {
     fn send(ecu: &mut SimEcu, command: Command) -> Response {
         let frame = command.encode().expect("测试命令都能编码");
         ecu.handle(&frame)
+    }
+
+    /// 怪癖注入改变 GET_CAL_PAGE 响应格式（M5-07）。无 vcan 的环境（CI
+    /// 一部分机器）也要能跑这一层；总线级的复现在 tests/vcan_quirk.rs。
+    #[test]
+    fn injected_page_echo_changes_the_response_shape() {
+        let mut plain = SimEcu::new(SimEcuConfig::default_ids());
+        plain.poke(0x1000, &[0x11, 0x22]);
+        let get_cal_page = || Command::GetCalPage {
+            mode: 0,
+            segment: 0,
+        };
+        assert_eq!(
+            expect_ok(send(&mut plain, get_cal_page()), CommandCode::GetCalPage),
+            vec![0x00, 0x00, 0],
+            "无怪癖走标准格式"
+        );
+
+        let quirky = openape_cal_core::quirk::QuirkConfig::from_toml("page_echo = \"short\"\n")
+            .expect("配置合法");
+        let mut short = SimEcu::new(SimEcuConfig::default_ids()).with_quirks(quirky);
+        assert_eq!(
+            expect_ok(send(&mut short, get_cal_page()), CommandCode::GetCalPage),
+            vec![0],
+            "注入后只回页号"
+        );
     }
 
     /// 期望正响应。`_command` 留作调用处可读性的标签：响应不再回显命令码，

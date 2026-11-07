@@ -49,7 +49,9 @@ pub struct QuirkConfig {
 
 /// 配置加载失败。toml 的错误已带行列号与原因，这里补一句可操作的指引。
 #[derive(Debug, Error)]
-#[error("怪癖配置解析失败：{source}\n提示：字段只有 pad_dtos / dto_padding / page_echo；page_echo 取 standard 或 short；完整示例见 openape-cal-core::QuirkConfig 文档")]
+#[error(
+    "怪癖配置解析失败：{source}\n提示：字段只有 pad_dtos / dto_padding / page_echo；page_echo 取 standard 或 short；完整示例见 openape-cal-core::QuirkConfig 文档"
+)]
 pub struct QuirkError {
     #[source]
     source: toml::de::Error,
@@ -73,7 +75,7 @@ impl QuirkConfig {
 /// 规范默认直接落在方法缺省实现上——没配怪的 ECU 拿到的全是标准行为，
 /// 具体怪癖由 [`ConfiguredQuirks`] 用配置覆盖。新差异面 = 加一个带默认
 /// 实现的方法 + 配置字段，消费方各自接线。
-pub trait Quirks: Send + Sync {
+pub trait Quirks: Send + Sync + std::fmt::Debug {
     /// DTO 是否补齐到 max_cto。默认 false（实长帧）。
     fn pad_dtos(&self) -> bool {
         false
@@ -118,11 +120,10 @@ mod tests {
     #[test]
     fn config_alone_changes_the_behavior() {
         let standard = QuirkConfig::from_toml("").expect("空配置即全默认").quirks();
-        let odd = QuirkConfig::from_toml(
-            "pad_dtos = true\ndto_padding = 255\npage_echo = \"short\"\n",
-        )
-        .expect("示例配置必须能加载")
-        .quirks();
+        let odd =
+            QuirkConfig::from_toml("pad_dtos = true\ndto_padding = 255\npage_echo = \"short\"\n")
+                .expect("示例配置必须能加载")
+                .quirks();
         let odd: Box<dyn Quirks> = Box::new(odd);
 
         assert!(!standard.pad_dtos());
