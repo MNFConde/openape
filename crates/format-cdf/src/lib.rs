@@ -14,6 +14,21 @@
 //!    允许子元素写成常量表（见 `parse`），**属性一律忽略**——2.0.0 的属性
 //!    （`C`/`S`/`T`/`VIEW` 等）是给文档与工具用的一致性标记，对取值没有影响。
 //!
+//! 三处按真实导出件（`.cdfx`）的实际写法放宽，都有测试钉住：
+//!
+//! - **编码**：文件不是 UTF-8 时按 ISO-8859-1 解码并给提示，不然一个 `°C` 就能
+//!   让整份合法文件读不了（见 [`parse_file`]）。
+//! - **取值落点有两处**：`SW-INSTANCE` 直属的 `SW-VALUE-CONT`，或变体包裹
+//!   `SW-INSTANCE-PROPS-VARIANTS/SW-INSTANCE-PROPS-VARIANT/SW-VALUE-CONT`。
+//!   多个变体只取第一个并明说——变体按 VCD 条件区分，猜错就是写错值。
+//! - **`CATEGORY` 越出 16 个枚举时不拒**：真实文件里出现过笔误
+//!   （`DEPEDNDENT_VALUE`），拒掉整份文件会让用户拿不到其余几百条取值。改为
+//!   类别留空 + 警告点名原文，**不猜**它本该是哪个值。
+//!
+//! 尚未支持（记录在案，未动工）：`SW-AXIS-CONTS` 里的**轴引用**
+//! （`SW-INSTANCE-REF` 指向别的实例）。目前轴容器整个跳过并提示，于是曲线与
+//! map 只导入取值、没有自带轴。
+//!
 //! 名字映射的口径：CDF 用短名定位标定量，嵌套 `SW-INSTANCE`（结构体成员）用
 //! `.` 连接成路径。A2L 的标定量名与 ELF 符号名都是扁平标识符，所以**路径是
 //! 一等公民**，映射按完整路径比，不做"取末段猜"的模糊匹配——猜错的代价是把
@@ -277,6 +292,10 @@ impl CdfDocument {
         Self { entries, notes }
     }
 
+    pub(crate) fn push_note(&mut self, note: Notice) {
+        self.notes.push(note);
+    }
+
     pub(crate) fn entry(system: String, path: String, category: Option<Category>) -> EntryBuilder {
         EntryBuilder {
             system,
@@ -319,13 +338,33 @@ pub fn parse_str(text: &str) -> Result<CdfDocument, Error> {
 }
 
 /// 解析一份 CDF 文件。
+///
+/// **编码**：真实导出件常写成 `ISO-8859-1`（ETAS 系工具如此），先按 UTF-8 读，
+/// 不是 UTF-8 就按 ISO-8859-1 逐字节解码并给一条提示——不这么做的话，一份完全
+/// 合法的文件会因为第 200 行有个 `°C` 而整份读不了。
 pub fn parse_file(path: impl AsRef<std::path::Path>) -> Result<CdfDocument, Error> {
     let path = path.as_ref();
-    let text = std::fs::read_to_string(path).map_err(|err| Error::Io {
+    let bytes = std::fs::read(path).map_err(|err| Error::Io {
         path: path.display().to_string(),
         detail: err.to_string(),
     })?;
-    parse::document(&text)
+    let (text, transcoded) = decode(&bytes);
+    let mut doc = parse::document(&text)?;
+    if transcoded {
+        doc.push_note(Notice::info(
+            path.display().to_string(),
+            "文件不是 UTF-8，已按 ISO-8859-1 解码（CDF 导出件的常见编码）；中文与度符号以外的字符请核对",
+        ));
+    }
+    Ok(doc)
+}
+
+/// UTF-8 优先，否则按 ISO-8859-1 逐字节映射。返回是否做过转码。
+fn decode(bytes: &[u8]) -> (String, bool) {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => (text.to_string(), false),
+        Err(_) => (bytes.iter().map(|byte| char::from(*byte)).collect(), true),
+    }
 }
 
 #[cfg(test)]

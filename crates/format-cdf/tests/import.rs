@@ -87,3 +87,18 @@ fn missing_file_gives_actionable_error() {
     );
     assert!(message.contains("确认路径"), "错误要带下一步：{message}");
 }
+
+#[test]
+fn latin1_export_is_decoded_instead_of_failing() {
+    // 真实导出件常写成 ISO-8859-1；°C 是 0xB0 一个字节，按 UTF-8 读会整份失败。
+    let doc = parse_file(fixtures().join("latin1.cdfx")).expect("ISO-8859-1 也要能读");
+    let entry = doc.by_path("t_coolant").expect("条目在");
+    assert_eq!(entry.unit(), Some("°C"), "0xB0 要解成度符号");
+    assert!(
+        doc.notes()
+            .iter()
+            .any(|n| n.message().contains("ISO-8859-1")),
+        "转码过要说明：{:?}",
+        doc.notes()
+    );
+}

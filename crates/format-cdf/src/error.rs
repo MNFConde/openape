@@ -64,20 +64,6 @@ pub enum Error {
         allowed: String,
     },
 
-    /// `CATEGORY` 不在 schema 的枚举里。
-    #[error(
-        "第 {line} 行 {path} 的 CATEGORY 是 {value}：不在 CDF 2.0.0 的取值里；\
-         检查是否拼错，或该文件来自更新的版本"
-    )]
-    BadCategory {
-        /// 标定量路径。
-        path: String,
-        /// 读到的值。
-        value: String,
-        /// 行号（1 起）。
-        line: usize,
-    },
-
     /// 数组维度不是正整数。
     #[error("第 {line} 行 {path} 的 SW-ARRAYSIZE 取值 {value} 无效：数组维度必须是正整数")]
     BadArraySize {

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<!DOCTYPE MSRSW SYSTEM "MSRSW.DTD">
+<!--
+  Hand-written ISO-8859-1 sample (see fixtures/README.md, section "CDF fixtures").
+
+  Why a separate file: real CDF/CDFX exports are often ISO-8859-1 (ETAS-style
+  tools), and a unit like degC is a single 0xB0 byte. A whole file failing to
+  load because of one non-ASCII byte is the easiest failure mode to miss, so it
+  is pinned as a fixture. This comment must stay ASCII-only: the file itself is
+  encoded ISO-8859-1.
+-->
+<MSRSW CREATOR="OpenAPE fixture" CREATOR-VERSION="1">
+  <SHORT-NAME>latin1-sample</SHORT-NAME>
+  <CATEGORY>CALIBRATION</CATEGORY>
+  <SW-SYSTEMS>
+    <SW-SYSTEM>
+      <SHORT-NAME>Engine</SHORT-NAME>
+      <SW-INSTANCE-SPEC>
+        <SW-INSTANCE-TREE>
+          <SHORT-NAME>Calibration</SHORT-NAME>
+          <SW-INSTANCE>
+            <SHORT-NAME>t_coolant</SHORT-NAME>
+            <CATEGORY>VALUE</CATEGORY>
+            <SW-VALUE-CONT>
+              <UNIT-DISPLAY-NAME>°C</UNIT-DISPLAY-NAME>
+              <SW-VALUES-PHYS><V>90</V></SW-VALUES-PHYS>
+            </SW-VALUE-CONT>
+          </SW-INSTANCE>
+        </SW-INSTANCE-TREE>
+      </SW-INSTANCE-SPEC>
+    </SW-SYSTEM>
+  </SW-SYSTEMS>
+</MSRSW>

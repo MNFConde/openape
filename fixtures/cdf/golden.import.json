@@ -103,7 +103,7 @@
   ],
   "notes": [
     {
-      "message": "有 SW-CS-HISTORY（版次历史），本次只读当前取值，这部分未导入（第 33 行）",
+      "message": "有 SW-CS-HISTORY（版次历史），本次只读当前取值，这部分未导入（第 33 行；同一份文件里这类提示只出现一次）",
       "severity": "Info",
       "subject": "n_max"
     }

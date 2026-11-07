@@ -52,12 +52,22 @@ const SW_VALUES_PHYS_CHILDREN: &[&str] = &["VT", "V", "VG"];
 const SW_ARRAYSIZE_CHILDREN: &[&str] = &["V"];
 /// `VG`（值分组）允许的子元素。
 const VG_CHILDREN: &[&str] = &["LABEL", "VT", "V", "VG"];
-/// 认得但本次不解析的容器：给提示而不是拒。
+/// `SW-INSTANCE-PROPS-VARIANTS` 允许的子元素。
+const SW_INSTANCE_VARIANTS_CHILDREN: &[&str] = &["SW-INSTANCE-PROPS-VARIANT"];
+/// `SW-INSTANCE-PROPS-VARIANT` 允许的子元素。
+const SW_INSTANCE_VARIANT_CHILDREN: &[&str] = &[
+    "SW-VCD-CRITERION-VALUES",
+    "SW-VALUE-CONT",
+    "SW-AXIS-CONTS",
+    "SW-CS-HISTORY",
+    "SW-CS-FLAGS",
+];
+/// 认得但本次不解析的容器：给提示而不是拒。同一份文件里每种只提示一次，
+/// 否则真实导出件里每条标定量都带 SW-FEATURE-REF，提示会把真正的问题淹掉。
 const UNPARSED_CONTAINERS: &[(&str, &str)] = &[
     ("SW-AXIS-CONTS", "坐标系（曲线/map 的自有轴）"),
     ("SW-CS-HISTORY", "版次历史"),
     ("SW-CS-FLAGS", "版次标记"),
-    ("SW-INSTANCE-PROPS-VARIANTS", "变体属性"),
     ("SW-FEATURE-REF", "特征引用"),
 ];
 
@@ -83,6 +93,7 @@ pub(crate) fn document(text: &str) -> Result<CdfDocument, Error> {
         doc: &doc,
         entries: Vec::new(),
         notes: Vec::new(),
+        noted_containers: Vec::new(),
     };
     walker.check_children(root, MSRSW_CHILDREN)?;
 
@@ -108,6 +119,8 @@ struct Walker<'d, 'i> {
     doc: &'d Document<'i>,
     entries: Vec<Entry>,
     notes: Vec<Notice>,
+    /// 已经提示过的未解析容器名：同一份文件里每种只提示一次。
+    noted_containers: Vec<&'static str>,
 }
 
 impl Walker<'_, '_> {
@@ -166,32 +179,43 @@ impl Walker<'_, '_> {
         };
 
         let category = match self.text(node, "CATEGORY") {
-            Some(raw) => Some(Category::parse(&raw).ok_or_else(|| Error::BadCategory {
-                path: path.clone(),
-                value: raw,
-                line: self.line(node),
-            })?),
+            Some(raw) => match Category::parse(&raw) {
+                Some(known) => Some(known),
+                None => {
+                    // 真实导出件里确实出现过笔误（如 DEPEDNDENT_VALUE）。拒掉整个
+                    // 文件会让用户拿不到其余几百条取值，所以只提示、不猜它本该是
+                    // 哪个枚举值——猜错比留空更糟。
+                    self.notes.push(Notice::warning(
+                        &path,
+                        format!(
+                            "CATEGORY 值 {raw:?} 不在 CDF 2.0.0 的 16 个取值里（第 {} 行）；\
+                             按未知类别保留，取值仍然导入",
+                            self.line(node)
+                        ),
+                    ));
+                    None
+                }
+            },
             None => None,
         };
 
-        for extra in node.children().filter(Node::is_element) {
-            let name = extra.tag_name().name();
-            if let Some((_, what)) = UNPARSED_CONTAINERS.iter().find(|(known, _)| *known == name) {
-                self.notes.push(Notice::info(
-                    &path,
-                    format!(
-                        "有 {name}（{what}），本次只读当前取值，这部分未导入（第 {} 行）",
-                        self.line(extra)
-                    ),
-                ));
-            }
-        }
+        self.note_unparsed(node, &path);
 
-        if let Some(cont) = self.child(node, "SW-VALUE-CONT") {
+        // 取值有两处落点：直属 SW-VALUE-CONT，或变体包裹里
+        // SW-INSTANCE-PROPS-VARIANTS/SW-INSTANCE-PROPS-VARIANT/SW-VALUE-CONT
+        // （真实导出件常见后者）。两处都没有才是"没有取值"。
+        let direct = self.child(node, "SW-VALUE-CONT");
+        let variant = if direct.is_some() {
+            None
+        } else {
+            self.variant_value_cont(node, &path)?
+        };
+
+        if let Some(cont) = direct.or(variant) {
             let (unit, dims, values) = self.value_cont(cont, &path)?;
             let builder = CdfDocument::entry(system.to_string(), path.clone(), category);
             let entry = builder.build(unit, dims, values, self.line(node));
-            if !entry.shape_matches() {
+            if !entry.dims().is_empty() && !entry.shape_matches() {
                 self.notes.push(Notice::warning(
                     &path,
                     format!(
@@ -234,6 +258,65 @@ impl Walker<'_, '_> {
         })
     }
 
+    /// 未解析的合法容器：每种只提示一次——真实导出件里每条标定量都带
+    /// `SW-FEATURE-REF`，逐条提示会把真正的问题淹掉。
+    fn note_unparsed(&mut self, node: Node<'_, '_>, path: &str) {
+        for extra in node.children().filter(Node::is_element) {
+            let name = extra.tag_name().name();
+            let Some((known, what)) = UNPARSED_CONTAINERS.iter().find(|(known, _)| *known == name)
+            else {
+                continue;
+            };
+            if self.noted_containers.contains(known) {
+                continue;
+            }
+            self.noted_containers.push(known);
+            self.notes.push(Notice::info(
+                path,
+                format!(
+                    "有 {name}（{what}），本次只读当前取值，这部分未导入（第 {} 行；同一份文件里这类提示只出现一次）",
+                    self.line(extra)
+                ),
+            ));
+        }
+    }
+
+    /// 变体包裹里的取值。
+    ///
+    /// 多个变体时只取第一个并明说：变体按 VCD 条件区分，猜哪一个是"当前"
+    /// 等于替用户决定写哪一列，猜错的代价是标定数据错值。
+    fn variant_value_cont<'a, 'b>(
+        &mut self,
+        node: Node<'a, 'b>,
+        path: &str,
+    ) -> Result<Option<Node<'a, 'b>>, Error> {
+        let Some(wrapper) = self.child(node, "SW-INSTANCE-PROPS-VARIANTS") else {
+            return Ok(None);
+        };
+        self.check_children(wrapper, SW_INSTANCE_VARIANTS_CHILDREN)?;
+
+        let mut found = None;
+        let mut total = 0usize;
+        for variant in children(wrapper, "SW-INSTANCE-PROPS-VARIANT") {
+            self.check_children(variant, SW_INSTANCE_VARIANT_CHILDREN)?;
+            self.note_unparsed(variant, path);
+            total += 1;
+            if found.is_none() {
+                found = self.child(variant, "SW-VALUE-CONT");
+            }
+        }
+        if total > 1 {
+            self.notes.push(Notice::warning(
+                path,
+                format!(
+                    "有 {total} 个变体（按 VCD 条件区分），只导入第 1 个的取值，其余 {} 个未导入",
+                    total - 1
+                ),
+            ));
+        }
+        Ok(found)
+    }
+
     /// `SW-VALUE-CONT`：单位、维度与取值。
     #[allow(clippy::type_complexity)]
     fn value_cont(
@@ -266,8 +349,27 @@ impl Walker<'_, '_> {
         }
 
         let mut values = Vec::new();
+        let mut labels = Vec::new();
         if let Some(phys) = self.child(node, "SW-VALUES-PHYS") {
-            self.values(phys, path, SW_VALUES_PHYS_CHILDREN, &mut values)?;
+            self.values(
+                phys,
+                path,
+                SW_VALUES_PHYS_CHILDREN,
+                &mut values,
+                &mut labels,
+            )?;
+        }
+        if !labels.is_empty() {
+            let mut distinct: Vec<&str> = Vec::new();
+            for label in &labels {
+                if !distinct.contains(&label.as_str()) {
+                    distinct.push(label);
+                }
+            }
+            self.notes.push(Notice::info(
+                path,
+                format!("值分组标签 {distinct:?} 被摊平，分组的层级关系未保留"),
+            ));
         }
         Ok((unit, dims, values))
     }
@@ -279,6 +381,7 @@ impl Walker<'_, '_> {
         path: &str,
         allowed: &[&str],
         out: &mut Vec<Scalar>,
+        labels: &mut Vec<String>,
     ) -> Result<(), Error> {
         self.check_children(node, allowed)?;
         for child in node.children().filter(Node::is_element) {
@@ -299,15 +402,15 @@ impl Walker<'_, '_> {
                         }
                     }
                 }
+                // LABEL 只描述分组，取值与它无关：调用方已为它给过提示。
+                "LABEL" => {}
                 "VT" => out.push(Scalar::Text(self.node_text(child))),
                 "VG" => {
-                    if let Some(label) = self.text(child, "LABEL") {
-                        self.notes.push(Notice::info(
-                            path,
-                            format!("值分组标签 {label:?} 被摊平，分组的层级关系未保留"),
-                        ));
+                    // 空标签在真实文件里很常见（二维 map 的内层分组），不值得提示。
+                    if let Some(label) = self.text(child, "LABEL").filter(|text| !text.is_empty()) {
+                        labels.push(label);
                     }
-                    self.values(child, path, VG_CHILDREN, out)?;
+                    self.values(child, path, VG_CHILDREN, out, labels)?;
                 }
                 other => {
                     return Err(Error::UnexpectedElement {
@@ -456,13 +559,110 @@ mod tests {
     }
 
     #[test]
-    fn bad_category_is_rejected() {
+    fn unknown_category_is_kept_as_unknown_with_warning() {
+        // 真实导出件里出现过笔误（DEPEDNDENT_VALUE）。拒掉整份文件会让用户拿不到
+        // 其余几百条取值，所以只提示、类别留空，不猜它原本该是哪个枚举值。
         let text = minimal().replace(
             "<CATEGORY>VALUE</CATEGORY>",
             "<CATEGORY>VALUE_BLOCK</CATEGORY>",
         );
-        let err = parse_str(&text).expect_err("枚举外的 CATEGORY 应被拒");
-        assert!(matches!(err, Error::BadCategory { ref value, .. } if value == "VALUE_BLOCK"));
+        let doc = parse_str(&text).expect("枚举外的类别不该拒掉整份文件");
+        assert_eq!(doc.by_path("n_max").expect("条目仍在").category(), None);
+        assert!(
+            doc.notes()
+                .iter()
+                .any(|n| n.message().contains("VALUE_BLOCK")),
+            "要点名是哪个值：{:?}",
+            doc.notes()
+        );
+    }
+
+    #[test]
+    fn values_inside_variant_wrapper_are_read() {
+        // 真实导出件把取值放在变体包裹里：SW-INSTANCE 下没有直属 SW-VALUE-CONT。
+        let text = minimal().replace(
+            "<SW-VALUE-CONT>",
+            "<SW-INSTANCE-PROPS-VARIANTS><SW-INSTANCE-PROPS-VARIANT><SW-VALUE-CONT>",
+        );
+        let text = text.replace(
+            "</SW-VALUE-CONT>",
+            "</SW-VALUE-CONT></SW-INSTANCE-PROPS-VARIANT></SW-INSTANCE-PROPS-VARIANTS>",
+        );
+        let doc = parse_str(&text).expect("变体写法应能读");
+        assert_eq!(doc.entries().len(), 2, "两条都要从变体里取出来");
+        assert_eq!(
+            doc.by_path("n_max").expect("标量在").values()[0].as_number(),
+            Some(6500.0)
+        );
+    }
+
+    #[test]
+    fn multiple_variants_import_the_first_and_say_so() {
+        let text = minimal().replace(
+            "<SW-VALUE-CONT>",
+            "<SW-INSTANCE-PROPS-VARIANTS><SW-INSTANCE-PROPS-VARIANT><SW-VALUE-CONT>",
+        );
+        let text = text.replace(
+            "</SW-VALUE-CONT>",
+            "</SW-VALUE-CONT></SW-INSTANCE-PROPS-VARIANT>\
+             <SW-INSTANCE-PROPS-VARIANT><SW-VALUE-CONT><SW-VALUES-PHYS><V>1</V></SW-VALUES-PHYS></SW-VALUE-CONT></SW-INSTANCE-PROPS-VARIANT>\
+             </SW-INSTANCE-PROPS-VARIANTS>",
+        );
+        let doc = parse_str(&text).expect("多变体不该拒");
+        assert!(
+            doc.notes().iter().any(|n| n.message().contains("变体")),
+            "要说明只导入了第一个：{:?}",
+            doc.notes()
+        );
+    }
+
+    #[test]
+    fn undeclared_dims_do_not_warn() {
+        // 真实文件常不写 SW-ARRAYSIZE：曲线只有 6 个值、没有维度声明。
+        // 没有声明就无从"对不上"，警告只会变成噪声。
+        let text = minimal().replace("<SW-ARRAYSIZE><V>3</V></SW-ARRAYSIZE>", "");
+        let doc = parse_str(&text).expect("无维度声明应能读");
+        assert!(
+            !doc.notes().iter().any(|n| n.message().contains("对不上")),
+            "不该报维度不符：{:?}",
+            doc.notes()
+        );
+    }
+
+    #[test]
+    fn flat_unparsed_containers_are_noted_once_per_document() {
+        // 真实导出件每条标定量都带 SW-FEATURE-REF；逐条提示会淹没真正的问题。
+        let text = minimal().replace(
+            "<CATEGORY>VALUE</CATEGORY>",
+            "<CATEGORY>VALUE</CATEGORY><SW-FEATURE-REF>F</SW-FEATURE-REF>",
+        );
+        let text = text.replace(
+            "<CATEGORY>CURVE</CATEGORY>",
+            "<CATEGORY>CURVE</CATEGORY><SW-FEATURE-REF>F</SW-FEATURE-REF>",
+        );
+        let doc = parse_str(&text).expect("合法容器不该被拒");
+        let notes = doc
+            .notes()
+            .iter()
+            .filter(|n| n.message().contains("SW-FEATURE-REF"))
+            .count();
+        assert_eq!(notes, 1, "同一种容器只提示一次");
+    }
+
+    #[test]
+    fn empty_value_group_label_is_silent() {
+        let text = minimal().replace(
+            "<SW-VALUES-PHYS><V>6500</V></SW-VALUES-PHYS>",
+            "<SW-VALUES-PHYS><VG><LABEL/><V>6500</V></VG></SW-VALUES-PHYS>",
+        );
+        let doc = parse_str(&text).expect("空标签应能读");
+        assert!(
+            !doc.notes()
+                .iter()
+                .any(|n| n.message().contains("值分组标签")),
+            "空标签不该提示：{:?}",
+            doc.notes()
+        );
     }
 
     #[test]
