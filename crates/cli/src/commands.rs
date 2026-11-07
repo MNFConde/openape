@@ -59,6 +59,18 @@ pub async fn probe_xcp(
     timeout_ms: u64,
     json: bool,
 ) -> Result<String, Fault> {
+    let report = xcp_connect(channel, tx_id, rx_id, timeout_ms).await?;
+    render_connect(json, &report)
+}
+
+/// XCP 建链的判定本体：`probe xcp` 与 doctor 走同一个函数，判定条件
+/// 只写一份。
+async fn xcp_connect(
+    channel: &str,
+    tx_id: u32,
+    rx_id: u32,
+    timeout_ms: u64,
+) -> Result<ConnectReport, Fault> {
     let config = session_config(channel, tx_id, rx_id, timeout_ms)?;
     let mut session = Session::open(config)?;
     let info = session.connect(0).await?;
@@ -74,7 +86,7 @@ pub async fn probe_xcp(
         )),
     };
     session.disconnect().await.ok();
-    render_connect(json, &report)
+    Ok(report)
 }
 
 /// `read`：读一段内存并打印。
@@ -314,6 +326,159 @@ fn symbols(list: &[openape_cal_core::Symbol]) -> Vec<String> {
 
 fn fault_of(error: impl std::fmt::Display) -> Fault {
     usage_fault(error.to_string())
+}
+
+/// doctor 的一次检查结论。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DoctorCheck {
+    /// 类别名。
+    pub name: &'static str,
+    /// pass / skip / fail。
+    pub outcome: &'static str,
+    /// 判定细节。
+    pub detail: String,
+}
+
+/// doctor 的输入。缺的类别跳过——缺省项不猜结果。
+pub struct DoctorOptions<'a> {
+    /// CAN 通道（给了才做通道探测）。
+    pub channel: Option<&'a str>,
+    /// 描述文件 ELF（给了才做信息源检查）。
+    pub elf: Option<&'a std::path::Path>,
+    /// 描述文件 A2L。
+    pub a2l: Option<&'a std::path::Path>,
+    /// daemon 地址（给了才做连通检查）。
+    pub daemon: Option<&'a str>,
+    /// 真建一次 XCP 链（会碰 ECU）。
+    pub connect: bool,
+}
+
+/// doctor（M5-16）：一次跑完各故障类别的判定，收集全部结论而不是遇错
+/// 即停。判定本体全部复用 probe 系的函数（通道枚举、通道探测、建链、
+/// 描述文件装载、daemon 连通各一份实现），doctor 只收集与汇总——判定
+/// 条件写两份就会漂移，probe 过的 doctor 也必须过。
+pub async fn doctor(options: DoctorOptions<'_>) -> Vec<DoctorCheck> {
+    let mut checks = Vec::new();
+    let pass = |name: &'static str, detail: String| DoctorCheck {
+        name,
+        outcome: "pass",
+        detail,
+    };
+    let skip = |name: &'static str, detail: &str| DoctorCheck {
+        name,
+        outcome: "skip",
+        detail: detail.to_owned(),
+    };
+    fn fail(name: &'static str, error: impl std::fmt::Display) -> DoctorCheck {
+        DoctorCheck {
+            name,
+            outcome: "fail",
+            detail: error.to_string(),
+        }
+    }
+
+    // 1. 通道枚举。
+    let channels = list_channels();
+    checks.push(if channels.is_empty() {
+        pass(
+            "channels",
+            "0 条（本机没有可见 CAN 通道；vcan 用 ip link 建）".to_owned(),
+        )
+    } else {
+        pass(
+            "channels",
+            format!("{} 条：{}", channels.len(), channels.join("、")),
+        )
+    });
+
+    // 2. 通道探测（给了 --channel 才查）。
+    checks.push(match options.channel {
+        Some(channel) => match probe_channel(channel) {
+            Ok(_) => pass("channel", format!("{channel} 可打开")),
+            Err(error) => fail("channel", error),
+        },
+        None => skip("channel", "没给 --channel"),
+    });
+
+    // 3. XCP 建链（显式 --connect 才碰 ECU）。
+    checks.push(match (options.connect, options.channel) {
+        (true, Some(channel)) => match xcp_connect(channel, 0x600, 0x601, 200).await {
+            Ok(report) => pass("xcp", format!("{channel} 建链成功：{}", report.channel)),
+            Err(error) => fail("xcp", error),
+        },
+        (true, None) => skip("xcp", "--connect 需要配 --channel"),
+        (false, _) => skip("xcp", "默认不碰 ECU，要建链加 --connect"),
+    });
+
+    // 4. 信息源（给了 --elf / --a2l 才查）。
+    checks.push(match (options.elf, options.a2l) {
+        (None, None) => skip("source", "没给 --elf / --a2l"),
+        (elf, a2l) => {
+            let mut notes = Vec::new();
+            let outcome = (|| -> Result<(usize, usize), Fault> {
+                let elf = elf
+                    .map(|path| load_elf(path, &mut notes))
+                    .transpose()?
+                    .map(|tree| tree.iter().count())
+                    .unwrap_or(0);
+                let a2l = a2l
+                    .map(|path| load_a2l(path, &mut notes))
+                    .transpose()?
+                    .map(|tree| tree.iter().count())
+                    .unwrap_or(0);
+                Ok((elf, a2l))
+            })();
+            match outcome {
+                Ok((elf_vars, a2l_vars)) => pass(
+                    "source",
+                    format!("ELF {elf_vars} 个变量，A2L {a2l_vars} 个"),
+                ),
+                Err(error) => fail("source", error),
+            }
+        }
+    });
+
+    // 5. daemon 连通（给了 --daemon 才查）。
+    checks.push(match options.daemon {
+        Some(url) => match connect_daemon(url).await {
+            Ok(mut client) => match client.get_session(openape_proto::Empty {}).await {
+                Ok(reply) => {
+                    let report = reply.into_inner();
+                    pass(
+                        "daemon",
+                        format!(
+                            "{} 在线：{}",
+                            url,
+                            if report.linked {
+                                "已接管通道"
+                            } else {
+                                "未接管"
+                            }
+                        ),
+                    )
+                }
+                Err(status) => fail("daemon", format!("{url} 会话查询失败：{status}")),
+            },
+            Err(error) => fail("daemon", error),
+        },
+        None => skip("daemon", "没给 --daemon"),
+    });
+
+    checks
+}
+
+/// doctor 报告的双模渲染。
+pub fn render_doctor(json: bool, checks: &[DoctorCheck]) -> Result<String, Fault> {
+    render(json, &Vec::from(checks), || {
+        let mut out = String::from("自检结论：");
+        for check in checks {
+            out.push_str(&format!(
+                "\n  [{}] {}\n    {}",
+                check.outcome, check.name, check.detail
+            ));
+        }
+        out
+    })
 }
 
 fn source_variable(variable: &openape_cal_core::Variable) -> SourceVariable {

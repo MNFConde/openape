@@ -47,6 +47,8 @@ enum Command {
         #[command(subcommand)]
         target: ProbeTarget,
     },
+    /// 一次跑完各故障类别的判定（M5-16）。默认只查不碰 ECU；真建链要 --connect。
+    Doctor(DoctorArgs),
     /// 读一段 ECU 内存
     Read(ReadArgs),
     /// 写一个标定量（单点写，带写前读回、量程校验、快照与审计）
@@ -86,6 +88,26 @@ enum DatasetAction {
     },
     /// 按快照回滚（逐项单点写，同样留痕）
     Restore(WriteArgs),
+}
+
+/// doctor 自检的参数。所有项都可缺省：缺了就跳过那一类，不猜。
+#[derive(Debug, Parser)]
+struct DoctorArgs {
+    /// CAN 通道（给了才做通道探测）
+    #[arg(long)]
+    channel: Option<String>,
+    /// 描述文件 ELF（给了才做信息源检查）
+    #[arg(long)]
+    elf: Option<std::path::PathBuf>,
+    /// 描述文件 A2L
+    #[arg(long)]
+    a2l: Option<std::path::PathBuf>,
+    /// daemon 地址（给了才做 daemon 连通检查）
+    #[arg(long, default_missing_value = commands::DAEMON_DEFAULT)]
+    daemon: Option<String>,
+    /// 真建一次 XCP 链（会碰 ECU；默认跳过）
+    #[arg(long)]
+    connect: bool,
 }
 
 /// 只连设备的公共参数。
@@ -278,11 +300,42 @@ fn parse_u32(text: &str) -> Result<u32, std::num::ParseIntError> {
 async fn run(cli: &Cli) -> Result<String, Fault> {
     match &cli.command {
         Command::Probe { target } => probe(cli, target).await,
+        Command::Doctor(args) => doctor(cli, args).await,
         Command::Read(args) => read(cli, args).await,
         Command::Write(args) => write(cli, args).await,
         Command::Page { action } => page(cli, action).await,
         Command::Dataset { action } => dataset(cli, action).await,
     }
+}
+
+/// doctor：一次跑完各类别判定，收集全部结论而不是遇错即停。
+async fn doctor(cli: &Cli, args: &DoctorArgs) -> Result<String, Fault> {
+    let options = commands::DoctorOptions {
+        channel: args.channel.as_deref(),
+        elf: args.elf.as_deref(),
+        a2l: args.a2l.as_deref(),
+        daemon: args.daemon.as_deref(),
+        connect: args.connect,
+    };
+    let checks = commands::doctor(options).await;
+    let failed = checks
+        .iter()
+        .filter(|check| check.outcome == "fail")
+        .count();
+    let skipped = checks
+        .iter()
+        .filter(|check| check.outcome == "skip")
+        .count();
+    let text = commands::render_doctor(cli.json, &checks)?;
+    if failed > 0 {
+        // 明细先落 stdout（json 消费者要的也是这份），故障随后走统一面板
+        // 与非零退出码——明细不能只活在"见上方报告"这句话里。
+        println!("{text}");
+        return Err(openape_cli::usage_fault(format!(
+            "{failed} 类未通过（{skipped} 类跳过）"
+        )));
+    }
+    Ok(text)
 }
 
 async fn write(cli: &Cli, args: &WriteArgs) -> Result<String, Fault> {
