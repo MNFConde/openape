@@ -1,0 +1,178 @@
+name: CI
+
+# 门禁口径的单一源是 .agents/rules/commit.md 的门禁流水线节：本文件的每个 job
+# 对应那节的一条命令，改门禁先改那节再改这里，顺序保持一致。
+# 不在本文件的：socketcand / XCPlite 等外部构建件的互通测试（需要手工构建，
+# 见 script/scripts.md 台账）、真机抽验（档三，M5-08）。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  docs:
+    name: 文档三检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: 链接 / frontmatter / 方案标记
+        run: |
+          python script/check-links.py
+          python script/check-frontmatter.py
+          python script/check-markers.py
+
+  lint:
+    name: 格式化与 clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # rust-toolchain.toml 是版本唯一源：这里不写死版本，交给 rustup 读文件
+      - name: 按 rust-toolchain.toml 装工具链
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: 装 protoc（tonic 的 build 脚本依赖）
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - run: protoc --version
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: 测试（vcan 在环）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: 按 rust-toolchain.toml 装工具链
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: 装 protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      # 大量测试用 VcanGuard 建 vcan 链路，缺模块或缺 CAP_NET_ADMIN 时会静默
+      # 跳过——那正是"全绿掩盖没测"。所以这里缺模块直接失败，且下面还有
+      # 哨兵断言二次确认关键测试确实跑过。
+      - name: 载入 vcan 模块
+        run: |
+          if ! sudo modprobe vcan 2>/dev/null; then
+            echo "vcan 模块缺失，尝试装模块包"
+            sudo apt-get update || true
+            sudo apt-get install -y "linux-modules-extra-$(uname -r)" || true
+            sudo depmod -a || true
+            sudo modprobe vcan
+          fi
+          ip link show type vcan >/dev/null && echo "vcan 就绪"
+      - name: 全量测试（以 root 跑，vcan 夹具要 CAP_NET_ADMIN）
+        run: |
+          set -o pipefail
+          sudo env \
+            "PATH=$PATH" \
+            "HOME=$HOME" \
+            "CARGO_HOME=${CARGO_HOME:-$HOME/.cargo}" \
+            "RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup}" \
+            "CARGO_TERM_COLOR=always" \
+            cargo test --workspace --locked 2>&1 | tee "$RUNNER_TEMP/test.log"
+      # root 跑测试会把这些目录写成 root 所有：不交还归属，缓存打包会因
+      # 权限被拒而整包失败（实测 tar exit 2）
+      - name: 交还 target 与 cargo 目录归属（缓存要能存）
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" target "$HOME/.cargo" "$HOME/.rustup" || true
+      - name: 确认 vcan 面没被静默跳过
+        run: |
+          status=0
+          for t in \
+            vcan_carries_frames_back_to_a_second_socket \
+            daq_frames_carry_the_signal_values \
+            read_returns_the_ecus_memory \
+            twenty_samples_reach_a_grpc_client
+          do
+            if grep -Eq "test $t \.\.\. ok" "$RUNNER_TEMP/test.log"; then
+              echo "ok: $t"
+            else
+              echo "::error::$t 没跑（vcan 夹具没起来？）——跳过会掩盖没测"
+              status=1
+            fi
+          done
+          exit $status
+
+  golden:
+    name: golden 基线
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: 按 rust-toolchain.toml 装工具链
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: 装 protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      # 档二 golden：比对不通过即红灯；门禁不设 OPENAPE_WRITE_GOLDEN
+      - name: 跑 golden 断言
+        run: |
+          set -e
+          cargo test --locked -p openape-format-a2l --test axis_binding_golden
+          cargo test --locked -p openape-format-cdf --test golden
+          cargo test --locked -p openape-format-elf --test golden_elf
+          cargo test --locked -p openape-format-mf4 --test golden
+          cargo test --locked -p openape-bus-replay --test golden
+      - name: 确认没有顺手改写 golden
+        run: git diff --exit-code
+
+  frontend:
+    name: 前端检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+        working-directory: ui
+      - run: npm run build
+        working-directory: ui
+
+  audit:
+    name: 依赖审计
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  semver:
+    name: 契约 semver
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: 按 rust-toolchain.toml 装工具链
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: 装 protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      # 基线取 base 分支而非 crates.io：这些 crate 都没发布，check-release
+      # 会报 "not found in registry" 直接红（首跑实测）。rust-toolchain 设
+      # manual：用 rust-toolchain.toml 钉的那个，别被 action 换成最新 stable。
+      - uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          baseline-rev: origin/${{ github.base_ref }}
+          rust-toolchain: manual
