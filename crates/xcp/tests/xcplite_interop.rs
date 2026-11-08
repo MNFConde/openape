@@ -11,12 +11,16 @@
 //! 实现逐条接受，**DTO 数据流已通到总线层**：配置后每 1ms 一拍，载荷是
 //! `global_counter` 的 u32 且逐帧递增。
 //!
-//! 仍未做（如实记录）：DTO 头的解码。参考实现的 DTO 头是私有布局
+//! 头按生产档案剥（D-27）：参考实现的 DTO 头是私有布局
 //! `[相对 ODT 号][0xAA 对齐][DAQ list u16 LE][32 位时间戳][数据]`（源码
 //! `xcplite.c` 的 ODT_HEADER_SIZE==4 分支），比标准的 `[PID][数据]` 多
-//! 7 字节且 PID 是 list 内相对号；生产解码要接这一层，得先把「DTO 头
-//! 布局」做成显式能力（会一路穿到 session 的采集泵），待排期决策。
-//! 本测试只断言「帧到、内容对」，头由测试内的 `xcplite_dto_payload` 剥。
+//! 7 字节且 PID 是 list 内相对号。本测试直接用
+//! [`openape_xcp_proto::dto_profile::XCPLITE`] 剥头，跟生产解码同一份
+//! 字段表——以前这里手写过一个私有剥头函数，那等于同一条布局有两份实现。
+//!
+//! 仍未接：采集泵的档案接线（`capture::CaptureConfig::with_dto`）已到位，
+//! 但 daemon 还没有选档案的入口，所以本测试走的是档案 + 总线，不是整条
+//! 会话链。
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -35,18 +39,6 @@ fn signal(address: u32, len: u16) -> openape_xcp::daq::DaqSignal {
         address: Address::new(address),
         len: ByteLen::new(len).expect("长度非零"),
     }
-}
-
-/// 剥参考实现的私有 DTO 头，取载荷。布局见文件头注释。
-///
-/// 返回 `(相对 ODT 号, DAQ list 号, 载荷)`。
-fn xcplite_dto_payload(frame: &[u8]) -> Option<(u8, u16, &[u8])> {
-    const HEADER: usize = 8;
-    if frame.len() < HEADER || frame[1] != 0xAA {
-        return None;
-    }
-    let daq = u16::from_le_bytes([frame[2], frame[3]]);
-    Some((frame[0], daq, &frame[HEADER..]))
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -115,21 +107,23 @@ async fn xcplite_server_accepts_connect_events_and_daq_config() {
         .await
         .expect("XCPlite 要接受动态 DAQ 配置全序列");
 
-    // DTO 到达：取两帧，剥私有头后载荷是递增的计数器。
+    // DTO 到达：取两帧，按生产档案剥头后载荷是递增的计数器。
     let first = bus.recv(Duration::from_secs(2)).await.expect("要收到 DTO");
     let second = bus
         .recv(Duration::from_secs(2))
         .await
         .expect("要收到第二帧");
-    let (odt, daq, first_payload) =
-        xcplite_dto_payload(&first.data).expect("第一帧是 XCPlite 的 DTO");
-    let (_, _, second_payload) =
-        xcplite_dto_payload(&second.data).expect("第二帧是 XCPlite 的 DTO");
-    assert_eq!(odt, 0, "单 list 单 ODT，相对编号应为 0");
-    assert_eq!(daq, 0, "DAQ list 号应为 0");
-    assert_eq!(first_payload.len(), 4, "global_counter 是 u32");
-    let first_value = u32::from_le_bytes(first_payload.try_into().expect("4 字节"));
-    let second_value = u32::from_le_bytes(second_payload.try_into().expect("4 字节"));
+    let profile = &openape_xcp_proto::dto_profile::XCPLITE;
+    let first = openape_xcp_proto::dto_profile::split(profile, &first.data)
+        .expect("第一帧是 XCPlite 的 DTO");
+    let second = openape_xcp_proto::dto_profile::split(profile, &second.data)
+        .expect("第二帧是 XCPlite 的 DTO");
+    assert_eq!(first.pid, 0, "单 list 单 ODT，相对编号应为 0");
+    assert_eq!(first.daq_list, Some(0), "DAQ list 号应为 0");
+    assert!(first.timestamp.is_some(), "档案声明了时间戳，就该有值");
+    assert_eq!(first.payload.len(), 4, "global_counter 是 u32");
+    let first_value = u32::from_le_bytes(first.payload.try_into().expect("4 字节"));
+    let second_value = u32::from_le_bytes(second.payload.try_into().expect("4 字节"));
     assert!(
         second_value > first_value,
         "计数器要递增：{first_value} → {second_value}"
