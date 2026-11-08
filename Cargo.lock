@@ -1337,6 +1337,7 @@ dependencies = [
  "openape-format-dbc",
  "openape-format-mf4",
  "openape-xcp",
+ "openape-xcp-proto",
  "serde",
  "serde_json",
  "thiserror",

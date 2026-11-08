@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use openape_bus::{Bus, BusError, CanId};
 use openape_diag::Metrics;
 use openape_xcp::DaqLayout;
+use openape_xcp_proto::dto_profile::{self, DtoProfile};
 use tokio::task::JoinHandle;
 
 use crate::daq_stream::{DEFAULT_CAPACITY, DaqStats, DaqStream};
@@ -69,7 +70,8 @@ pub(crate) fn spawn(
     let paused = Arc::new(AtomicBool::new(false));
     let worker = Arc::clone(&stream);
     let gate = Arc::clone(&paused);
-    let task = tokio::spawn(async move { pump(bus, response_id, layout, worker, gate).await });
+    let dto = config.dto;
+    let task = tokio::spawn(async move { pump(bus, response_id, layout, dto, worker, gate).await });
     DaqCapture {
         stream,
         paused,
@@ -81,6 +83,7 @@ async fn pump(
     bus: Arc<dyn Bus>,
     response_id: CanId,
     layout: DaqLayout,
+    dto: &'static DtoProfile,
     stream: Arc<DaqStream>,
     paused: Arc<AtomicBool>,
 ) {
@@ -97,17 +100,20 @@ async fn pump(
                 if frame.id != response_id {
                     continue;
                 }
-                let Some((&pid, payload)) = frame.data.split_first() else {
+                // 按对端档案剥头（D-27）。档案不符或帧被截断就当它不是 DTO
+                // 跳过——头长猜错比丢一帧糟得多：头字节混进载荷会让曲线看着
+                // 有数、实际全错。
+                let Ok(decoded) = dto_profile::split(dto, &frame.data) else {
                     continue;
                 };
                 // 不认识的 ODT 编号不猜：多半是上一轮采集的残留帧。
-                if layout.decode(pid, payload).is_none() {
+                if layout.decode(decoded.pid, decoded.payload).is_none() {
                     continue;
                 }
                 stream.push_at(
-                    pid,
+                    decoded.pid,
                     frame.timestamp.unwrap_or_else(Instant::now),
-                    payload.to_vec(),
+                    decoded.payload.to_vec(),
                 );
             }
             Err(BusError::Timeout { .. }) => continue,
@@ -125,6 +131,9 @@ pub struct CaptureConfig {
     /// 指标出口。给了它，`push` 才会更新 `daq_frames` 与 `queue_depth`——
     /// 不挂的话指标恒为零，看起来像"没在采集"。
     pub metrics: Option<Arc<Metrics>>,
+    /// 对端的 DTO 头布局档案（D-27）。默认是标准 `[PID][数据]`；连私有头
+    /// 的从站（如 XCPlite）必须换成对应档案，否则头字节会被当成载荷。
+    pub dto: &'static DtoProfile,
 }
 
 impl Default for CaptureConfig {
@@ -132,6 +141,7 @@ impl Default for CaptureConfig {
         Self {
             capacity: DEFAULT_CAPACITY,
             metrics: None,
+            dto: &dto_profile::STANDARD,
         }
     }
 }
@@ -140,6 +150,12 @@ impl CaptureConfig {
     /// 顺带更新指标出口。
     pub fn with_metrics(mut self, metrics: Arc<Metrics>) -> Self {
         self.metrics = Some(metrics);
+        self
+    }
+
+    /// 按对端档案切 DTO。档案来自 `openape_xcp_proto::dto_profile`。
+    pub fn with_dto(mut self, dto: &'static DtoProfile) -> Self {
+        self.dto = dto;
         self
     }
 }
@@ -213,6 +229,15 @@ mod tests {
         }
     }
 
+    /// 整帧原样送出（帧首不强行当 PID：私有头的从站首字节不一定是我们认的编号）。
+    fn raw(data: &[u8]) -> CanFrame {
+        CanFrame {
+            id: CanId::standard(0x601).expect("合法"),
+            data: data.to_vec(),
+            timestamp: None,
+        }
+    }
+
     fn layout_with(pid: u8, len: u16) -> DaqLayout {
         let mut layout = DaqLayout::default();
         layout.insert_odt(pid, &[ByteLen::new(len).expect("测试长度非零")]);
@@ -259,5 +284,54 @@ mod tests {
             .expect("应有一条样本");
         assert_eq!(sample.payload, vec![0xAA]);
         assert_eq!(capture.stats().produced, 1, "被跳过的两帧不该计数");
+    }
+
+    #[tokio::test]
+    async fn a_private_header_dto_is_split_by_the_profile() {
+        // XCPlite 的私有头（D-27）：相对 ODT、0xAA 标记、DAQ list、时间戳，
+        // 之后才是载荷——头字节绝不能进载荷。
+        let frame = raw(&[
+            0x00, 0xAA, 0x00, 0x00, 0x03, 0x02, 0x01, 0x00, 0x11, 0x22, 0x33, 0x44,
+        ]);
+        let bus = Arc::new(ScriptedBus::new(vec![frame]));
+        let config = CaptureConfig::default().with_dto(&openape_xcp_proto::dto_profile::XCPLITE);
+        let capture = spawn(
+            bus,
+            CanId::standard(0x601).expect("合法"),
+            layout_with(0, 4),
+            &config,
+        );
+        let mut reader = capture.stream().subscribe();
+        let sample = tokio::time::timeout(Duration::from_secs(2), reader.recv())
+            .await
+            .expect("不该超时")
+            .expect("应有一条样本");
+        assert_eq!(sample.pid, 0, "相对编号就是 PID 字节");
+        assert_eq!(sample.payload, vec![0x11, 0x22, 0x33, 0x44]);
+    }
+
+    #[tokio::test]
+    async fn a_frame_shorter_than_the_profile_header_is_skipped() {
+        // 标准档案下这条私有头帧能"解出"11 字节载荷，属于档案配错的成本；
+        // 但真正截断的帧（不够头长）必须跳过，不能靠补零凑出来。
+        let bus = Arc::new(ScriptedBus::new(vec![
+            raw(&[0x00, 0xAA]),
+            raw(&[0x01, 0x11]),
+        ]));
+        let config = CaptureConfig::default().with_dto(&openape_xcp_proto::dto_profile::XCPLITE);
+        let capture = spawn(
+            bus,
+            CanId::standard(0x601).expect("合法"),
+            layout_with(0, 1),
+            &config,
+        );
+        let mut reader = capture.stream().subscribe();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), reader.recv())
+                .await
+                .is_err(),
+            "头长不足的帧不该变成样本"
+        );
+        assert_eq!(capture.stats().produced, 0);
     }
 }
