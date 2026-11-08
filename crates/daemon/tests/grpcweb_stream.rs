@@ -120,7 +120,7 @@ async fn grpc_web_streaming_over_http1_carries_twenty_frames() {
         vcan.name().to_owned(),
         session,
         capture,
-        info,
+        Some(info),
     ));
     let app = build_router(state, Path::new("ui/does-not-exist"));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

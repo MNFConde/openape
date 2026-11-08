@@ -4,17 +4,18 @@
 //! 解析与 `serve`，那两件事没有分支可测，写不成测试也不该长。
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::Router;
 
 use clap::Parser;
-use openape_bus::CanId;
+use openape_bus::{Bus, CanId};
+use openape_bus_replay::{ReplayBus, ReplayFrame};
 use openape_cal_core::{Address, ByteLen};
 use openape_diag::{Domain, Fault, FaultCode, Metrics, Severity};
 use openape_session::{CaptureConfig, Session, SessionConfig, WriteContext};
-use openape_xcp::{DaqListSpec, DaqSignal};
+use openape_xcp::{DaqLayout, DaqListSpec, DaqSignal};
 
 use crate::service::AppState;
 
@@ -31,6 +32,10 @@ pub struct Args {
     /// 接管的 CAN 通道。不给就只提供健康与指标。
     #[arg(long)]
     pub channel: Option<String>,
+    /// 回放日志（.asc / .blf）。与 `--channel` 互斥：把日志当总线放，
+    /// 不碰硬件（M5-10）。
+    #[arg(long, conflicts_with = "channel")]
+    pub replay: Option<PathBuf>,
     /// 命令帧标识符。
     #[arg(long, default_value_t = 0x600)]
     pub tx_id: u32,
@@ -144,17 +149,79 @@ pub async fn open_session(
         channel.to_owned(),
         session,
         capture,
-        info,
+        Some(info),
     ))
 }
 
-/// 按参数决定状态：给了通道就接管，没给就只做健康与指标。
+/// 把回放日志解成帧序列，按扩展名分派（.asc 文本 / .blf 二进制）。
+pub fn parse_replay(path: &Path) -> Result<Vec<ReplayFrame>, Fault> {
+    let extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase);
+    match extension.as_deref() {
+        Some("asc") => {
+            let text = std::fs::read_to_string(path)
+                .map_err(|err| usage(format!("读回放日志失败：{err}")))?;
+            openape_bus_replay::asc::parse(&text).map_err(|err| usage(err.to_string()))
+        }
+        Some("blf") => {
+            let file =
+                std::fs::File::open(path).map_err(|err| usage(format!("读回放日志失败：{err}")))?;
+            openape_bus_replay::blf::frames(std::io::BufReader::new(file))
+                .map_err(|err| usage(err.to_string()))
+        }
+        other => Err(usage(format!(
+            "回放日志扩展名要是 .asc 或 .blf，拿到 {}（{}）",
+            other.unwrap_or("无"),
+            path.display()
+        ))),
+    }
+}
+
+/// 用回放日志装配会话与采集（M5-10）：不碰硬件、不拿设备锁，采集与
+/// 实时走同一条泵、同一条代码路径。回放是单向观察：不建链也不配
+/// DAQ，布局按参数声明的采样表镜像——日志里的 DTO 内容由它自己说话，
+/// master 只需要知道每个 ODT 有哪些列。
+pub fn open_replay_session(
+    path: &Path,
+    tx_id: u32,
+    rx_id: u32,
+    specs: &[SampleSpec],
+    metrics: Arc<Metrics>,
+) -> Result<AppState, Fault> {
+    let config = session_config("replay", tx_id, rx_id)?;
+    let frames = parse_replay(path)?;
+    tracing::info!(frames = frames.len(), path = %path.display(), "回放日志装载");
+    let bus: Arc<dyn Bus> = Arc::new(ReplayBus::new(frames));
+    let session = Session::open_with_bus(config, bus)?;
+    let mut layout = DaqLayout::default();
+    let lens: Vec<ByteLen> = signals(specs)?.iter().map(|signal| signal.len).collect();
+    layout.insert_odt(0, &lens);
+    let capture = session.start_capture_with(
+        layout,
+        CaptureConfig::default().with_metrics(metrics.clone()),
+    );
+    Ok(AppState::with_capture(
+        metrics,
+        "replay".to_owned(),
+        session,
+        capture,
+        None,
+    ))
+}
+
+/// 按参数决定状态：给了通道就接管，给了回放日志就放日志，都没给就
+/// 只做健康与指标。
 pub async fn build_state(args: &Args, metrics: Arc<Metrics>) -> Result<Arc<AppState>, Fault> {
-    let state = match args.channel.as_deref() {
-        Some(channel) => {
+    let state = match (args.channel.as_deref(), args.replay.as_deref()) {
+        (Some(channel), _) => {
             open_session(channel, args.tx_id, args.rx_id, &args.samples, metrics).await?
         }
-        None => AppState::idle(metrics),
+        (None, Some(path)) => {
+            open_replay_session(path, args.tx_id, args.rx_id, &args.samples, metrics)?
+        }
+        (None, None) => AppState::idle(metrics),
     };
     // 变量清单与是否接管硬件无关：可以只看描述文件不连 ECU。
     let state = match load_variables(args.elf.as_deref(), args.a2l.as_deref()) {
@@ -222,8 +289,10 @@ pub async fn prepare(args: &Args, metrics: Arc<Metrics>) -> Result<Prepared, Fau
 pub async fn run(args: Args) -> Result<(), Fault> {
     let metrics = Arc::new(Metrics::new());
     let prepared = prepare(&args, metrics).await?;
-    if let Some(channel) = args.channel.as_deref() {
-        tracing::info!(channel, "已接管通道");
+    match (&args.channel, &args.replay) {
+        (Some(channel), _) => tracing::info!(channel, "已接管通道"),
+        (None, Some(path)) => tracing::info!(path = %path.display(), "回放模式"),
+        (None, None) => {}
     }
     println!("openaped 监听 http://{}", prepared.address);
     axum::serve(prepared.listener, prepared.app)
@@ -259,6 +328,8 @@ fn usage(message: impl Into<String>) -> Fault {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     #[test]
@@ -456,5 +527,125 @@ mod tests {
         .await
         .expect_err("通道不存在");
         assert_eq!(err.code().domain(), Domain::Bus);
+    }
+
+    // ---- 回放（M5-10）----
+
+    fn tempdir(name: &str) -> PathBuf {
+        // 名字带调用方给的子名：同一线程里多次取目录时互不覆盖，不然
+        // 第二次调用把第一个目录连根删了，写出线程建文件就 ENOENT。
+        let dir = std::env::temp_dir().join(format!(
+            "openape-daemon-boot-{}-{:?}-{name}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+        dir
+    }
+
+    /// 一份最小回放日志：一帧杂音 + 两帧 DTO（响应 id 0x601、pid 0、
+    /// 两个数据字节）。DTO 放在 100/300 ms：给测试订阅流留出时间——
+    /// broadcast 队列只保订阅之后的样本。
+    fn write_replay_log(path: &PathBuf) {
+        std::fs::write(
+            path,
+            "\
+date Sun Nov 09 12:00:00 2026
+Begin Triggerblock
+   0.000000 1  Tx   100   1   42
+   0.100000 1  Rx   601   3   00 34 12
+   0.300000 1  Rx   601   3   00 78 56
+End TriggerBlock
+",
+        )
+        .expect("写回放日志");
+    }
+
+    #[tokio::test]
+    async fn a_replay_session_feeds_samples_with_log_timestamps() {
+        let dir = tempdir("replay-session");
+        let log = dir.join("run.asc");
+        write_replay_log(&log);
+
+        let state = open_replay_session(
+            &log,
+            0x600,
+            0x601,
+            &[SampleSpec {
+                address: 0x1000,
+                len: 2,
+            }],
+            Arc::new(Metrics::new()),
+        )
+        .expect("回放会话不碰硬件");
+        assert_eq!(state.channel(), Some("replay"));
+
+        let capture = state.capture().expect("回放也接管了采集");
+        let mut reader = capture.stream().subscribe();
+        let first = tokio::time::timeout(Duration::from_secs(2), reader.recv())
+            .await
+            .expect("首帧要在 100 ms 后出")
+            .expect("有样本");
+        assert_eq!(first.pid, 0);
+        assert_eq!(first.payload, vec![0x34, 0x12]);
+        let second = tokio::time::timeout(Duration::from_secs(2), reader.recv())
+            .await
+            .expect("次帧要在 300 ms 后出")
+            .expect("有样本");
+        assert_eq!(second.payload, vec![0x78, 0x56]);
+        assert!(
+            (280_000..=360_000).contains(&second.timestamp_us),
+            "样本时间戳要对齐日志 300 ms 偏移（D-25 保留日志时间）：{}",
+            second.timestamp_us
+        );
+    }
+
+    #[tokio::test]
+    async fn a_replay_session_refuses_an_unknown_extension_by_name() {
+        let dir = tempdir("replay-ext");
+        let log = dir.join("run.csv");
+        std::fs::write(&log, "1,2\n").expect("写探针");
+        let err = open_replay_session(
+            &log,
+            0x600,
+            0x601,
+            &[SampleSpec {
+                address: 0x1000,
+                len: 2,
+            }],
+            Arc::new(Metrics::new()),
+        )
+        .expect_err("未知扩展名要被点名");
+        assert!(err.message().contains(".asc"), "{err}");
+    }
+
+    #[test]
+    fn channel_and_replay_are_mutually_exclusive() {
+        let err = Args::try_parse_from(["openaped", "--channel", "vcan0", "--replay", "run.asc"])
+            .expect_err("两个来源互斥");
+        assert!(err.to_string().contains("cannot be used"), "{err}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn build_state_routes_replay_without_touching_the_bus_layer() {
+        let dir = tempdir("replay-route");
+        let log = dir.join("run.asc");
+        write_replay_log(&log);
+        let args = Args::parse_from([
+            "openaped",
+            "--listen",
+            "127.0.0.1:0",
+            "--replay",
+            log.to_str().expect("路径可转"),
+            "--sample",
+            "0x1000:2",
+            "--state-dir",
+            dir.join("state").to_str().expect("路径可转"),
+        ]);
+        let state = build_state(&args, Arc::new(Metrics::new()))
+            .await
+            .expect("回放装配不需要设备");
+        assert_eq!(state.channel(), Some("replay"), "回放也要占据通道位");
     }
 }

@@ -57,13 +57,14 @@ impl AppState {
         }
     }
 
-    /// 接管一条通道并开始采集。`capture` 由调用方配好 DAQ 后起。
+    /// 接管一条通道并开始采集。`capture` 由调用方配好 DAQ 后起；回放
+    /// （M5-10）不建链，`info` 为 `None`——界面如实显示未建链。
     pub fn with_capture(
         metrics: Arc<Metrics>,
         channel: String,
         session: Session,
         capture: DaqCapture,
-        info: ConnectInfo,
+        info: Option<ConnectInfo>,
     ) -> Self {
         Self {
             metrics,
@@ -71,7 +72,7 @@ impl AppState {
             capture: Some(capture),
             session: Some(tokio::sync::Mutex::new(session)),
             channel: Some(channel),
-            info: Some(info),
+            info,
             variables: None,
             tree: None,
             mode: SourceMode::ElfOnly,

@@ -173,7 +173,7 @@ async fn twenty_samples_reach_a_grpc_client() {
         vcan.name().to_owned(),
         session,
         capture,
-        info,
+        Some(info),
     ));
     let app = build_router(state, Path::new("ui/does-not-exist"));
 
@@ -247,7 +247,7 @@ async fn headless_chrome_renders_the_curve() {
         vcan.name().to_owned(),
         session,
         capture,
-        info,
+        Some(info),
     ));
     let app = build_router(state, &dist);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
