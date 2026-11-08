@@ -9,6 +9,9 @@
 | `config/` | 轴绑定 golden 的工程配置（`axis-binding-golden.toml`）与期望 IR 快照（`.ir.json`） | M3-06 |
 | `a2l/` | 轴绑定导出的 golden A2L 片段（`axis-binding-golden.a2l`）与档二 golden（`elf-export-golden.a2l`：`test.elf` 全量导出） | M0-5 RFC 第 8 节 / M3-05 |
 | `cdf/` | CDF 档二 golden 三件套：输入样本（`minimal.cdf`）、变量名配置（`golden.names.toml`）、期望导入结果（`golden.import.json`）；另有一份 ISO-8859-1 编码样本（`latin1.cdfx`） | M4-06 / M4-07 |
+| `mf4/` | MF4 夹具：`golden.minimal.mf4`（本项目写出端 golden） | M5-02/03 |
+
+> ASAM CDF 2.0.0 规范 XSD **不在本目录**：版权属 ASAM，不入库，取法见文末「规范 XSD 不入库」节（[D-26](../docs/decisions.md#d-26-cdf-规范-xsd-随夹具入库)）。
 
 ## ELF 夹具：产物入库，源码随改随编
 
@@ -42,7 +45,7 @@ rm -f *.o
 
 ## CDF 夹具：样本自造，期望结果逐年可重生成
 
-`cdf/minimal.cdf` **是本项目手写的**，不是从工具链导出的真实文件。原因有两条：ASAM 官网的 CDF 2.1.0 下载只对会员开放，公开可得的是 2.0.0 的 XSD，而该 XSD 的版权属 ASAM、不能进本仓（[D-24](../docs/decisions.md#d-24-数据集对接格式改判-cdf)）；许可干净的公开样例文件也没找到。手写的样本版权清楚，还能随手改造成坏样本去测报错路径。
+`cdf/minimal.cdf` **是本项目手写的**，不是从工具链导出的真实文件。原因有两条：ASAM 官网的 CDF 2.1.0 下载只对会员开放，公开可得的是 2.0.0 的 XSD，而该 XSD 的版权属 ASAM（[D-24](../docs/decisions.md#d-24-数据集对接格式改判-cdf) 原判断为不入库；2026-11-08 曾按 [D-26](../docs/decisions.md#d-26-cdf-规范-xsd-随夹具入库) 随夹具携带，**同日改判回不入库**，见下节）；许可干净的公开样例文件也没找到。手写的样本版权清楚，还能随手改造成坏样本去测报错路径。
 
 样本覆盖标量、字符串（`VT`）、曲线、二维 map、结构体成员（嵌套 `SW-INSTANCE`）、带单位与不带单位，以及一个"合法但我们不解析"的 `SW-CS-HISTORY`——它用来钉住"给提示而不是拒"这条行为。
 
@@ -69,3 +72,17 @@ OPENAPE_WRITE_GOLDEN=1 cargo test -p openape-format-cdf --test golden
 真实 CDF/CDFX 导出件常写成 `ISO-8859-1`（ETAS 系工具如此），单位里的 `°C` 就是 `0xB0` 一个字节。按 UTF-8 读会让整份合法文件失败——这是最容易漏掉的失败方式，所以单放一份样本钉住它：`parse_file` 先按 UTF-8 读，不行再按 ISO-8859-1 解码并给提示。
 
 这份文件**必须保持 ISO-8859-1 编码**，改动后别让编辑器顺手转成 UTF-8，否则测的就不是这条路径了。文件里的注释也只能用 ASCII（ISO-8859-1 装不下中文）。
+
+### 规范 XSD 不入库：改由脚本校验安装
+
+`fixtures/cdf/cdf_v2.0.0.sl.xsd` 曾是入库件（D-26），对外公开前改判：ASAM 文件头写 "Copyright 2006 ASAM e.V / All rights reserved"，本仓是 MIT OR Apache-2.0，把 ASAM 版权物放进公开仓库等于替它做再分发判断——这不该由本仓代劳。取件改由脚本：
+
+```sh
+script/fetch-cdf-xsd.sh --from <下载路径>   # 装已有件（zip 也吃，会抽同名文件）
+script/fetch-cdf-xsd.sh --url  <地址>       # 先下再校验
+script/fetch-cdf-xsd.sh                     # 只打印获取指引与期望 sha256
+```
+
+装上后位于 `tmp/cdf/cdf_v2.0.0.sl.xsd`（`tmp/` 已忽略，不入 git）。脚本按固定 sha256 校验，不符就拒装——**不钉直链**是因为 ASAM 官网只给会员下载、公开可得的又是第三方仓库里的副本，钉死等于埋一条到期即坏的路。
+
+代码与测试**不读**这份 XSD：「越出 schema 即拒绝」由 `format-cdf` 自带的元素集常量表承担（只校验元素、属性一律忽略），所以它的缺席不影响构建与门禁，只影响人回头核对实现依据。

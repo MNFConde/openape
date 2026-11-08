@@ -1,6 +1,6 @@
 # a2ltool-dwarf（裁剪副本）
 
-从 [`a2ltool`](https://github.com/DanielT/CanapeA2L) 3.4.2 裁剪而来，只保留 DWARF / PDB 提取层。
+从 [`a2ltool`](https://github.com/DanielT/a2ltool) 3.4.2（tag `v3.4.2`）裁剪而来，只保留 DWARF / PDB 提取层。
 上游许可 `MIT OR Apache-2.0`，`LICENSE-MIT`、`LICENSE-APACHE` 原样保留。
 
 ## 保留范围
@@ -25,4 +25,8 @@
 
 ## 升级方式
 
-重跑 `script/vendor-a2ltool.sh`（把上游 tag 解包到 `tmp/`，复制上述三个路径，用 `git diff` 核对只看得到可见性改动）。
+重跑 `script/vendor-a2ltool.sh [tag]`（登记在 `script/scripts.md`）：它把上游 tag 克隆到 `tmp/vendor/a2ltool`，复制 `src/debuginfo/`、`src/symbol.rs` 与两份 LICENSE，然后打印核对 `git diff` 的命令。`src/lib.rs` 是本仓新写的薄导出层，脚本不覆盖它。
+
+复制完 `git diff` 应只有两类改动：上面「与上游的差异」列的可见性改动，以及两处 `mod test` 被重新带回（脚本不会替你删——它不猜上游测试段长什么样）。出现别的差异说明上游逻辑变了，逐条看过再提交。
+
+2026-11-08 按 tag `v3.4.2` 重跑实测：5 个文件有改动，内容只有 `pub` ↔ `pub(crate)` 与 `mod iter` 的可见性，加两处 `mod test` 段（`dwarf/mod.rs` +321 行、`pdb/mod.rs` +262 行）。口径与上节的差异说明一致。
