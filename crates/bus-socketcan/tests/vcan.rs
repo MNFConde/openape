@@ -62,3 +62,91 @@ async fn recv_on_silent_channel_times_out() {
         "实际得到: {err:?}"
     );
 }
+
+#[tokio::test]
+async fn fd_channel_carries_a_64_byte_payload() {
+    let Some(vcan) = VcanGuard::create_fd("d") else {
+        return;
+    };
+
+    let sender = SocketCanBus::open(vcan.name()).expect("发送端能打开");
+    let receiver = SocketCanBus::open(vcan.name()).expect("接收端能打开");
+    let caps = sender.capabilities();
+    assert!(
+        caps.classic_can() && caps.can_fd(),
+        "MTU 72 的链路要报 FD：{caps:?}"
+    );
+
+    let payload: Vec<u8> = (0..64).collect();
+    sender
+        .send(CanFrame::new(CanId::Standard(0x123), payload.clone()).expect("64 字节是 FD 上限"))
+        .await
+        .expect("FD 帧发送成功");
+
+    let received = receiver
+        .recv(Duration::from_secs(2))
+        .await
+        .expect("2 秒内应收到");
+    assert_eq!(received.id, CanId::Standard(0x123));
+    assert_eq!(received.data, payload);
+    assert!(received.timestamp.is_some(), "软时间戳必须填上");
+}
+
+#[tokio::test]
+async fn eight_byte_frame_on_fd_channel_keeps_classic_form() {
+    let Some(vcan) = VcanGuard::create_fd("g") else {
+        return;
+    };
+
+    // 探针先开好再发，否则可能漏帧。
+    let probe = socketcan::tokio::CanFdSocket::open(vcan.name()).expect("探针能打开");
+    let sender = SocketCanBus::open(vcan.name()).expect("发送端能打开");
+
+    // 8 字节是经典帧的上限：经典节点只认经典形态，这一帧不能变成 FD 帧。
+    sender
+        .send(CanFrame::new(CanId::Standard(0x321), vec![0x11; 8]).expect("8 字节合法"))
+        .await
+        .expect("发送成功");
+
+    let frame = tokio::time::timeout(Duration::from_secs(2), probe.read_frame())
+        .await
+        .expect("2 秒内应收到")
+        .expect("读帧成功");
+    assert!(
+        matches!(frame, socketcan::CanAnyFrame::Normal(_)),
+        "8 字节帧应保持经典形态，实际 {frame:?}"
+    );
+}
+
+#[tokio::test]
+async fn fd_channel_still_carries_classic_frames() {
+    let Some(vcan) = VcanGuard::create_fd("e") else {
+        return;
+    };
+
+    let sender = SocketCanBus::open(vcan.name()).expect("发送端能打开");
+    let receiver = SocketCanBus::open(vcan.name()).expect("接收端能打开");
+
+    // 经典帧在 FD 链路上不回归：同一个 socket 收两种帧形态。
+    let frame =
+        CanFrame::new(CanId::Extended(0x18DA_F110), vec![0xff, 0x61, 0x02]).expect("3 字节");
+    sender.send(frame).await.expect("经典帧发送成功");
+
+    let received = receiver
+        .recv(Duration::from_secs(2))
+        .await
+        .expect("2 秒内应收到");
+    assert_eq!(received.id, CanId::Extended(0x18DA_F110));
+    assert_eq!(received.data, vec![0xff, 0x61, 0x02]);
+}
+
+#[tokio::test]
+async fn classic_only_channel_does_not_claim_fd() {
+    let Some(vcan) = VcanGuard::create_classic_only("f") else {
+        return;
+    };
+    let bus = SocketCanBus::open(vcan.name()).expect("能打开");
+    let caps = bus.capabilities();
+    assert!(caps.classic_can(), "经典帧始终可用：{caps:?}");
+    assert!(!caps.can_fd(), "MTU 16 的链路不能报 FD：{caps:?}");
+}

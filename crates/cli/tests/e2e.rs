@@ -128,7 +128,8 @@ async fn three_runs_of_the_same_read_agree() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn probe_bus_lists_and_inspects_channels() {
-    let Some(vcan) = VcanGuard::create("e") else {
+    // 经典链路（MTU 16）：能力位据此报经典帧，FD 报 false。
+    let Some(vcan) = VcanGuard::create_classic_only("e") else {
         return;
     };
 

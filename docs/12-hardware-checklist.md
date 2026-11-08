@@ -29,7 +29,7 @@ Linux 侧经 socketcan 访问同一张卡时，Windows 驱动与 socketcan 不�
 | 编号 | 检查什么 | 怎么查 | 通过判据 | 失败常见原因 |
 |---|---|---|---|---|
 | H-01 | 通道枚举 | `openape probe bus --json` | 目标通道出现在 `channels` 里 | 驱动未装、通道名大小写不符 |
-| H-02 | 打开与能力位 | `openape probe bus --channel <ch> --json` | 能打开；`can_fd` 与 `hardware_timestamp` 与驱动实际能力一致 | 能力位报 false 但驱动支持——说明后端未接，不是 bug，但要在记录里注明 |
+| H-02 | 打开与能力位 | `openape probe bus --channel <ch> --json` | 能打开；`can_fd` 与 `hardware_timestamp` 与驱动实际能力一致 | 能力位报 false 但驱动支持——说明后端未接，不是 bug，但要在记录里注明。socketcand 后端按接口 MTU 上报 FD（`mtu >= 72`，与内核发送路径同判据）：真机上核 `ip -d link show <ch>` 的 MTU 与 `can_fd` 是否对得上；`hardware_timestamp` 目前各后端一律报 false（软时间戳路径） |
 | H-03 | 经典帧自发自收 | 两个终端各跑一次 `probe bus --channel <ch>` 后手工发帧，或用外部工具发一帧 | 对端能收到，DLC 与数据一致 | 未接线、终端电阻缺失、波特率不一致 |
 | H-04 | 8 字节填充策略 | 抓包看 ECU 回的响应帧 DLC | 记录 ECU 是否满帧填充 | 填充与否不影响解析，但影响"响应是否被截断"的判定，必须记录 |
 | H-05 | 标识符确认 | 按已知配置跑 `probe xcp`；不确定时在 0x600/0x601 附近试探 | 能建链 | 标识符错、ECU 未进入可标定状态 |

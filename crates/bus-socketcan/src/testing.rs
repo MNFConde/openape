@@ -7,6 +7,12 @@
 use std::process::Command;
 use std::time::Duration;
 
+/// 经典 CAN 接口的 MTU，也是经典帧的身位上限。
+pub const CAN_MTU: u32 = 16;
+/// CAN-FD 接口的 MTU。内核在发送路径上按 `dev->mtu >= CANFD_MTU`
+/// 允许 FD 帧，后端的能力探测用同一条判据。
+pub const CANFD_MTU: u32 = crate::CANFD_MTU;
+
 /// 一个用完即删的 vcan 通道。丢弃时自动 `ip link del`。
 #[derive(Debug)]
 pub struct VcanGuard {
@@ -19,6 +25,20 @@ impl VcanGuard {
     /// 建不起来时返回 `None` **并打印原因**——跳过必须留痕，否则"全绿"会
     /// 掩盖没测。
     pub fn create(tag: &str) -> Option<Self> {
+        Self::create_with_mtu(tag, None)
+    }
+
+    /// 建一条 MTU 指定为 72 的 vcan：内核据此允许收发 FD 帧。
+    pub fn create_fd(tag: &str) -> Option<Self> {
+        Self::create_with_mtu(tag, Some(CANFD_MTU))
+    }
+
+    /// 建一条 MTU 指定为 16 的 vcan：只有经典帧身位。
+    pub fn create_classic_only(tag: &str) -> Option<Self> {
+        Self::create_with_mtu(tag, Some(CAN_MTU))
+    }
+
+    fn create_with_mtu(tag: &str, mtu: Option<u32>) -> Option<Self> {
         let name = format!("v{}{}", std::process::id() % 10_000, tag);
         let mut last_error = String::new();
 
@@ -30,6 +50,19 @@ impl VcanGuard {
                 .output()
                 .ok()?;
             if add.status.success() {
+                // MTU 必须在 up 之前设：链路已 up 时 vcan 的 change_mtu
+                // 回 EBUSY，表现为"建链路失败"。
+                if let Some(mtu) = mtu {
+                    let set_mtu = Command::new("ip")
+                        .args(["link", "set", &name, "mtu", &mtu.to_string()])
+                        .output()
+                        .ok()?;
+                    if !set_mtu.status.success() {
+                        last_error = String::from_utf8_lossy(&set_mtu.stderr).trim().to_owned();
+                        let _ = Command::new("ip").args(["link", "del", &name]).output();
+                        continue;
+                    }
+                }
                 let up = Command::new("ip")
                     .args(["link", "set", &name, "up"])
                     .output()

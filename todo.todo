@@ -92,7 +92,8 @@
 [x] M5-07 feat(sim-ecu)：怪癖注入，复现 M5-06 的配置（前置 M5-06）→ 验收：注入的填充与回显差异在 vcan 上可复现
     完成说明（2026-11-08）：SimEcu 持 Box<dyn Quirks>（Quirks 加 Debug supertrait 保 derive(Debug)），with_quirks(QuirkConfig) 注入；dto_of 按 pad_dtos/dto_padding 补齐，GET_CAL_PAGE 按 page_echo 分支。vcan 复现：注入侧 DTO 补齐 8 尾填 FF 且页回显只回页号，空配置对照实长帧与标准回显；master.set_cal_page 的读回确认在短回显下必败（怪癖差异的直接证据，测试切页绕开 master API）。单元测试覆盖无 vcan 环境。
 [ ] M5-08 docs/test：真机复验——复测 M4 遗留的「未验」项（H-01–H-17 与写入类检查点）→ 验收：12 号记录表无「未验」残留
-[ ] M5-09 feat(bus-socketcan)：CAN-FD 收发与能力位，经典帧不回归 → 验收：H-02 能力位与驱动一致，FD 帧双向收发通
+[x] M5-09 feat(bus-socketcan)：CAN-FD 收发与能力位，经典帧不回归 → 验收：H-02 能力位与驱动一致，FD 帧双向收发通
+    完成说明（2026-11-08）：能力位按接口 MTU 判（`/sys/class/net/<ch>/mtu >= 72`，与内核发送路径 `dev->mtu >= CANFD_MTU` 同一条判据，避免"报了 FD 但内核拒发"；读不到 MTU 按经典处理，宁少报不假报）——MTU 72 报 `FrameKinds::BOTH`，MTU 16 报经典 only。**一个 socket 收两种帧形态**：FD 链路上开 `CanFdSocket`（兼容经典帧），不设第二个接收队列（两队列的到达顺序无法保证）；发送按长度分支——>8 字节走 FD 帧（不设 BRS，切波特率是上层的事），<=8 保持经典形态（经典节点收不到 FD 帧，8 字节帧变形就是真回归）；接收跳过远程帧与错误帧。vcan 验收：64 字节 FD 双向、8 字节帧在总线上仍是经典形态（探针 socket 直接看 `CanAnyFrame::Normal`）、FD 链路经典帧不回归、MTU 16 链路不报 FD。真机能力位与驱动一致性仍归 M5-08 抽验（H-02 记录口径不变）。夹具坑：vcan 的 MTU 必须在 `ip link set up` **之前**设，up 后 change_mtu 回 EBUSY、表象是"建链路失败"。cli e2e 的 `can_fd=false` 断言改用 MTU 16 的链路（WSL vcan 默认 MTU 2060，内核允许 FD，报 true 是对的）。crapper/dryer 新增面 CRAP ≤ 3.0、无重复候选。
 [x] M5-10 feat(bus-replay)：BLF / ASC 日志回放后端（按用户请求触发）→ 验收：回放与实时走同一条采集通路
     完成说明（2026-11-08）：bus-replay crate（asc 自实现、blf 经 ablf 0.2——真实 BLF 样本许可不干净未核对，见三道门）+ ReplayBus 实现 Bus。收尾：ReplayBus::recv 交付帧盖「起表时刻 + 日志偏移」时间戳（D-25 保留日志时间、禁墙钟混源，泵对回放帧永不回退到墙钟）；daemon `--replay <日志>`（互斥 --channel，扩展名分派 asc/blf、错误带行号）——open_replay_session 走 open_with_bus 不碰硬件不拿锁，回放单向观察不建链不配 DAQ，布局按 --sample 声明镜像（insert_odt），采集与实时同一条泵；样本时间戳来自日志偏移（测试断言对齐）。AppState::with_capture 的 info 改 Option（回放未建链界面如实显示）。验收：回放会话喂样本且时间戳对齐日志偏移、与实时同一采集通路（同泵同过滤），daemon 全量绿。
 [x] M5-11 feat(bus-socketcand)：socketcand 客户端（按用户请求触发）→ 验收：能力位按服务端如实上报，上层零分支
