@@ -588,6 +588,11 @@ impl Command {
         })
     }
 
+    // 以下 decode_* 群的相似度 0.82+ 是协议表的必然：每个命令的字段
+    // 布局由 ASAM 标准逐条规定，抽公共框架只会把「哪 byte 是哪域」
+    // 从一眼可见变成查两层。属复杂度三分类里的"协议分派"例外
+    // （cairn/code-quality.md），触发修改的条件：dryer 进 CI 门禁。
+
     fn decode_connect(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
         Ok(Self::Connect {
             mode: decoder.u8()?,
