@@ -67,3 +67,38 @@ async fn frames_arrive_in_log_order_keeping_the_log_pace() {
         .expect_err("放完要报关闭");
     assert!(err.to_string().contains("关闭"), "{err}");
 }
+
+/// D-25：回放喂入保留日志时间——帧的时间戳是「起表时刻 + 日志偏移」，
+/// 不是接收时刻；混源（一半墙钟一半日志时间）从这里挡住。
+#[tokio::test]
+async fn frames_carry_the_log_timestamp_not_the_receive_moment() {
+    let bus = ReplayBus::new(vec![
+        ReplayFrame {
+            offset_us: 100_000,
+            frame: frame(0x100, 1),
+        },
+        ReplayFrame {
+            offset_us: 300_000,
+            frame: frame(0x101, 2),
+        },
+    ]);
+    let started = std::time::Instant::now();
+    let (first, _) = pump_until(&bus, started).await;
+    let (second, _) = pump_until(&bus, started).await;
+
+    let at = |f: &CanFrame| {
+        f.timestamp
+            .map(|t| t.duration_since(started).as_micros())
+            .unwrap_or_else(|| panic!("回放帧必须带日志时间戳"))
+    };
+    let first_at = at(&first);
+    assert!(
+        (90_000..=140_000).contains(&first_at),
+        "首帧时间戳要对齐日志 100 ms 偏移：{first_at} µs"
+    );
+    let second_at = at(&second);
+    assert!(
+        (290_000..=350_000).contains(&second_at),
+        "次帧时间戳要对齐日志 300 ms 偏移：{second_at} µs"
+    );
+}

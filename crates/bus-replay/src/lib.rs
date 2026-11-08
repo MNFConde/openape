@@ -7,8 +7,9 @@
 //! 没给就照常开硬件通道。
 //!
 //! 时间语义：按日志里的相对时间真实回放（100 ms 的间隔就等 100 ms），
-//! `recv` 阻塞到点才返回帧；全部帧放完返回 `Closed`。回放是单向观察，
-//! `send` 报不支持——往日志里"写帧"没有意义。
+//! `recv` 阻塞到点才返回帧；全部帧放完返回 `Closed`。帧的时间戳按
+//! 「起表时刻 + 日志偏移」盖入（D-25：保留日志时间、禁墙钟混源）。
+//! 回放是单向观察，`send` 报不支持——往日志里"写帧"没有意义。
 
 pub mod asc;
 pub mod blf;
@@ -80,8 +81,12 @@ impl Bus for ReplayBus {
             let due = self.started + Duration::from_micros(next.offset_us);
             let now = Instant::now();
             if due <= now {
-                let ReplayFrame { frame, .. } = frames.remove(0);
-                Step::Deliver(frame)
+                let ReplayFrame { offset_us, frame } = frames.remove(0);
+                // 保留日志时间（D-25）：时间戳 = 起表 + 日志偏移，不是接收
+                // 时刻。采集泵据此推样本时间，绝不回退到墙钟。
+                Step::Deliver(
+                    frame.with_timestamp((self.started + Duration::from_micros(offset_us)).into()),
+                )
             } else {
                 Step::Wait((due - now).min(timeout))
             }
