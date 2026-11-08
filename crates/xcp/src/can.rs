@@ -11,7 +11,7 @@ use openape_xcp_proto::{
     Command, DecodeError, ErrorCode, MAX_CTO, OdtIds, Response, SHORT_IO_HEADER, SeedKey,
 };
 
-use crate::connection::{self, ConnectInfo, SessionStatus, XcpConnection, seq};
+use crate::connection::{self, ConnectInfo, DaqEvent, SessionStatus, XcpConnection, seq};
 use crate::daq::{self, DaqLayout, DaqListSpec};
 
 /// SHORT_UPLOAD 单次可读的最大字节数：响应帧 `PID + 命令码 + 数据` 共 8 字节。
@@ -108,13 +108,14 @@ impl CanXcpMaster {
         Err(self.timeout_fault(code))
     }
 
-    /// 把命令编成要发出去的帧。真 ECU 期望帧宽补齐到经典上限；更宽的帧
-    /// （CAN FD 上的短写）保持编码出的长度，不能截断。
+    /// 把命令编成要发出去的帧。定宽载体（经典 CAN）补齐到经典上限；
+    /// 不定宽的载体（UDP、回放）保持编码出的长度——对端按声明长度
+    /// 收帧，多余的字节会被当成命令的一部分拒掉。
     fn command_frame(&self, command: &Command) -> Result<CanFrame, Fault> {
         let mut data = command
             .encode_max(self.frame_width())
             .map_err(|err| connection::fault(seq::CODEC, Severity::Error, err.to_string()))?;
-        if data.len() < MAX_CTO {
+        if self.bus.capabilities().cro_padding && data.len() < MAX_CTO {
             data.resize(MAX_CTO, 0);
         }
         CanFrame::new(self.config.command_id, data)
@@ -416,6 +417,83 @@ impl XcpConnection for CanXcpMaster {
         Ok(())
     }
 
+    async fn daq_events(&mut self) -> Result<Vec<DaqEvent>, Fault> {
+        self.require_session()?;
+        // 事件总数在 GET_DAQ_PROCESSOR_INFO 里；为 0 表示从站没有打开
+        // 事件查询，不硬扫。
+        let payload = self.transact(&Command::GetDaqProcessorInfo).await?;
+        let count = payload
+            .get(3..5)
+            .and_then(|raw| <[u8; 2]>::try_from(raw).ok())
+            .map(u16::from_le_bytes)
+            .ok_or_else(|| {
+                connection::fault(
+                    seq::DAQ,
+                    Severity::Error,
+                    format!(
+                        "GET_DAQ_PROCESSOR_INFO 响应只有 {} 字节，读不到事件总数",
+                        payload.len()
+                    ),
+                )
+            })?;
+        let unsupported = || {
+            connection::fault(
+                seq::DAQ,
+                Severity::Error,
+                "从站不支持 GET_DAQ_EVENT_INFO（可选命令）",
+            )
+            .with_hint("事件号从 ECU 手册或 A2L 里找；也可以直接给事件号配 DAQ")
+        };
+        let mut events = Vec::new();
+        for index in 0..count {
+            let payload = self
+                .transact(&Command::GetDaqEventInfo { event: index })
+                .await
+                .map_err(|err| {
+                    if err.message().contains("命令码") {
+                        unsupported()
+                    } else {
+                        err
+                    }
+                })?;
+            // 响应有两种实测布局：properties(1) max_daq_lists(1)
+            // name_length(1) time_cycle(1) time_unit(1) priority(1)，
+            // 或参考实现 V2.3 的精简版——只有前两个域，且名字以 C 字
+            // 符串形式挂在 MTA 上，长度要按 0 结尾截。域缺席按 0 计。
+            let properties = payload.first().copied().unwrap_or(0);
+            let max_daq_lists = payload.get(1).copied().unwrap_or(0);
+            let name = match payload.get(2).copied() {
+                Some(name_len) if name_len > 0 => {
+                    let bytes = self.transact(&Command::Upload { len: name_len }).await?;
+                    String::from_utf8_lossy(&bytes).into_owned()
+                }
+                _ => {
+                    // 参考实现的 PTR 段 UPLOAD 对大块读取会拒绝
+                    // （实测 64 字节 0x24，8 字节通过）；它的名字缓冲
+                    // 上限 16 字节（XCP_MAX_EVENT_NAME=15 + 0 终止符）。
+                    let cap = self
+                        .session
+                        .as_ref()
+                        .map_or(MAX_CTO - 1, |info| info.max_cto as usize)
+                        .saturating_sub(1)
+                        .min(16);
+                    let bytes = self.transact(&Command::Upload { len: cap as u8 }).await?;
+                    let ended = bytes.split(|byte| *byte == 0).next().unwrap_or(&[]);
+                    String::from_utf8_lossy(ended).into_owned()
+                }
+            };
+            events.push(DaqEvent {
+                index,
+                properties,
+                max_daq_lists,
+                time_cycle: payload.get(3).copied().unwrap_or(0),
+                time_unit: payload.get(4).copied().unwrap_or(0),
+                name,
+            });
+        }
+        Ok(events)
+    }
+
     async fn configure_daq(&mut self, lists: &[DaqListSpec]) -> Result<DaqLayout, Fault> {
         let session = self.require_session()?;
         if session.resource & openape_xcp_proto::resource::DAQ == 0 {
@@ -426,7 +504,9 @@ impl XcpConnection for CanXcpMaster {
             )
             .with_hint("该 ECU 只支持标定读写；换用 resource 位含 DAQ 的从站"));
         }
-        let limit = u8::try_from(session.max_dto.saturating_sub(1)).unwrap_or(0);
+        // ODT 的载荷上限：从站报的 maxDto 减去 PID，封顶 255——ODT 条目
+        // 大小本身是单字节域（参考实现也报 255），更大的值不会兑现。
+        let limit = session.max_dto.saturating_sub(1).min(255) as u8;
 
         // 先把分组算完：任何一条放不下都在动从站之前报出来，不留半配置状态。
         let odts_per_list = lists
@@ -538,14 +618,20 @@ impl CanXcpMaster {
                     self.transact(&Command::WriteDaq {
                         bit_offset: 0,
                         size: signal.len.get() as u8,
-                        address_extension: 0,
+                        address_extension: spec.address_extension,
                         address: signal.address.get(),
                     })
                     .await?;
                 }
             }
+            // timestamp 位按调用方声明透传：参考实现（XCPlite）强制要
+            // 这一位，自研从站忽略它——DTO 是否真带时间戳由对端定。
+            let mut mode = 0;
+            if spec.timestamp {
+                mode |= 0x10;
+            }
             self.transact(&Command::SetDaqListMode {
-                mode: 0,
+                mode,
                 daq_list,
                 event: spec.event,
                 prescaler: spec.prescaler,
@@ -560,12 +646,18 @@ impl CanXcpMaster {
     ///
     /// 从站的编号是权威：master 按"跨 list 连续"算一遍，两者不一致说明对
     /// 绝对 ODT 编号的理解有分歧，此时收到的 DTO 必然切错，宁可现在就失败。
+    ///
+    /// 对端不支持逐 list 启动时（参考实现 XCPlite 的测试构建回 0x27）
+    /// 回退到 SELECT + START_STOP_SYNCH：此时拿不到从站的 firstPid（它
+    /// 的 DTO 头也不是 PID 字节），布局按 master 的连续分配，核对豁免
+    /// 并留下日志。
     async fn start_and_map(
         &mut self,
         odts_per_list: &[Vec<Vec<daq::DaqSignal>>],
     ) -> Result<DaqLayout, Fault> {
         let mut layout = DaqLayout::default();
         let mut next_pids = OdtIds::new();
+        let mut synch_fallback = false;
         for (index, groups) in odts_per_list.iter().enumerate() {
             let expected = next_pids.allocate(groups.len() as u8).ok_or_else(|| {
                 connection::fault(
@@ -574,7 +666,25 @@ impl CanXcpMaster {
                     "DAQ list 多到绝对 ODT 编号用尽（上限 0xFB）",
                 )
             })?;
-            let reported = self.start_list(index as u16).await?;
+            let reported = match self.start_list(index as u16).await {
+                Ok(pid) => pid,
+                Err(fault) => {
+                    if !fault.message().contains("0x27") {
+                        return Err(fault);
+                    }
+                    synch_fallback = true;
+                    self.transact(&Command::StartStopDaqList {
+                        mode: 2,
+                        daq_list: index as u16,
+                    })
+                    .await?;
+                    tracing::warn!(
+                        list = index,
+                        "从站不支持逐 list 启动：改用 SELECT+SYNCH，跳过从站 firstPid 核对"
+                    );
+                    expected
+                }
+            };
             if reported != expected {
                 return Err(connection::fault(
                     seq::DAQ,
@@ -588,6 +698,9 @@ impl CanXcpMaster {
             for (odt, group) in groups.iter().enumerate() {
                 layout.insert(expected + odt as u8, group);
             }
+        }
+        if synch_fallback {
+            self.transact(&Command::StartStopSynch { mode: 1 }).await?;
         }
         Ok(layout)
     }
@@ -634,17 +747,18 @@ fn take_exact(payload: Vec<u8>, wanted: usize) -> Result<Vec<u8>, Fault> {
 
 /// 解析 CONNECT 响应。CAN 上参数放不全时版本字段缺席，不臆造。
 fn parse_connect_info(payload: &[u8]) -> Result<ConnectInfo, Fault> {
-    // 帧定长 8 字节、短响应会被补零，所以"长度够"不代表"内容完整"。
-    // 可靠判据是 maxCto 非零：真从站不可能报 0。
-    if payload.len() < 6 {
+    // 标准 CONNECT 响应布局：resource(1) commMode(1) maxCto(byte)
+    // maxDto(LE word) protocol 版本 transport 版本，共 7 字节参数。
+    // CAN 8 字节帧恰好装下（PID + 7）；UDP 上从站也按标准回。
+    if payload.len() < 5 {
         return Err(connection::fault(
             seq::PROTOCOL,
             Severity::Error,
-            format!("CONNECT 响应只有 {} 字节，至少需要 6 字节", payload.len()),
+            format!("CONNECT 响应只有 {} 字节，至少需要 5 字节", payload.len()),
         ));
     }
-    let max_cto = u16::from_le_bytes([payload[2], payload[3]]);
-    let max_dto = u16::from_le_bytes([payload[4], payload[5]]);
+    let max_cto = u16::from(payload[2]);
+    let max_dto = u16::from_le_bytes([payload[3], payload[4]]);
     if max_cto == 0 {
         return Err(connection::fault(
             seq::PROTOCOL,
@@ -653,8 +767,10 @@ fn parse_connect_info(payload: &[u8]) -> Result<ConnectInfo, Fault> {
         )
         .with_hint("确认从站按标准回的响应是 PID + 命令码 + 参数"));
     }
-    let protocol_version = (payload.len() >= 8).then(|| (payload[6], payload[7]));
-    let transport_version = (payload.len() >= 10).then(|| (payload[8], payload[9]));
+    // 版本域只有 major；minor 由 GET_VERSION 给，那里没实现就归零。
+    // 用 then 而不是 then_some：后者急切求值，短响应会越界。
+    let protocol_version = (payload.len() >= 6).then(|| (payload[5], 0));
+    let transport_version = (payload.len() >= 7).then(|| (payload[6], 0));
     Ok(ConnectInfo {
         resource: payload[0],
         comm_mode_basic: payload[1],
@@ -680,28 +796,31 @@ mod tests {
 
     #[test]
     fn connect_info_reads_versions_only_when_the_frame_holds_them() {
-        // 8 字节：正好装得下协议版本，装不下传输层版本
-        let full = [0x05, 0x00, 8, 0, 8, 0, 1, 1];
-        let info = parse_connect_info(&full).expect("8 字节合法");
+        // 标准布局：resource、comm、maxCto(byte)、maxDto(LE word)、
+        // protocol major、transport major。6 字节只有协议版本，
+        // 7 字节两者都有。
+        let full = [0x05, 0x00, 8, 8, 0, 1];
+        let info = parse_connect_info(&full).expect("6 字节合法");
         assert_eq!(info.resource, 0x05);
         assert_eq!(info.comm_mode_basic, 0x00, "取第 1 字节，不是第 0 字节");
-        assert_eq!(info.protocol_version, Some((1, 1)));
+        assert_eq!(info.max_cto, 8);
+        assert_eq!(info.max_dto, 8);
+        assert_eq!(info.protocol_version, Some((1, 0)));
         assert_eq!(info.transport_version, None);
 
-        // 10 字节：加上传输层版本
-        let full = [0x05, 0x00, 8, 0, 8, 0, 1, 1, 1, 1];
-        let info = parse_connect_info(&full).expect("10 字节合法");
-        assert_eq!(info.transport_version, Some((1, 1)));
+        let full = [0x05, 0x00, 8, 8, 0, 1, 1];
+        let info = parse_connect_info(&full).expect("7 字节合法");
+        assert_eq!(info.transport_version, Some((1, 0)));
     }
 
     #[test]
     fn connect_info_rejects_short_and_zero_max_cto() {
         assert!(
-            parse_connect_info(&[0x05, 0x00, 8, 0, 8]).is_err(),
-            "不足 6 字节"
+            parse_connect_info(&[0x05, 0x00, 8, 8]).is_err(),
+            "不足 5 字节"
         );
         assert!(
-            parse_connect_info(&[0x05, 0x00, 0, 0, 8, 0]).is_err(),
+            parse_connect_info(&[0x05, 0x00, 0, 8, 0]).is_err(),
             "maxCto 为 0 说明响应被截断"
         );
     }

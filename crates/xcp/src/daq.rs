@@ -32,6 +32,14 @@ pub struct DaqListSpec {
     pub prescaler: u8,
     /// 采集哪些块，顺序即 DTO 内的字节顺序。
     pub signals: Vec<DaqSignal>,
+    /// 要求 DTO 带从站时间戳（SET_DAQ_LIST_MODE 的 timestamp 位）。
+    /// 对端能力里的强约束：XCPlite 的实现强制要这一位，不带就拒配。
+    /// DTO 布局由对端说了算，master 的解码按它呈现的头适配。
+    pub timestamp: bool,
+    /// 条目的地址扩展（WRITE_DAQ 的 ext 字节）。list 内必须一致——
+    /// 这是参考实现的硬约束。0 在多数真 ECU 上是绝对寻址；XCPlite
+    /// 的默认配置里 0 是标定段相对，绝对寻址用 0x01。
+    pub address_extension: u8,
 }
 
 impl DaqListSpec {
@@ -44,7 +52,21 @@ impl DaqListSpec {
             event,
             prescaler,
             signals,
+            timestamp: false,
+            address_extension: 0,
         })
+    }
+
+    /// 要求 DTO 带从站时间戳。
+    pub fn with_timestamp(mut self) -> Self {
+        self.timestamp = true;
+        self
+    }
+
+    /// 声明条目的地址扩展。
+    pub fn with_address_extension(mut self, ext: u8) -> Self {
+        self.address_extension = ext;
+        self
     }
 }
 

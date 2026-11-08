@@ -31,6 +31,26 @@ pub struct SessionStatus {
     pub protection: u8,
 }
 
+/// 一个事件通道（GET_DAQ_EVENT_INFO）。
+///
+/// DAQ 按事件出帧：配一条 DAQ 之前要先知道事件号。从站自己登记的事件
+/// 号 master 无法推算，只能查询。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DaqEvent {
+    /// 事件号。
+    pub index: u16,
+    /// 事件属性字节（bit2 支持 DAQ）。
+    pub properties: u8,
+    /// 该事件最多可挂的 DAQ list 数。
+    pub max_daq_lists: u8,
+    /// 周期数与单位（time_cycle 为 0 表示 sporadic）。
+    pub time_cycle: u8,
+    /// 时间单位（ASAM 编码：0=1ns，3=1µs，6=1ms）。
+    pub time_unit: u8,
+    /// 名字。从站登记时用的标识，形如 `mainloop`。
+    pub name: String,
+}
+
 /// 一条 XCP 连接。
 #[async_trait]
 pub trait XcpConnection: Send + Sync {
@@ -60,6 +80,13 @@ pub trait XcpConnection: Send + Sync {
 
     /// 完成资源保护解锁（GET_SEED → 算密钥 → UNLOCK）。
     async fn unlock(&mut self) -> Result<(), Fault>;
+
+    /// 列出从站登记的事件通道。
+    ///
+    /// 先 GET_DAQ_PROCESSOR_INFO 拿事件总数，再逐个 GET_DAQ_EVENT_INFO。
+    /// 从站不支持事件查询（可选命令）时报错并给指引——上层仍可手动指定
+    /// 事件号配 DAQ。
+    async fn daq_events(&mut self) -> Result<Vec<DaqEvent>, Fault>;
 
     /// 配置并启动 DAQ，返回把 DTO 切回信号的布局。
     ///

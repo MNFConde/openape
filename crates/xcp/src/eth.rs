@@ -63,7 +63,8 @@ impl Bus for UdpXcpBus {
     }
 
     fn capabilities(&self) -> BusCapabilities {
-        BusCapabilities::CLASSIC_SOFT_TIMESTAMP
+        // UDP 按声明长度收帧：不定宽、不补齐。
+        BusCapabilities::CLASSIC_SOFT_TIMESTAMP_UNPADDED
     }
 
     async fn send(&self, frame: CanFrame) -> Result<(), BusError> {

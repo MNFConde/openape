@@ -40,8 +40,8 @@ async fn slave_answers_connect_and_short_upload_on_the_bus() {
     assert_eq!(reply.id, response_id());
     assert_eq!(
         reply.data,
-        vec![0xFF, 0x05, 0x00, 0x08, 0x00, 0x08, 0x00],
-        "响应是 PID 加数据，不回显命令码"
+        vec![0xFF, 0x05, 0x00, 0x08, 0x08, 0x00, 0x01, 0x01],
+        "标准 CONNECT 响应布局，PID 后不回显命令码"
     );
 
     // SHORT_UPLOAD：命令码在 offset 0，地址对齐到 offset 4。

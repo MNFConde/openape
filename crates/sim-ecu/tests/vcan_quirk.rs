@@ -87,7 +87,8 @@ async fn injected_quirks_show_up_on_the_bus() {
         .await
         .expect("配置应成功");
     let dto = next_frame(&observer, |frame| {
-        frame.id == response_id() && frame.data.len() == 8
+        // DTO 的 PID 是 0x00；响应帧也是 8 字节但以 0xFF 开头，别混进来。
+        frame.id == response_id() && frame.data.len() == 8 && frame.data.first() == Some(&0x00)
     })
     .await;
     assert_eq!(&dto.data[..3], &[0x00, 0x11, 0x22], "PID + 实数据在前");

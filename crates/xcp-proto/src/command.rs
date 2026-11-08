@@ -59,6 +59,8 @@ pub enum CommandCode {
     StartStopSynch = 0xDD,
     /// 清空 DAQ list 的条目。
     ClearDaqList = 0xE3,
+    /// 查一个事件通道的属性与名字。
+    GetDaqEventInfo = 0xE5,
     /// 提交密钥。
     Unlock = 0xF7,
     /// 取种子。
@@ -93,6 +95,7 @@ impl CommandCode {
             0xDE => Self::StartStopDaqList,
             0xDD => Self::StartStopSynch,
             0xE3 => Self::ClearDaqList,
+            0xE5 => Self::GetDaqEventInfo,
             0xF7 => Self::Unlock,
             0xF8 => Self::GetSeed,
             _ => return None,
@@ -248,6 +251,12 @@ pub enum Command {
         /// DAQ list 编号。
         daq_list: u16,
     },
+    /// 查一个事件通道的属性与名字。名字不在响应帧里：从站把 MTA 指到
+    /// 名字，`name_length` 字节随后用 [`Command::Upload`] 拿。
+    GetDaqEventInfo {
+        /// 事件通道号。
+        event: u16,
+    },
     /// 取种子。`mode` 为 0 起新序列、1 续接；`resource` 是被保护资源位。
     GetSeed {
         /// 0 起新序列，1 续接。
@@ -293,6 +302,7 @@ impl Command {
             Self::StartStopDaqList { .. } => CommandCode::StartStopDaqList,
             Self::StartStopSynch { .. } => CommandCode::StartStopSynch,
             Self::ClearDaqList { .. } => CommandCode::ClearDaqList,
+            Self::GetDaqEventInfo { .. } => CommandCode::GetDaqEventInfo,
             Self::GetSeed { .. } => CommandCode::GetSeed,
             Self::Unlock { .. } => CommandCode::Unlock,
         }
@@ -437,6 +447,12 @@ impl Command {
                 .finish(),
             Self::StartStopSynch { mode } => Encoder::with_command(code).u8(*mode).finish(),
             Self::ClearDaqList { daq_list } => Encoder::with_command(code).u16(*daq_list).finish(),
+            // 参考从站的 CRO_GET_DAQ_EVENT_INFO_LEN 是 4：命令码 + 事件
+            // 号 + 保留字节，保留字节写 0。
+            Self::GetDaqEventInfo { event } => Encoder::with_command(code)
+                .u16(*event)
+                .u8(RESERVED)
+                .finish(),
             Self::GetSeed { mode, resource } => {
                 Encoder::with_command(code).u8(*mode).u8(*resource).finish()
             }
@@ -527,6 +543,9 @@ impl Command {
             }),
             CommandCode::ClearDaqList => Ok(Self::ClearDaqList {
                 daq_list: decoder.u16()?,
+            }),
+            CommandCode::GetDaqEventInfo => Ok(Self::GetDaqEventInfo {
+                event: decoder.u16()?,
             }),
             CommandCode::GetSeed => Ok(Self::GetSeed {
                 mode: decoder.u8()?,
@@ -785,6 +804,7 @@ mod tests {
             },
             Command::StartStopSynch { mode: 1 },
             Command::ClearDaqList { daq_list: 2 },
+            Command::GetDaqEventInfo { event: 7 },
             Command::GetSeed {
                 mode: 0,
                 resource: 1,

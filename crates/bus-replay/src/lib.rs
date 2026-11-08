@@ -57,8 +57,9 @@ impl Bus for ReplayBus {
     }
 
     fn capabilities(&self) -> BusCapabilities {
-        // 日志时间戳是软件记的，精度同软件时间戳档。
-        BusCapabilities::CLASSIC_SOFT_TIMESTAMP
+        // 日志时间戳是软件记的，精度同软件时间戳档；帧按日志里的实际
+        // 字节数呈现，不定宽、不补齐。
+        BusCapabilities::CLASSIC_SOFT_TIMESTAMP_UNPADDED
     }
 
     async fn send(&self, _frame: CanFrame) -> Result<(), BusError> {

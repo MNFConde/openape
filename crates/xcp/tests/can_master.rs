@@ -32,6 +32,7 @@ impl ScriptedBus {
         Self::with_capabilities(BusCapabilities {
             backends: FrameKinds::BOTH,
             hardware_timestamp: false,
+            cro_padding: true,
         })
     }
 
@@ -101,8 +102,9 @@ fn master_with(bus: &Arc<ScriptedBus>, retries: u8) -> CanXcpMaster {
 }
 
 fn connect_ok_payload() -> Vec<u8> {
-    // resource=DAQ|CAL_PAG, commMode=0, maxCto=8, maxDto=8。
-    vec![0x05, 0x00, 0x08, 0x00, 0x08, 0x00]
+    // 标准 CONNECT 响应布局：resource、commMode、maxCto(byte)、
+    // maxDto(LE word)、protocol 版本、transport 版本。
+    vec![0x05, 0x00, 0x08, 0x08, 0x00, 0x01, 0x01]
 }
 
 #[tokio::test]
@@ -119,8 +121,9 @@ async fn connect_parses_slave_capabilities() {
     assert_eq!(info.max_cto, 8);
     assert_eq!(info.max_dto, 8);
     assert_eq!(
-        info.protocol_version, None,
-        "CAN 上放不下版本字段，不许臆造"
+        info.protocol_version,
+        Some((1, 0)),
+        "标准布局带版本 major，minor 归零待 GET_VERSION 补"
     );
     assert_eq!(
         bus.sent_frames()[0].data,
@@ -297,11 +300,11 @@ async fn disconnect_marks_session_closed() {
 
 #[tokio::test]
 async fn connect_response_with_zero_max_cto_is_rejected() {
-    // 帧定长 8 字节，缺的参数会被补零；maxCto 为 0 是"响应不完整"的可靠判据。
+    // 标准布局里 maxCto 是单字节；maxCto 为 0 是"响应不完整"的可靠判据。
     let bus = Arc::new(ScriptedBus::new());
     bus.queue_response(Response::Ok {
-        // 长度够 6 字节，但 maxCto 与 maxDto 都是 0——从站不可能这么报。
-        payload: vec![0x05, 0x00, 0x00, 0x00, 0x00, 0x00],
+        // 长度够 7 字节，但 maxCto 与 maxDto 都是 0——从站不可能这么报。
+        payload: vec![0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
     });
     let mut master = master_with(&bus, 0);
 

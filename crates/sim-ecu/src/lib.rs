@@ -75,6 +75,10 @@ pub struct SimEcu {
     seed_counter: u32,
     /// 是否已解锁。
     unlocked: bool,
+    /// UPLOAD 的旁路缓冲：GET_DAQ_EVENT_INFO 这类「MTA 指到主机内存对
+    /// 象」的命令把对象放这里，下一次 UPLOAD 优先取它（XCP 允许 MTA 指
+    /// 向设备内存之外的载体，参考实现也是这么回事件名的）。
+    upload_override: Option<Vec<u8>>,
 }
 
 impl SimEcu {
@@ -92,6 +96,7 @@ impl SimEcu {
             pending_seed: None,
             seed_counter: 0,
             unlocked: false,
+            upload_override: None,
         }
     }
 
@@ -181,11 +186,20 @@ impl SimEcu {
         match command {
             Command::Connect { .. } => {
                 self.running = true;
-                // CAN 上 maxCto = 8：PID + 命令码之后只剩 6 字节参数。
-                // 版本字段放不下，master 侧因此按"缺席"处理，不臆造默认值。
+                // 标准 CONNECT 响应布局：resource、commMode、maxCto(byte)、
+                // maxDto(LE word)、protocol 版本、transport 版本——PID 加
+                // 7 字节参数正好一帧。版本报 major（1, 1），minor 归零。
                 ok(
                     code,
-                    vec![resource::CAL_PAG | resource::DAQ, 0x00, 8, 0x00, 8, 0x00],
+                    vec![
+                        resource::CAL_PAG | resource::DAQ,
+                        0x00,
+                        8,
+                        8,
+                        0x00,
+                        0x01,
+                        0x01,
+                    ],
                 )
             }
             Command::Disconnect => {
@@ -209,7 +223,17 @@ impl SimEcu {
                 ok(code, vec![])
             }
             Command::Upload { len } => {
-                let Some(data) = self.read_memory(self.mta, len) else {
+                // 旁路缓冲优先：事件名这类主机内存对象不经模拟内存。
+                let data = if let Some(override_data) = self.upload_override.take() {
+                    if len as usize <= override_data.len() {
+                        Some(override_data[..len as usize].to_vec())
+                    } else {
+                        None
+                    }
+                } else {
+                    self.read_memory(self.mta, len)
+                };
+                let Some(data) = data else {
                     return err(ErrorCode::OutOfRange);
                 };
                 self.mta = self.mta.saturating_add(len as u32);
@@ -279,6 +303,17 @@ impl SimEcu {
                 // properties=预分频与动态 DAQ、最多 4 条 list、最多 1 个事件通道
                 vec![0x03, 4, 0x00, 1, 0x00, 0x00],
             ),
+            Command::GetDaqEventInfo { event } => {
+                const EVENT_NAME: &str = "sim-tick";
+                if event != 0 {
+                    return err(ErrorCode::OutOfRange);
+                }
+                // 名字不在响应帧里：放进 UPLOAD 旁路缓冲，master 随后
+                // UPLOAD 按 name_length 取。
+                self.upload_override = Some(EVENT_NAME.as_bytes().to_vec());
+                // properties=支持 DAQ、该事件最多 4 条 list、周期域暂不支持（全 0）
+                ok(code, vec![0x04, 4, EVENT_NAME.len() as u8, 0, 0, 0])
+            }
             Command::GetDaqResolutionInfo => ok(
                 code,
                 // 条目粒度 1 字节、最大条目 7 字节；时间戳暂不支持（全 0）
@@ -884,8 +919,9 @@ mod tests {
         );
         assert_eq!(payload[0] & resource::DAQ, resource::DAQ);
         assert_eq!(payload[0] & resource::CAL_PAG, resource::CAL_PAG);
-        assert_eq!(u16::from_le_bytes([payload[2], payload[3]]), 8, "maxCto");
-        assert_eq!(u16::from_le_bytes([payload[4], payload[5]]), 8, "maxDto");
+        assert_eq!(payload[2], 8, "maxCto（标准布局单字节）");
+        assert_eq!(u16::from_le_bytes([payload[3], payload[4]]), 8, "maxDto");
+        assert_eq!(payload.len(), 7, "标准布局共 7 字节参数（含两个版本字节）");
     }
 
     #[test]

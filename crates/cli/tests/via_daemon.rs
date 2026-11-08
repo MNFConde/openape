@@ -55,7 +55,7 @@ async fn cli_reads_through_the_daemon_without_stealing_the_lock() {
         channel.clone(),
         session,
         capture,
-        info,
+        Some(info),
     ));
     let app = build_router(state, Path::new("ui/does-not-exist"));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -136,7 +136,7 @@ async fn the_via_helpers_work_against_a_live_daemon() {
         channel.clone(),
         session,
         capture,
-        info,
+        Some(info),
     ));
     let app = build_router(state, Path::new("ui/does-not-exist"));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

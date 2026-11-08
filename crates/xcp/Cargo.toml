@@ -15,6 +15,7 @@ openape-diag.workspace = true
 openape-xcp-proto.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tracing.workspace = true
 
 [lints]
 workspace = true

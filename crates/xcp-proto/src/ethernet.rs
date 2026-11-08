@@ -85,7 +85,9 @@ mod tests {
     #[test]
     fn headered_unwrap_names_a_mode_mismatch_instead_of_guessing() {
         // 无头消息被按带头解：包短于头长，报边界错误。
-        let short = HeaderMode::Headered.unwrap(&[0xFF, 0x00]).expect_err("头不完整");
+        let short = HeaderMode::Headered
+            .unwrap(&[0xFF, 0x00])
+            .expect_err("头不完整");
         assert!(short.contains("包边界"), "{short}");
         // 长度头与实际载荷不符：报长与实长都点名——对端模式不符的指纹。
         let mut packet = HeaderMode::Headered.wrap(&[0xFF, 0x00], 1);
