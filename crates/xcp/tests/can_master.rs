@@ -408,6 +408,10 @@ async fn configure_daq_emits_the_expected_command_sequence() {
         layout.decode(1, &[7, 8, 9, 10]),
         Some(vec![&[7u8, 8][..], &[9, 10][..]])
     );
+    // 私有头的从站发 list 内相对号，解码要靠这张表还原（D-27）：
+    // 单 list、从 0 起分配，相对 0 与相对 1 就是绝对 0 与 1。
+    assert_eq!(layout.absolute_pid(0, 0), Some(0));
+    assert_eq!(layout.absolute_pid(0, 1), Some(1));
 }
 
 #[tokio::test]

@@ -81,9 +81,14 @@ struct Slice {
 ///
 /// 这张表是 master 自己写下去的条目的镜像，所以它比从站更早知道每个字节
 /// 属于哪个信号。
+///
+/// 另存「每条 DAQ list 的首个绝对编号」（[`Self::insert_list`]）：私有头的
+/// 从站（D-27 的 `PidKind::RelativeToDaqList`）发的是 list 内相对号，靠它
+/// 才能还原成绝对号。标准从站的 DTO 自带绝对号，这张表不参与。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DaqLayout {
     odts: BTreeMap<u8, Vec<Slice>>,
+    list_first: BTreeMap<u16, u8>,
 }
 
 impl DaqLayout {
@@ -100,6 +105,22 @@ impl DaqLayout {
             })
             .collect();
         self.odts.insert(pid, slices);
+    }
+
+    /// 登记一条 DAQ list 的首个绝对 ODT 编号。
+    pub fn insert_list(&mut self, daq_list: u16, first_odt: u8) {
+        self.list_first.insert(daq_list, first_odt);
+    }
+
+    /// 把「list 内相对编号」还原成绝对 ODT 编号。
+    ///
+    /// list 没登记、或算出来的编号越过 [`openape_xcp_proto::PID_DAQ_MAX`]
+    /// （0xFC 起被命令与响应占用）时返回 `None`——不猜、也不截断。
+    pub fn absolute_pid(&self, daq_list: u16, relative: u8) -> Option<u8> {
+        let first = *self.list_first.get(&daq_list)?;
+        let absolute = u16::from(first) + u16::from(relative);
+        let absolute = u8::try_from(absolute).ok()?;
+        (absolute <= openape_xcp_proto::PID_DAQ_MAX).then_some(absolute)
     }
 
     /// 从信号表登记，等价于按长度调用 [`Self::insert_odt`]。
@@ -266,6 +287,35 @@ mod tests {
         assert!(layout.decode(3, &[0; 3]).is_none(), "载荷不足要报，不补零");
         assert!(!layout.is_empty());
         assert!(DaqLayout::default().is_empty());
+    }
+
+    #[test]
+    fn relative_pids_resolve_through_the_list_first_odt() {
+        // 私有头的从站发 list 内相对号；绝对号 = 该 list 首号 + 相对号。
+        let mut layout = DaqLayout::default();
+        layout.insert_list(0, 4);
+        layout.insert(4, &[signal(0x1000, 2)]);
+        layout.insert(5, &[signal(0x1002, 2)]);
+        assert_eq!(layout.absolute_pid(0, 0), Some(4));
+        assert_eq!(layout.absolute_pid(0, 1), Some(5));
+        assert_eq!(layout.absolute_pid(1, 0), None, "没登记的 list 不猜");
+        assert_eq!(
+            layout.absolute_pid(0, 0xF8),
+            None,
+            "4 + 0xF8 落到 0xFC，已经是命令区间"
+        );
+    }
+
+    #[test]
+    fn relative_pids_that_would_leave_the_daq_range_are_refused() {
+        let mut layout = DaqLayout::default();
+        layout.insert_list(0, 0xFB);
+        assert_eq!(layout.absolute_pid(0, 0), Some(0xFB));
+        assert_eq!(
+            layout.absolute_pid(0, 1),
+            None,
+            "0xFC 起是命令与响应，不能当 DTO 编号用"
+        );
     }
 
     #[test]

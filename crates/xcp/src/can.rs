@@ -684,6 +684,9 @@ impl CanXcpMaster {
             for (odt, group) in groups.iter().enumerate() {
                 layout.insert(expected + odt as u8, group);
             }
+            // 私有头的从站发 list 内相对号，解码要靠这张表还原（D-27）。
+            // 标准从站不看它，记下来零成本。
+            layout.insert_list(index as u16, expected);
         }
         if synch_fallback {
             self.transact(&Command::StartStopSynch { mode: 1 }).await?;

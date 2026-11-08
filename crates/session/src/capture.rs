@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use openape_bus::{Bus, BusError, CanId};
 use openape_diag::Metrics;
 use openape_xcp::DaqLayout;
-use openape_xcp_proto::dto_profile::{self, DtoProfile};
+use openape_xcp_proto::dto_profile::{self, DtoProfile, PidKind};
 use tokio::task::JoinHandle;
 
 use crate::daq_stream::{DEFAULT_CAPACITY, DaqStats, DaqStream};
@@ -117,12 +117,25 @@ async fn pump(
                     }
                     continue;
                 };
+                // 编号语义由档案声明（D-27）：绝对号直接用；list 内相对号
+                // 要用「该 list 的首个绝对编号」还原——拿相对号当绝对号用
+                // 能解出数，但解的是别的信号，比报错难查得多。
+                let pid = match dto.pid {
+                    PidKind::Absolute => Some(decoded.pid),
+                    PidKind::RelativeToDaqList => decoded
+                        .daq_list
+                        .and_then(|list| layout.absolute_pid(list, decoded.pid)),
+                };
+                let Some(pid) = pid else {
+                    stream.record_rejected();
+                    continue;
+                };
                 // 不认识的 ODT 编号不猜：多半是上一轮采集的残留帧。
-                if layout.decode(decoded.pid, decoded.payload).is_none() {
+                if layout.decode(pid, decoded.payload).is_none() {
                     continue;
                 }
                 stream.push_at(
-                    decoded.pid,
+                    pid,
                     frame.timestamp.unwrap_or_else(Instant::now),
                     decoded.payload.to_vec(),
                 );
@@ -298,6 +311,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_relative_pid_becomes_the_absolute_odt_number() {
+        // 私有头带 list 号与 list 内相对号：绝对号 = 该 list 首号 + 相对号。
+        // 采样流里的 pid 必须是绝对号，否则查 DaqLayout 一定错位。
+        let frame = raw(&[0x01, 0xAA, 0x00, 0x00, 0x03, 0x02, 0x01, 0x00, 0x44, 0x55]);
+        let bus = Arc::new(ScriptedBus::new(vec![frame]));
+        let mut layout = DaqLayout::default();
+        layout.insert_list(0, 4);
+        layout.insert_odt(5, &[ByteLen::new(2).expect("非零")]);
+        let config = CaptureConfig::default().with_dto(&openape_xcp_proto::dto_profile::XCPLITE);
+        let capture = spawn(bus, CanId::standard(0x601).expect("合法"), layout, &config);
+        let mut reader = capture.stream().subscribe();
+        let sample = tokio::time::timeout(Duration::from_secs(2), reader.recv())
+            .await
+            .expect("不该超时")
+            .expect("应有一条样本");
+        assert_eq!(sample.pid, 5, "相对 1 + 首号 4");
+        assert_eq!(sample.payload, vec![0x44, 0x55]);
+    }
+
+    #[tokio::test]
+    async fn a_relative_pid_with_no_known_list_is_rejected_not_guessed() {
+        // 档案说编号是相对的，帧里却没有可用 list 首号：跳过并计数，
+        // 绝不把相对号当绝对号用——那样能解出数，但解的是别人的信号。
+        let frame = raw(&[0x00, 0xAA, 0x07, 0x00, 0x03, 0x02, 0x01, 0x00, 0x11, 0x22]);
+        let bus = Arc::new(ScriptedBus::new(vec![frame]));
+        let config = CaptureConfig::default().with_dto(&openape_xcp_proto::dto_profile::XCPLITE);
+        let capture = spawn(
+            bus,
+            CanId::standard(0x601).expect("合法"),
+            layout_with(0, 2),
+            &config,
+        );
+        let mut reader = capture.stream().subscribe();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), reader.recv())
+                .await
+                .is_err(),
+            "没有 list 首号就不该出样本"
+        );
+        assert_eq!(capture.stats().produced, 0);
+        assert_eq!(capture.stats().rejected, 1);
+    }
+
+    #[tokio::test]
     async fn a_private_header_dto_is_split_by_the_profile() {
         // XCPlite 的私有头（D-27）：相对 ODT、0xAA 标记、DAQ list、时间戳，
         // 之后才是载荷——头字节绝不能进载荷。
@@ -306,18 +363,16 @@ mod tests {
         ]);
         let bus = Arc::new(ScriptedBus::new(vec![frame]));
         let config = CaptureConfig::default().with_dto(&openape_xcp_proto::dto_profile::XCPLITE);
-        let capture = spawn(
-            bus,
-            CanId::standard(0x601).expect("合法"),
-            layout_with(0, 4),
-            &config,
-        );
+        // list 0 的首号是 0：相对 0 就还原成绝对 0，与本例登记的 ODT 对上。
+        let mut layout = layout_with(0, 4);
+        layout.insert_list(0, 0);
+        let capture = spawn(bus, CanId::standard(0x601).expect("合法"), layout, &config);
         let mut reader = capture.stream().subscribe();
         let sample = tokio::time::timeout(Duration::from_secs(2), reader.recv())
             .await
             .expect("不该超时")
             .expect("应有一条样本");
-        assert_eq!(sample.pid, 0, "相对编号就是 PID 字节");
+        assert_eq!(sample.pid, 0, "相对 0 + 首号 0 还原成绝对 0");
         assert_eq!(sample.payload, vec![0x11, 0x22, 0x33, 0x44]);
     }
 
