@@ -97,6 +97,7 @@
     进度（2026-11-08，部分完成）：bus-replay crate 落地——asc 自实现（fixtures/replay/sample.asc 自造样本入库，认不出的行跳过、帧行解析失败报行号）、blf 经 ablf 0.2（MIT/Apache clean-room，容器解析归它，本 crate 只转语义；真实 BLF 样本许可不干净未核对，见三道门）、ReplayBus 实现 Bus trait（按日志时间真实节奏回放，锁不跨 await，放完报关闭）+ ReplayBus 时序测试。session::Session::open_with_bus 落地（回放不拿设备锁，Bus 层同一性已证）。缺口：daemon --replay 接线未做——回放总线上无从站，XCP connect 必败，正确接线是「日志 DTO 帧过滤后进 DaqStream 观察通路」，涉及 DaqStream 日志时间戳 vs 墙钟的语义决策，留下一轮做。
 [ ] M5-11 feat(bus-socketcand)：socketcand 客户端（按用户请求触发）→ 验收：能力位按服务端如实上报，上层零分支
 [ ] M5-12 feat(xcp)：XCP-on-Ethernet 传输（经 XcpConnection，UDP 先行）→ 验收：与 xcp-lite 从站互通，CONNECT 与 DAQ 跑通
+    进度（2026-11-08，部分完成）：xcp::eth 的 UdpXcpBus 落地——UDP 包按无头模式包成 Bus 视图（响应与 DTO 同端口、统一按响应标识符呈现，master 的 PID 过滤与 DAQ 解码零改动复用）；sim-ecu::serve_udp 落地（命令走同一 handle 状态机、DTO 发往最近命令来源）。回环验证 CONNECT / 短读 / DAQ 配置与 DTO 值全链通过（sim-ecu/tests/udp_eth.rs，放 L3 侧守依赖方向）。缺口：验收线的互通对象 xcp-lite 是 Vector 的 C 库（XCPlite），Rust 侧互通要 FFI 或外部构建链，属外部依赖决策；与第三方互通时按对端的 CTR 头模式适配（当前无头模式两侧自洽）；daemon 装配层尚未暴露 UDP 端点参数。
 [ ] M5-13 feat(ui-tauri)：桌面壳与 daemon sidecar（仅 Windows，D-21）→ 验收：双击启动可用，sidecar 生命周期与崩溃重启正确
 [ ] M5-14 chore(ci)：GitHub Actions（cargo 四门 + 前端检查 + 文档三检查 + golden）→ 验收：PR 上全绿且与本机结论一致
 [x] M5-15 test/docs：契约 crate 的 examples/（D-20 完成标准）+ cargo semver-checks 门 → 验收：每个契约 crate 有只用公开 API 的流程，semver 检查可跑

@@ -481,6 +481,65 @@ pub async fn serve_with_metrics(
     }
 }
 
+/// UDP 端点（M5-12）：XCP-on-Ethernet 的从站侧。
+///
+/// 命令走同一条 [`SimEcu::handle`] 状态机，DAQ 按同一套节拍出帧——
+/// UDP 包里没有 CAN 标识符，命令响应与 DTO 同端口进出。DTO 发给最近
+/// 一次命令的来源地址：XCP-on-Ethernet 的常规做法是从站回发到 master
+/// 的源端口；还没收到过命令时出的帧没有去处，按丢帧处理。
+pub async fn serve_udp(
+    mut ecu: SimEcu,
+    socket: Arc<tokio::net::UdpSocket>,
+    metrics: Arc<Metrics>,
+) -> Result<(), Fault> {
+    let config = ecu.config.clone();
+    let mut rng = Lcg::new(config.jitter_seed);
+    let mut next_tick = tokio::time::Instant::now() + next_delay(&config, &mut rng);
+    let mut buffer = vec![0u8; 2048];
+    let mut peer: Option<std::net::SocketAddr> = None;
+    loop {
+        tokio::select! {
+            biased;
+            received = socket.recv_from(&mut buffer) => {
+                let (count, source) = received.map_err(|err| {
+                    udp_fault(format!("从站收包失败：{err}"))
+                })?;
+                peer = Some(source);
+                let response = ecu.handle(&buffer[..count]);
+                socket
+                    .send_to(&response.encode(), source)
+                    .await
+                    .map_err(|err| udp_fault(format!("从站发响应失败：{err}")))?;
+            }
+            _ = tokio::time::sleep_until(next_tick) => {
+                let output = ecu.on_tick();
+                if output.dropped > 0 {
+                    metrics.record_dropped_frames(output.dropped as u64);
+                }
+                let Some(target) = peer else {
+                    metrics.record_dropped_frames(output.frames.len() as u64);
+                    continue;
+                };
+                for frame in output.frames {
+                    match socket.send_to(&frame.data, target).await {
+                        Ok(_) => metrics.record_daq_frames(1),
+                        Err(err) => {
+                            metrics.record_dropped_frames(1);
+                            tracing::warn!(target: "openape::sim", %err, "DAQ 帧发不出去");
+                        }
+                    }
+                }
+                next_tick = tokio::time::Instant::now() + next_delay(&config, &mut rng);
+            }
+        }
+    }
+}
+
+fn udp_fault(message: String) -> Fault {
+    let code = FaultCode::new(Domain::Bus, 5).expect("序号常量在 1..=999 内");
+    Fault::new(code, Severity::Error, message)
+}
+
 /// 发一轮 DAQ。单帧发不出去只计丢帧继续跑——DAQ 少一帧不致命，
 /// 命令通道挂了才致命，两者不能同一种处理。
 async fn emit_daq(ecu: &mut SimEcu, bus: &Arc<dyn Bus>, metrics: &Metrics) {
