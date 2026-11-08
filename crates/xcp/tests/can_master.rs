@@ -390,9 +390,9 @@ async fn configure_daq_emits_the_expected_command_sequence() {
     );
     let write = &frames[7].data;
     assert_eq!(
-        (write[0], write[3]),
-        (0xE1, 0x00),
-        "WRITE_DAQ 的地址扩展为 0"
+        (write[0], write[1], write[3]),
+        (0xE1, 0x00, 0x00),
+        "WRITE_DAQ 的 bit_offset 与地址扩展为 0"
     );
     let mode = &frames[12].data;
     assert_eq!(mode[0], 0xE0);

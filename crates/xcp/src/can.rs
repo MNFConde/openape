@@ -418,32 +418,12 @@ impl XcpConnection for CanXcpMaster {
     }
 
     async fn daq_events(&mut self) -> Result<Vec<DaqEvent>, Fault> {
-        self.require_session()?;
+        // max_cto 先拷出来：session 借着 self，upload 又要 &mut self。
+        let max_cto = self.require_session()?.max_cto;
         // 事件总数在 GET_DAQ_PROCESSOR_INFO 里；为 0 表示从站没有打开
         // 事件查询，不硬扫。
         let payload = self.transact(&Command::GetDaqProcessorInfo).await?;
-        let count = payload
-            .get(3..5)
-            .and_then(|raw| <[u8; 2]>::try_from(raw).ok())
-            .map(u16::from_le_bytes)
-            .ok_or_else(|| {
-                connection::fault(
-                    seq::DAQ,
-                    Severity::Error,
-                    format!(
-                        "GET_DAQ_PROCESSOR_INFO 响应只有 {} 字节，读不到事件总数",
-                        payload.len()
-                    ),
-                )
-            })?;
-        let unsupported = || {
-            connection::fault(
-                seq::DAQ,
-                Severity::Error,
-                "从站不支持 GET_DAQ_EVENT_INFO（可选命令）",
-            )
-            .with_hint("事件号从 ECU 手册或 A2L 里找；也可以直接给事件号配 DAQ")
-        };
+        let count = parse_max_event(&payload)?;
         let mut events = Vec::new();
         for index in 0..count {
             let payload = self
@@ -451,44 +431,20 @@ impl XcpConnection for CanXcpMaster {
                 .await
                 .map_err(|err| {
                     if err.message().contains("命令码") {
-                        unsupported()
+                        unsupported_event_query()
                     } else {
                         err
                     }
                 })?;
-            // 响应有两种实测布局：properties(1) max_daq_lists(1)
-            // name_length(1) time_cycle(1) time_unit(1) priority(1)，
-            // 或参考实现 V2.3 的精简版——只有前两个域，且名字以 C 字
-            // 符串形式挂在 MTA 上，长度要按 0 结尾截。域缺席按 0 计。
-            let properties = payload.first().copied().unwrap_or(0);
-            let max_daq_lists = payload.get(1).copied().unwrap_or(0);
-            let name = match payload.get(2).copied() {
-                Some(name_len) if name_len > 0 => {
-                    let bytes = self.transact(&Command::Upload { len: name_len }).await?;
-                    String::from_utf8_lossy(&bytes).into_owned()
-                }
-                _ => {
-                    // 参考实现的 PTR 段 UPLOAD 对大块读取会拒绝
-                    // （实测 64 字节 0x24，8 字节通过）；它的名字缓冲
-                    // 上限 16 字节（XCP_MAX_EVENT_NAME=15 + 0 终止符）。
-                    let cap = self
-                        .session
-                        .as_ref()
-                        .map_or(MAX_CTO - 1, |info| info.max_cto as usize)
-                        .saturating_sub(1)
-                        .min(16);
-                    let bytes = self.transact(&Command::Upload { len: cap as u8 }).await?;
-                    let ended = bytes.split(|byte| *byte == 0).next().unwrap_or(&[]);
-                    String::from_utf8_lossy(ended).into_owned()
-                }
-            };
+            let summary = parse_event_summary(&payload)?;
+            let name = self.upload_event_name(&summary, max_cto).await?;
             events.push(DaqEvent {
                 index,
-                properties,
-                max_daq_lists,
-                time_cycle: payload.get(3).copied().unwrap_or(0),
-                time_unit: payload.get(4).copied().unwrap_or(0),
                 name,
+                properties: summary.properties,
+                max_daq_lists: summary.max_daq_lists,
+                time_cycle: summary.time_cycle,
+                time_unit: summary.time_unit,
             });
         }
         Ok(events)
@@ -526,6 +482,36 @@ impl XcpConnection for CanXcpMaster {
 }
 
 impl CanXcpMaster {
+    /// 精简布局（无名字长度域）下 UPLOAD 的块大小：参考实现的 PTR 段
+    /// 对大块读取会拒绝（实测 64 字节 0x24，8 字节通过）；名字缓冲上限
+    /// 16 字节（XCP_MAX_EVENT_NAME=15 + 0 终止符）。
+    fn upload_name_cap(max_cto: u16) -> u8 {
+        (max_cto as usize).saturating_sub(1).min(16) as u8
+    }
+
+    /// 按响应布局取事件名：有名字长度域就按域 UPLOAD，精简布局按
+    /// 0 终止符从整块里截。
+    async fn upload_event_name(
+        &mut self,
+        summary: &EventSummary,
+        max_cto: u16,
+    ) -> Result<String, Fault> {
+        match summary.name_length {
+            Some(name_len) => {
+                let bytes = self.transact(&Command::Upload { len: name_len }).await?;
+                Ok(String::from_utf8_lossy(&bytes).into_owned())
+            }
+            None => {
+                let bytes = self
+                    .transact(&Command::Upload {
+                        len: Self::upload_name_cap(max_cto),
+                    })
+                    .await?;
+                Ok(name_before_terminator(&bytes))
+            }
+        }
+    }
+
     /// DOWNLOAD 一帧能带几字节：整帧减去命令码与长度字节。
     fn download_capacity(&self) -> Result<usize, Fault> {
         let width = self.frame_width();
@@ -745,6 +731,69 @@ fn take_exact(payload: Vec<u8>, wanted: usize) -> Result<Vec<u8>, Fault> {
     Ok(payload[..wanted].to_vec())
 }
 
+/// GET_DAQ_PROCESSOR_INFO 响应里的事件通道总数（LE word，偏移 3）。
+fn parse_max_event(payload: &[u8]) -> Result<u16, Fault> {
+    payload
+        .get(3..5)
+        .and_then(|raw| <[u8; 2]>::try_from(raw).ok())
+        .map(u16::from_le_bytes)
+        .ok_or_else(|| {
+            connection::fault(
+                seq::DAQ,
+                Severity::Error,
+                format!(
+                    "GET_DAQ_PROCESSOR_INFO 响应只有 {} 字节，读不到事件总数",
+                    payload.len()
+                ),
+            )
+        })
+}
+
+/// GET_DAQ_EVENT_INFO 不被从站支持时的统一故障。
+fn unsupported_event_query() -> Fault {
+    connection::fault(
+        seq::DAQ,
+        Severity::Error,
+        "从站不支持 GET_DAQ_EVENT_INFO（可选命令）",
+    )
+    .with_hint("事件号从 ECU 手册或 A2L 里找；也可以直接给事件号配 DAQ")
+}
+
+/// GET_DAQ_EVENT_INFO 响应的固定域。
+struct EventSummary {
+    properties: u8,
+    max_daq_lists: u8,
+    /// 名字长度域：参考实现的精简响应缺席（名字按 0 结尾从 UPLOAD 截）。
+    name_length: Option<u8>,
+    time_cycle: u8,
+    time_unit: u8,
+}
+
+/// 解析事件信息响应的固定域。两种实测布局：完整版六域，或参考实现
+/// 的精简版只有 properties 与 max_daq_lists——缺席域按 0 计。
+fn parse_event_summary(payload: &[u8]) -> Result<EventSummary, Fault> {
+    if payload.len() < 2 {
+        return Err(connection::fault(
+            seq::DAQ,
+            Severity::Error,
+            format!("GET_DAQ_EVENT_INFO 响应只有 {} 字节", payload.len()),
+        ));
+    }
+    Ok(EventSummary {
+        properties: payload[0],
+        max_daq_lists: payload[1],
+        name_length: payload.get(2).copied().filter(|len| *len != 0),
+        time_cycle: payload.get(3).copied().unwrap_or(0),
+        time_unit: payload.get(4).copied().unwrap_or(0),
+    })
+}
+
+/// UPLOAD 回来的名字按 0 终止符截取（参考实现的 C 字符串口径）。
+fn name_before_terminator(bytes: &[u8]) -> String {
+    let ended = bytes.split(|byte| *byte == 0).next().unwrap_or(&[]);
+    String::from_utf8_lossy(ended).into_owned()
+}
+
 /// 解析 CONNECT 响应。CAN 上参数放不全时版本字段缺席，不臆造。
 fn parse_connect_info(payload: &[u8]) -> Result<ConnectInfo, Fault> {
     // 标准 CONNECT 响应布局：resource(1) commMode(1) maxCto(byte)
@@ -823,5 +872,34 @@ mod tests {
             parse_connect_info(&[0x05, 0x00, 0, 8, 0]).is_err(),
             "maxCto 为 0 说明响应被截断"
         );
+    }
+
+    #[test]
+    fn event_queries_parse_both_layouts_and_name_the_shortfalls() {
+        // 事件总数：LE word 在偏移 3。
+        assert_eq!(
+            parse_max_event(&[0x11, 0, 0, 2, 0, 0, 0xC0]).ok(),
+            Some(2),
+            "参考实现的实测响应"
+        );
+        assert!(parse_max_event(&[0x11, 0, 0]).is_err(), "响应太短要报错");
+
+        // 完整布局：名字长度域存在且非零。
+        let full = parse_event_summary(&[0x04, 4, 8, 0, 0, 0]).expect("完整布局");
+        assert_eq!(full.name_length, Some(8));
+        assert_eq!(full.properties, 0x04, "属性字节在域 0");
+        assert_eq!(full.max_daq_lists, 4, "list 上限在域 1");
+        // 精简布局（参考实现）：只有两域，名字长度缺席。
+        let slim = parse_event_summary(&[0x11, 0]).expect("精简布局");
+        assert_eq!(slim.properties, 0x11);
+        assert_eq!(slim.max_daq_lists, 0);
+        assert_eq!(slim.name_length, None);
+        assert_eq!(slim.time_cycle, 0, "缺席域按 0 计");
+        assert!(parse_event_summary(&[0x05]).is_err(), "两域都不够要报错");
+
+        // 名字按 0 终止符截。
+        assert_eq!(name_before_terminator(b"V2.3\0\0\0"), "V2.3");
+        assert_eq!(name_before_terminator(b"mainloop"), "mainloop");
+        assert_eq!(name_before_terminator(b""), "");
     }
 }
