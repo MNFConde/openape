@@ -114,3 +114,9 @@
     完成说明（2026-11-08）：ui 性能面板（2s 轮询 GetMetrics，五项一等指标一行文本，界面只搬运数字不二次加工）；cli `openape metrics`（经 --via-daemon，--watch 每秒行内重画 \r 清行，--json 走契约 snake_case）。两侧同一 RPC 同一口径。验证：idle daemon 起→终端人类/JSON 双模拉通；ui tsc 与 vite build 过。M5-03 说明里的顺路项（daemon 实时录制 --record 接 recorder）不在本项验收线，未做，留待录制面单独排。
 [ ] M5-18 test：mutator/crapper 全仓台账分类——前置条件是先补行为测试钉住，再拆 → 验收：台账每项有「豁免（三类之一）/真缺口已杀/待拆」三态结论
     台账（2026-11-08 全仓首扫）：mutator 104 存活（sim-ecu 29、cal-core 21、diag 15、format-dbc 11、xcp 9、format-cdf 6、session 4、mf4/a2l 各 3、daemon 2、socketcan 1）；本轮新增面已处理（xcp 事件查询拆纯函数+断言补齐即杀、upload_name_cap 不可达分支收紧、WRITE_DAQ bit_offset 进帧断言、synch_fallback 属外部依赖环境限制豁免）。crapper 高 CRAP：cli doctor CC23/cov0、format-cdf label CC17/cov0、cli resolve CC20/cov29.9、session write_one CC10/cov0、unlock CC10——cov 0 的拆分前置是先补行为测试（Refactoring 第一步 pin 行为），不能裸拆。dryer 0.82 的 xcp-proto decode_* 群已登记协议分派例外（command.rs 注释）。
+[ ] M5-19 test(perf)：性能哨兵与基准基线（三层，L1 先做）→ 验收：L1 进 cargo test 常态跑、L2 有本机基线与 bench 编译门、L3 形态固定且不误报
+    规划（2026-11-08）：不追绝对帧率，只盯不变量与回归。真实链路量级作参照——CAN 经典 1Mbps ≈ 8 千帧/s（8 字节满载）、CAN-FD 5Mbps 数据段 ≈ 1.1 万帧/s（64 字节）、标定现场每 list 1kHz × 几十 list ≈ 几万帧/s；几十万帧/s 只有千兆 UDP 合成压测能到，只当余量参考，不进验收线。
+    - **L1 不变量哨兵（先做，成本最低、免疫 CI 抖动）**：不加计时、不比数值，只断言——采集泵空转不吃 CPU（无 DAQ 配置时不忙轮询）；`DaqStream` 环形缓冲满时丢弃计数与实际丢失一致（沿用 M5-02/03 的背压记账恒等式口径）；MF4 写出端背压时内存不无限涨（队列长度有上界且可观测）。形态是 `#[test]`，进现有 `cargo test` 与 CI 的 test job，无需新设施。
+    - **L2 数据面微基准（一次投入，排在 M5-12 的 DTO 头解码之后）**：只压三个无 IO、无 tokio 的纯热点——`DaqLayout::decode` 的字节切分、`HeaderMode::unwrap_all` 的包内分帧、MF4 单样本写出前的编码。需引入 criterion（dev-dependency，须过 `cargo audit`）。产出**本机基线数**用于回归比较，不设绝对阈值；DTO 头解码未落地前基线会白定，故顺序不能提前。
+    - **L3 CI 回归门（最后做）**：默认形态 `workflow_dispatch` + 夜间 cron 跑 L2 bench，结果存 artifact，退化由人看；PR 上只跑 L1 哨兵 + bench smoke（能编译、能跑完，不判数值）。GitHub 托管机方差大，真要判数值须 `--baseline` 文件比对并把阈值放宽到 15% 以上，或改走自建 runner。
+    - **端到端速率**：用 `--xcp-udp` 回环（sim-ecu 天然无限供数）量丢帧计数与 CPU 占比，不走 vcan——vcan 那档测的是内核 socket 缓冲，不是我们的代码。
