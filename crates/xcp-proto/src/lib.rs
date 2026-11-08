@@ -16,6 +16,7 @@
 
 mod codec;
 mod command;
+pub mod dto_profile;
 pub mod ethernet;
 pub mod protection;
 
