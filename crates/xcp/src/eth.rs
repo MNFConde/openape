@@ -27,6 +27,9 @@ pub struct UdpXcpBus {
     mode: HeaderMode,
     /// 出向 CTR 头的计数器：只增不校验，给对端抓包时对序用。
     counter: AtomicU16,
+    /// 拆多出来的消息：对端会把若干条消息拼进一条 UDP 包，一条包拆出
+    /// 多条时剩下的排队，下一次 recv 先交付它们。
+    pending: std::sync::Mutex<std::collections::VecDeque<Vec<u8>>>,
 }
 
 impl UdpXcpBus {
@@ -43,6 +46,7 @@ impl UdpXcpBus {
             response_id,
             mode,
             counter: AtomicU16::new(0),
+            pending: std::sync::Mutex::new(std::collections::VecDeque::new()),
         })
     }
 
@@ -85,7 +89,11 @@ impl Bus for UdpXcpBus {
     }
 
     async fn recv(&self, timeout: Duration) -> Result<CanFrame, BusError> {
-        let mut buffer = vec![0u8; 2048];
+        // 上一条包拆出来的消息还没交付完，先给它们。
+        if let Some(message) = self.take_pending() {
+            return self.frame_of(message);
+        }
+        let mut buffer = vec![0u8; 4096];
         let received = tokio::time::timeout(timeout, self.socket.recv(&mut buffer)).await;
         let count = match received {
             Ok(Ok(count)) => count,
@@ -99,12 +107,34 @@ impl Bus for UdpXcpBus {
         // UDP 上命令响应与 DTO 同端口到达且没有 CAN 标识符：统一按响应
         // 标识符呈现，靠 PID 区分——master 的 await_answer 与 DAQ 解码
         // 各自的过滤在 CAN 上就是这么干的，这里原样复用。
-        let message = self
+        let messages = self
             .mode
-            .unwrap(&buffer[..count])
+            .unwrap_all(&buffer[..count])
             .map_err(BusError::Transport)?;
-        CanFrame::new(self.response_id, message.to_vec())
+        let mut queued = self
+            .pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        queued.extend(messages.into_iter().map(<[u8]>::to_vec));
+        drop(queued);
+        let message = self
+            .take_pending()
+            .ok_or_else(|| BusError::Transport(format!("包长 {count} 里没有 XCP 消息")))?;
+        self.frame_of(message)
+    }
+}
+
+impl UdpXcpBus {
+    fn take_pending(&self) -> Option<Vec<u8>> {
+        self.pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .pop_front()
+    }
+
+    fn frame_of(&self, message: Vec<u8>) -> Result<CanFrame, BusError> {
+        CanFrame::new(self.response_id, message)
             .map(|frame| frame.with_timestamp(std::time::Instant::now()))
-            .ok_or_else(|| BusError::Transport(format!("包长 {count} 超出帧上限")))
+            .ok_or_else(|| BusError::Transport("收到超过帧上限的 XCP 消息".to_owned()))
     }
 }

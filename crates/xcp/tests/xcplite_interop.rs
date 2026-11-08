@@ -8,16 +8,21 @@
 //! / GET_DAQ_EVENT_INFO 的两种响应布局都能解，动态 DAQ 分配全序列
 //! （FREE_DAQ → ALLOC_DAQ → ALLOC_ODT → ALLOC_ODT_ENTRY → SET_DAQ_PTR →
 //! WRITE_DAQ → SET_DAQ_LIST_MODE(timestamp) → START_STOP_SYNCH）被参考
-//! 实现逐条接受。
+//! 实现逐条接受，**DTO 数据流已通到总线层**：配置后每 1ms 一拍，载荷是
+//! `global_counter` 的 u32 且逐帧递增。
 //!
-//! 未达成（如实记录，不谎报）：DTO 数据流。所有命令都通过、从站侧
-//! 「DAQ processing start」也有日志，但参考实现不发出 DTO；其 DTO 头
-//! 还是私有格式（pid+保留+daq 词+32 位时间戳），两层适配攒下一轮。
+//! 仍未做（如实记录）：DTO 头的解码。参考实现的 DTO 头是私有布局
+//! `[相对 ODT 号][0xAA 对齐][DAQ list u16 LE][32 位时间戳][数据]`（源码
+//! `xcplite.c` 的 ODT_HEADER_SIZE==4 分支），比标准的 `[PID][数据]` 多
+//! 7 字节且 PID 是 list 内相对号；生产解码要接这一层，得先把「DTO 头
+//! 布局」做成显式能力（会一路穿到 session 的采集泵），待排期决策。
+//! 本测试只断言「帧到、内容对」，头由测试内的 `xcplite_dto_payload` 剥。
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
-use openape_bus::CanId;
+use openape_bus::{Bus, CanId};
 use openape_cal_core::{Address, ByteLen};
 use openape_xcp::CanXcpMaster;
 use openape_xcp::XcpConfig;
@@ -30,6 +35,18 @@ fn signal(address: u32, len: u16) -> openape_xcp::daq::DaqSignal {
         address: Address::new(address),
         len: ByteLen::new(len).expect("长度非零"),
     }
+}
+
+/// 剥参考实现的私有 DTO 头，取载荷。布局见文件头注释。
+///
+/// 返回 `(相对 ODT 号, DAQ list 号, 载荷)`。
+fn xcplite_dto_payload(frame: &[u8]) -> Option<(u8, u16, &[u8])> {
+    const HEADER: usize = 8;
+    if frame.len() < HEADER || frame[1] != 0xAA {
+        return None;
+    }
+    let daq = u16::from_le_bytes([frame[2], frame[3]]);
+    Some((frame[0], daq, &frame[HEADER..]))
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -74,18 +91,22 @@ async fn xcplite_server_accepts_connect_events_and_daq_config() {
     // 事件发现：参考实现的精简响应布局（无 name_length 域，名字走
     // UPLOAD 按 0 结尾截）也要能解。
     //
-    // 已知错位（2026-11-08 实测）：参考实现的 GET_DAQ_EVENT_INFO 编号
-    // 空间与 SET_DAQ_LIST_MODE 的不一致——E5 空间 [0]=V2.3、[1]=空名，
-    // 而它自己的日志打印 1=mainloop。事件名在这里不可作配对依据，
-    // 验收点收在「机制工作、清单非空」；真实 ECU 的对接以 ECU 手册
-    // 的事件号为准。
+    // 已知差异（2026-11-08 实测）：参考实现 GET_DAQ_EVENT_INFO 返回的
+    // 名字不可信——UPLOAD 读回的是 "V2.3"（EPK 版本串），不是事件名；
+    // 而 A2L（`tmp/XCPlite/hello_xcp_V2.3.a2l`）给出的权威事件是
+    // EVENT 0 = calc_power、EVENT 1 = mainloop。**事件号按 A2L 取，不按
+    // 这里返回的名字配对**；名称解析本身留待验证（不影响编号）。
     let events = master.daq_events().await.expect("XCPlite 支持事件查询");
-    assert!(!events.is_empty(), "事件清单不能为空");
+    assert!(events.len() >= 2, "事件清单非空，实际 {}", events.len());
 
     // 动态 DAQ 配置全序列：每条命令都要被接受。timestamp 位是参考
     // 实现的硬要求；地址扩展 0x01 是它默认配置的绝对寻址（0 是标定
     // 段相对，global_counter 不在标定段）。
-    let list = DaqListSpec::new(events[0].index, 1, vec![signal(counter_addr, 4)])
+    //
+    // 事件号 1 = mainloop（A2L 权威）：global_counter 挂在它上面、每
+    // 1ms 触发一次。**配成 EVENT 0 会静默成功但永不出帧**——calc_power
+    // 只在函数被调用时触发，这就是第一轮「命令全过却没有 DTO」的根因。
+    let list = DaqListSpec::new(1, 1, vec![signal(counter_addr, 4)])
         .expect("配置合法")
         .with_timestamp()
         .with_address_extension(0x01);
@@ -93,4 +114,24 @@ async fn xcplite_server_accepts_connect_events_and_daq_config() {
         .configure_daq(&[list])
         .await
         .expect("XCPlite 要接受动态 DAQ 配置全序列");
+
+    // DTO 到达：取两帧，剥私有头后载荷是递增的计数器。
+    let first = bus.recv(Duration::from_secs(2)).await.expect("要收到 DTO");
+    let second = bus
+        .recv(Duration::from_secs(2))
+        .await
+        .expect("要收到第二帧");
+    let (odt, daq, first_payload) =
+        xcplite_dto_payload(&first.data).expect("第一帧是 XCPlite 的 DTO");
+    let (_, _, second_payload) =
+        xcplite_dto_payload(&second.data).expect("第二帧是 XCPlite 的 DTO");
+    assert_eq!(odt, 0, "单 list 单 ODT，相对编号应为 0");
+    assert_eq!(daq, 0, "DAQ list 号应为 0");
+    assert_eq!(first_payload.len(), 4, "global_counter 是 u32");
+    let first_value = u32::from_le_bytes(first_payload.try_into().expect("4 字节"));
+    let second_value = u32::from_le_bytes(second_payload.try_into().expect("4 字节"));
+    assert!(
+        second_value > first_value,
+        "计数器要递增：{first_value} → {second_value}"
+    );
 }
