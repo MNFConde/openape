@@ -12,6 +12,7 @@ use axum::Router;
 use clap::Parser;
 use openape_bus::{Bus, CanId};
 use openape_bus_replay::{ReplayBus, ReplayFrame};
+use openape_bus_socketcand::SocketcandBus;
 use openape_cal_core::{Address, ByteLen};
 use openape_diag::{Domain, Fault, FaultCode, Metrics, Severity};
 use openape_session::{CaptureConfig, Session, SessionConfig, WriteContext};
@@ -38,11 +39,19 @@ pub struct Args {
     pub replay: Option<PathBuf>,
     /// XCP-on-Ethernet 从站地址（`IP:端口`，UDP）。与 CAN 通道互斥；
     /// 对 XCPlite 这类默认带 CTR 头的对端再给 `--xcp-udp-headered`。
-    #[arg(long, conflicts_with = "channel")]
+    #[arg(long, conflicts_with_all = ["channel", "replay", "socketcand"])]
     pub xcp_udp: Option<String>,
     /// UDP 包走 CTR 头模式（XCP-on-Ethernet，XCPlite 默认）。
     #[arg(long, requires = "xcp_udp")]
     pub xcp_udp_headered: bool,
+    /// socketcand 守护进程地址（`host:端口`，TCP）。远端主机上的
+    /// SocketCAN 接口经它访问（M5-11），接口名由 `--socketcand-channel`
+    /// 给出。
+    #[arg(long, conflicts_with_all = ["channel", "replay", "xcp_udp"])]
+    pub socketcand: Option<String>,
+    /// socketcand 模式下的接口名（远端主机上的 CAN 接口）。
+    #[arg(long, default_value = "vcan0", requires = "socketcand")]
+    pub socketcand_channel: String,
     /// 命令帧标识符。
     #[arg(long, default_value_t = 0x600)]
     pub tx_id: u32,
@@ -259,21 +268,59 @@ pub async fn open_udp_session(
     ))
 }
 
+/// 连一台 socketcand 守护进程装配会话与采集（M5-11）：远端主机的
+/// SocketCAN 接口经 TCP 暴露，采集与本地 CAN 走同一条泵——上层对
+/// 后端零分支，能力位由 [`SocketcandBus`] 如实上报。
+pub async fn open_socketcand_session(
+    address: &str,
+    channel: &str,
+    tx_id: u32,
+    rx_id: u32,
+    specs: &[SampleSpec],
+    metrics: Arc<Metrics>,
+) -> Result<AppState, Fault> {
+    let peer: SocketAddr = address
+        .parse()
+        .map_err(|_| usage(format!("{address} 形如 127.0.0.1:29536")))?;
+    let bus = SocketcandBus::open(peer, channel)
+        .await
+        .map_err(|err| usage(format!("连 socketcand {address} 失败：{err}")))?;
+    let config = session_config(channel, tx_id, rx_id)?;
+    let mut session = Session::open_with_bus(config, Arc::new(bus))?;
+    let list = DaqListSpec::new(0, 1, signals(specs)?).ok_or_else(|| usage("采样列表为空"))?;
+    let info = session.connect(0).await?;
+    tracing::info!(max_cto = info.max_cto, max_dto = info.max_dto, "建链成功");
+    let layout = session.configure_daq(&[list]).await?;
+    let capture = session.start_capture_with(
+        layout,
+        CaptureConfig::default().with_metrics(metrics.clone()),
+    );
+    Ok(AppState::with_capture(
+        metrics,
+        format!("socketcand:{channel}"),
+        session,
+        capture,
+        Some(info),
+    ))
+}
+
 /// 按参数决定状态：给了通道就接管，给了回放日志就放日志，给了 UDP
-/// 从站就连以太网，都没给就只做健康与指标。
+/// 从站就连以太网，给了 socketcand 就走远端主机，都没给就只做健康
+/// 与指标。
 pub async fn build_state(args: &Args, metrics: Arc<Metrics>) -> Result<Arc<AppState>, Fault> {
     let state = match (
         args.channel.as_deref(),
         args.replay.as_deref(),
         args.xcp_udp.as_deref(),
+        args.socketcand.as_deref(),
     ) {
-        (Some(channel), _, _) => {
+        (Some(channel), _, _, _) => {
             open_session(channel, args.tx_id, args.rx_id, &args.samples, metrics).await?
         }
-        (_, Some(path), _) => {
+        (_, Some(path), _, _) => {
             open_replay_session(path, args.tx_id, args.rx_id, &args.samples, metrics)?
         }
-        (_, _, Some(peer)) => {
+        (_, _, Some(peer), _) => {
             open_udp_session(
                 peer,
                 args.xcp_udp_headered,
@@ -284,7 +331,18 @@ pub async fn build_state(args: &Args, metrics: Arc<Metrics>) -> Result<Arc<AppSt
             )
             .await?
         }
-        (None, None, None) => AppState::idle(metrics),
+        (_, _, _, Some(address)) => {
+            open_socketcand_session(
+                address,
+                &args.socketcand_channel,
+                args.tx_id,
+                args.rx_id,
+                &args.samples,
+                metrics,
+            )
+            .await?
+        }
+        (None, None, None, None) => AppState::idle(metrics),
     };
     // 变量清单与是否接管硬件无关：可以只看描述文件不连 ECU。
     let state = match load_variables(args.elf.as_deref(), args.a2l.as_deref()) {
@@ -352,11 +410,14 @@ pub async fn prepare(args: &Args, metrics: Arc<Metrics>) -> Result<Prepared, Fau
 pub async fn run(args: Args) -> Result<(), Fault> {
     let metrics = Arc::new(Metrics::new());
     let prepared = prepare(&args, metrics).await?;
-    match (&args.channel, &args.replay, &args.xcp_udp) {
-        (Some(channel), _, _) => tracing::info!(channel, "已接管通道"),
-        (None, Some(path), _) => tracing::info!(path = %path.display(), "回放模式"),
-        (None, _, Some(peer)) => tracing::info!(peer, "XCP-on-Ethernet 模式"),
-        (None, None, None) => {}
+    match (&args.channel, &args.replay, &args.xcp_udp, &args.socketcand) {
+        (Some(channel), _, _, _) => tracing::info!(channel, "已接管通道"),
+        (None, Some(path), _, _) => tracing::info!(path = %path.display(), "回放模式"),
+        (None, _, Some(peer), _) => tracing::info!(peer, "XCP-on-Ethernet 模式"),
+        (None, _, _, Some(address)) => {
+            tracing::info!(address, channel = %args.socketcand_channel, "socketcand 模式")
+        }
+        (None, None, None, None) => {}
     }
     println!("openaped 监听 http://{}", prepared.address);
     axum::serve(prepared.listener, prepared.app)
@@ -791,5 +852,44 @@ End TriggerBlock
         ])
         .expect_err("CAN 与 UDP 互斥");
         assert!(err.to_string().contains("cannot be used"), "{err}");
+    }
+
+    #[test]
+    fn socketcand_arguments_carry_defaults_and_exclusions() {
+        let args = Args::try_parse_from(["openaped", "--socketcand", "127.0.0.1:29536"])
+            .expect("socketcand 地址可解析");
+        assert_eq!(args.socketcand_channel, "vcan0", "接口名默认 vcan0");
+        let err = Args::try_parse_from([
+            "openaped",
+            "--channel",
+            "vcan0",
+            "--socketcand",
+            "127.0.0.1:29536",
+        ])
+        .expect_err("CAN 与 socketcand 互斥");
+        assert!(err.to_string().contains("cannot be used"), "{err}");
+        let err = Args::try_parse_from(["openaped", "--socketcand-channel", "can1"])
+            .expect_err("接口名开关不能脱离地址用");
+        assert!(err.to_string().contains("required"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_dead_socketcand_endpoint_fails_fast_with_a_named_cause() {
+        // 没有守护进程监听的端口：连接被拒要转成人话故障，而不是挂着。
+        let dead: SocketAddr = "127.0.0.1:1".parse().expect("合法地址");
+        let err = open_socketcand_session(
+            &dead.to_string(),
+            "vcan0",
+            0x600,
+            0x601,
+            &[SampleSpec {
+                address: 0x1000,
+                len: 2,
+            }],
+            Arc::new(Metrics::new()),
+        )
+        .await
+        .expect_err("没有守护进程要失败");
+        assert!(err.message().contains("socketcand"), "{err}");
     }
 }

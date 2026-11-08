@@ -22,6 +22,7 @@ openape-xcp-proto = { path = "crates/xcp-proto" }
 openape-proto = { path = "crates/proto" }
 openape-bus = { path = "crates/bus" }
 openape-bus-socketcan = { path = "crates/bus-socketcan" }
+openape-bus-socketcand = { path = "crates/bus-socketcand" }
 openape-bus-replay = { path = "crates/bus-replay" }
 openape-bus-zlg = { path = "crates/bus-zlg" }
 openape-xcp = { path = "crates/xcp" }

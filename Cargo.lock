@@ -1162,6 +1162,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "openape-bus-socketcand"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "openape-bus",
+ "openape-bus-socketcan",
+ "openape-cal-core",
+ "openape-sim-ecu",
+ "openape-xcp",
+ "openape-xcp-proto",
+ "tokio",
+]
+
+[[package]]
 name = "openape-bus-zlg"
 version = "0.2.0"
 dependencies = [
@@ -1217,6 +1231,7 @@ dependencies = [
  "openape-bus",
  "openape-bus-replay",
  "openape-bus-socketcan",
+ "openape-bus-socketcand",
  "openape-cal-core",
  "openape-diag",
  "openape-format-a2l",

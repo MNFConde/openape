@@ -19,6 +19,7 @@ openape-format-mf4.workspace = true
 openape-bus.workspace = true
 openape-bus-socketcan.workspace = true
 openape-bus-replay.workspace = true
+openape-bus-socketcand.workspace = true
 openape-cal-core.workspace = true
 openape-diag.workspace = true
 openape-proto.workspace = true

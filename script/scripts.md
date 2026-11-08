@@ -9,6 +9,16 @@
 | [check-markers.py](check-markers.py) | 校验方案状态标记两格式（行内简记=链接、块记=小标题+callout）结构 | 提交门禁（同上） |
 | [check-commit-msg.py](check-commit-msg.py) | 校验提交信息 Conventional Commits（结构/宽度/行数/footer/豁免清单） | 由 [.githooks/commit-msg](../.githooks/commit-msg) 钩子调用 |
 | [../.githooks/commit-msg](../.githooks/commit-msg) | 钩子薄壳：定位仓库根 → 四级探测 python → 调用 check-commit-msg；全不命中时告警放行——该输出 = 门失效须修环境 | git commit 自动 |
+| [xcplite-interop.sh](xcplite-interop.sh) | M5-12 互通验收：构建 XCPlite（MIT，`tmp/XCPlite`，缺则提示 clone `github.com/vectorgrp/XCPlite`）→ 起 `hello_xcp` 从站（UDP 5555，CTR 头）→ 算 `global_counter` 符号偏移 → 跑 `#[ignore]` 互通测试。依赖 cmake/gcc | 手动（互通复验时） |
+
+## 外部构建件台账
+
+> 集成测试依赖的外部构建产物：构建方式记一行，产物默认放 `tmp/`（不入 git）。
+
+| 构件 | 构建方式 | 消费方 |
+|---|---|---|
+| socketcand 0.6.x（GPL，运行时依赖不入分发） | `tmp/socketcand`：`git clone --depth 1 github.com/linux-can/socketcand` → `apt install libconfig-dev libsocketcan-dev` → `meson setup -Dlibconfig=true --buildtype=release build` → `meson compile -C build`；产物 `build/src/socketcand` | `crates/bus-socketcand/tests/vcan.rs`（默认路径，或 `SOCKETCAND_BIN` 覆盖）；测试自带 vcan 缺席时跳过 |
+| XCPlite（MIT） | 见 [xcplite-interop.sh](xcplite-interop.sh) | 同上 |
 
 ## 临时探针台账
 
