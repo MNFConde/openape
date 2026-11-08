@@ -87,6 +87,7 @@ async fn pump(
     stream: Arc<DaqStream>,
     paused: Arc<AtomicBool>,
 ) {
+    let mut warned = false;
     loop {
         if paused.load(Ordering::Relaxed) {
             // 让出接收端给命令事务。
@@ -104,6 +105,16 @@ async fn pump(
                 // 跳过——头长猜错比丢一帧糟得多：头字节混进载荷会让曲线看着
                 // 有数、实际全错。
                 let Ok(decoded) = dto_profile::split(dto, &frame.data) else {
+                    stream.record_rejected();
+                    // 只喊一次：一万帧里每帧喊一声只会把日志刷满，而这通常
+                    // 是「档案配错」这一个确定性错误，不是一个持续故障。
+                    if !warned {
+                        warned = true;
+                        tracing::warn!(
+                            profile = dto.name,
+                            "有帧按 DTO 档案解不出来（已计入 rejected）：若整段采集一条样本都没有，多半是 --dto-header 与从站不符"
+                        );
+                    }
                     continue;
                 };
                 // 不认识的 ODT 编号不猜：多半是上一轮采集的残留帧。
@@ -333,5 +344,10 @@ mod tests {
             "头长不足的帧不该变成样本"
         );
         assert_eq!(capture.stats().produced, 0);
+        assert_eq!(
+            capture.stats().rejected,
+            2,
+            "两帧都按档案不符计数——配错档案时这个数会一直涨"
+        );
     }
 }

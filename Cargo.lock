@@ -1241,6 +1241,7 @@ dependencies = [
  "openape-session",
  "openape-sim-ecu",
  "openape-xcp",
+ "openape-xcp-proto",
  "serde_json",
  "tokio",
  "tokio-stream",
@@ -1342,6 +1343,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

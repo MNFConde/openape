@@ -44,6 +44,11 @@ pub struct Args {
     /// UDP 包走 CTR 头模式（XCP-on-Ethernet，XCPlite 默认）。
     #[arg(long, requires = "xcp_udp")]
     pub xcp_udp_headered: bool,
+    /// 对端的 DTO 头布局档案（D-27）。默认 `standard`（`[PID][数据]`）；
+    /// XCPlite 这类带私有头的从站选 `xcplite`。选错不会报错，只会让
+    /// 采集一条样本都出不来——`rejected` 计数会一直涨，daemon 日志也喊一声。
+    #[arg(long, value_enum, default_value_t = DtoHeader::Standard, requires = "xcp_udp")]
+    pub dto_header: DtoHeader,
     /// socketcand 守护进程地址（`host:端口`，TCP）。远端主机上的
     /// SocketCAN 接口经它访问（M5-11），接口名由 `--socketcand-channel`
     /// 给出。
@@ -77,6 +82,27 @@ pub struct Args {
 
 /// 描述文件装配在 `assembly` 里：daemon 与 CLI 共用同一次解析的结果。
 pub use openape_assembly::descriptors::{LoadedVariables, load_variables};
+
+/// DTO 头布局档案的可选项（D-27）。命令行名字与
+/// `openape_xcp_proto::dto_profile` 里的档案常量一一对应。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum DtoHeader {
+    /// 标准 `[PID][数据]`。
+    Standard,
+    /// XCPlite 的私有头：相对 ODT、0xAA 标记、DAQ list、32 位时间戳。
+    Xcplite,
+}
+
+impl DtoHeader {
+    /// 对应的档案。选哪一个只在这一处决定，泵与总线都不再分支。
+    pub fn profile(self) -> &'static openape_xcp_proto::dto_profile::DtoProfile {
+        use openape_xcp_proto::dto_profile as profiles;
+        match self {
+            Self::Standard => &profiles::STANDARD,
+            Self::Xcplite => &profiles::XCPLITE,
+        }
+    }
+}
 
 /// 一路采样。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -233,6 +259,7 @@ pub fn open_replay_session(
 pub async fn open_udp_session(
     peer: &str,
     headered: bool,
+    dto_header: DtoHeader,
     tx_id: u32,
     rx_id: u32,
     specs: &[SampleSpec],
@@ -257,7 +284,9 @@ pub async fn open_udp_session(
     let layout = session.configure_daq(&[list]).await?;
     let capture = session.start_capture_with(
         layout,
-        CaptureConfig::default().with_metrics(metrics.clone()),
+        CaptureConfig::default()
+            .with_metrics(metrics.clone())
+            .with_dto(dto_header.profile()),
     );
     Ok(AppState::with_capture(
         metrics,
@@ -324,6 +353,7 @@ pub async fn build_state(args: &Args, metrics: Arc<Metrics>) -> Result<Arc<AppSt
             open_udp_session(
                 peer,
                 args.xcp_udp_headered,
+                args.dto_header,
                 args.tx_id,
                 args.rx_id,
                 &args.samples,
@@ -824,6 +854,74 @@ End TriggerBlock
             .expect("两秒内要有 DTO 样本")
             .expect("有样本");
         assert_eq!(sample.payload, vec![0x11, 0x22], "DTO 值来自 poke 的内存");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_wrong_dto_header_yields_no_samples_but_grows_the_reject_counter() {
+        // 从站发标准 DTO，命令却按 xcplite 档案解：这正是"配错档案"的样子。
+        // 不能安静得像没在采集——样本为零的同时 rejected 必须涨。
+        let addr = udp_slave().await;
+        let dir = tempdir("udp-wrong-profile");
+        let args = Args::parse_from([
+            "openaped",
+            "--listen",
+            "127.0.0.1:0",
+            "--xcp-udp",
+            addr.to_string().as_str(),
+            "--dto-header",
+            "xcplite",
+            "--sample",
+            "0x1000:2",
+            "--state-dir",
+            dir.join("state").to_str().expect("路径可转"),
+        ]);
+        let state = build_state(&args, Arc::new(Metrics::new()))
+            .await
+            .expect("建链照样能成——错的是档案，不是链路");
+        let capture = state.capture().expect("采集已起");
+        let mut reader = capture.stream().subscribe();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(400), reader.recv())
+                .await
+                .is_err(),
+            "档案不符时不该凑出样本"
+        );
+        let stats = capture.stats();
+        assert_eq!(stats.produced, 0);
+        assert!(
+            stats.rejected > 0,
+            "配错的证据在 rejected 计数上：{stats:?}"
+        );
+    }
+
+    #[test]
+    fn dto_header_flag_picks_the_profile_and_requires_the_udp_endpoint() {
+        let err = Args::try_parse_from(["openaped", "--dto-header", "xcplite"])
+            .expect_err("档案开关不能脱离 UDP 端点用");
+        assert!(err.to_string().contains("required"), "{err}");
+
+        let args = Args::try_parse_from([
+            "openaped",
+            "--xcp-udp",
+            "127.0.0.1:5555",
+            "--dto-header",
+            "xcplite",
+        ])
+        .expect("给了端点就能指定档案");
+        assert_eq!(args.dto_header.profile().name, "xcplite");
+        assert_eq!(
+            args.dto_header.profile().pid,
+            openape_xcp_proto::dto_profile::PidKind::RelativeToDaqList,
+            "私有头档案的编号是 list 内相对号"
+        );
+
+        let default = Args::try_parse_from(["openaped", "--xcp-udp", "127.0.0.1:5555"])
+            .expect("不写档案也能起");
+        assert_eq!(
+            default.dto_header.profile().name,
+            "standard",
+            "默认必须是标准口径，否则标准从站全被解错"
+        );
     }
 
     #[test]

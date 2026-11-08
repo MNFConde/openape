@@ -4,11 +4,13 @@
 //! 的值"，卡住的消费者拿三秒前的数据只会让画面更假。但丢掉的量必须可见：
 //! 慢消费者若只表现为"曲线不动"，排查方向会指向总线，而实际原因在消费者。
 //!
-//! 三个计数互不替代：
+//! 四个计数互不替代：
 //!
 //! - `produced`：写进缓冲的样本数
 //! - `delivered`：被消费者取走的份数（两个消费者时每条样本计两次）
 //! - `dropped_slow_consumer`：因消费者落后被跳过的份数
+//! - `rejected`：到了但没进缓冲的帧数——档案不符或头长不足。配错
+//!   `--dto-header` 时它会一直涨而 `produced` 不动，这就是"配错了"的信号
 //!
 //! 与 [`openape_diag::Metrics::record_dropped_frames`] 是两个口径：那是帧
 //! 没到总线侧就丢了，这里是帧到了但没人及时取。
@@ -43,6 +45,9 @@ pub struct DaqStats {
     pub delivered: u64,
     /// 因消费者落后被跳过的份数。
     pub dropped_slow_consumer: u64,
+    /// 到了总线但没进缓冲的帧数：DTO 头与所用档案不符，或帧短于档案声明
+    /// 的头长。配错档案时它会一直涨而 [`Self::produced`] 不动。
+    pub rejected: u64,
     /// 当前仍在缓冲里、尚未被取走的样本数——这就是背压的可观测量。
     pub backlog: usize,
 }
@@ -66,6 +71,7 @@ struct Counters {
     produced: AtomicU64,
     delivered: AtomicU64,
     dropped: AtomicU64,
+    rejected: AtomicU64,
 }
 
 impl DaqStream {
@@ -131,12 +137,22 @@ impl DaqStream {
         }
     }
 
+    /// 记一帧被拒：到了总线，但按当前档案解不成 DTO。
+    ///
+    /// 由采集侧调用。单独成方法而不是塞进 [`Self::push_at`]：这是"没成为
+    /// 样本"的帧，混进产出计数会让 `produced == 0 但曲线在动` 这种矛盾
+    /// 永远查不出来。
+    pub fn record_rejected(&self) {
+        self.counters.rejected.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// 取一份统计。
     pub fn stats(&self) -> DaqStats {
         DaqStats {
             produced: self.counters.produced.load(Ordering::Relaxed),
             delivered: self.counters.delivered.load(Ordering::Relaxed),
             dropped_slow_consumer: self.counters.dropped.load(Ordering::Relaxed),
+            rejected: self.counters.rejected.load(Ordering::Relaxed),
             backlog: self.tx.len(),
         }
     }
@@ -174,6 +190,17 @@ impl DaqStreamReader {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn rejected_frames_are_counted_apart_from_produced() {
+        let stream = DaqStream::new(4);
+        stream.record_rejected();
+        stream.record_rejected();
+        let stats = stream.stats();
+        assert_eq!(stats.rejected, 2);
+        assert_eq!(stats.produced, 0, "被拒的帧不算产出");
+        assert_eq!(stats.dropped_slow_consumer, 0, "也不是慢消费者丢的");
+    }
 
     #[tokio::test]
     async fn a_pushed_sample_comes_back_unchanged() {

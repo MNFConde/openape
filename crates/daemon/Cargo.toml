@@ -25,6 +25,7 @@ openape-diag.workspace = true
 openape-proto.workspace = true
 openape-session.workspace = true
 openape-xcp.workspace = true
+openape-xcp-proto.workspace = true
 axum.workspace = true
 clap.workspace = true
 tokio.workspace = true
