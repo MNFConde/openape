@@ -47,6 +47,12 @@ enum Command {
         #[command(subcommand)]
         target: ProbeTarget,
     },
+    /// daemon 指标（性能面板的终端侧）。--watch 每秒刷新一行。
+    Metrics {
+        /// 循环刷新而不是打一次就走
+        #[arg(long)]
+        watch: bool,
+    },
     /// 一次跑完各故障类别的判定（M5-16）。默认只查不碰 ECU；真建链要 --connect。
     Doctor(DoctorArgs),
     /// 读一段 ECU 内存
@@ -300,6 +306,7 @@ fn parse_u32(text: &str) -> Result<u32, std::num::ParseIntError> {
 async fn run(cli: &Cli) -> Result<String, Fault> {
     match &cli.command {
         Command::Probe { target } => probe(cli, target).await,
+        Command::Metrics { watch } => metrics(cli, *watch).await,
         Command::Doctor(args) => doctor(cli, args).await,
         Command::Read(args) => read(cli, args).await,
         Command::Write(args) => write(cli, args).await,
@@ -336,6 +343,44 @@ async fn doctor(cli: &Cli, args: &DoctorArgs) -> Result<String, Fault> {
         )));
     }
     Ok(text)
+}
+
+/// 指标：性能面板的终端侧。--watch 每秒重画，Ctrl-C 退出。
+async fn metrics(cli: &Cli, watch: bool) -> Result<String, Fault> {
+    let Some(url) = cli.via_daemon.as_deref() else {
+        return Err(openape_cli::usage_fault(
+            "指标在 daemon 手里：给 --via-daemon <地址>，或用默认本地地址".to_owned(),
+        ));
+    };
+    let mut client = commands::connect_daemon(url).await?;
+    let mut line = String::new();
+    loop {
+        let snapshot = client
+            .get_metrics(openape_proto::Empty {})
+            .await
+            .map_err(commands::daemon_fault)?
+            .into_inner();
+        let human = format!(
+            "采集 {} 帧 · {:.1} fps · 丢帧 {} · 延迟 p50 {} µs / p99 {} µs · 队列 {}",
+            snapshot.daq_frames_total,
+            snapshot.daq_fps,
+            snapshot.dropped_frames_total,
+            snapshot.latency_p50_us,
+            snapshot.latency_p99_us,
+            snapshot.queue_depth,
+        );
+        if !watch {
+            // 与性能面板同一口径、同一份数字，只是搬到终端。
+            return commands::render(cli.json, &snapshot, || human);
+        }
+        // 行内重画：\r 回行首 + 清到行尾，日志不被刷屏。
+        line.clear();
+        line.push_str(&human);
+        print!("\r\x1b[K{line}");
+        use std::io::Write as _;
+        std::io::stdout().flush().ok();
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
 }
 
 async fn write(cli: &Cli, args: &WriteArgs) -> Result<String, Fault> {

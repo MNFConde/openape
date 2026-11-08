@@ -359,12 +359,36 @@ async function runCurve(source: SampleSource, mode: CurveMode): Promise<void> {
   statusLine.textContent = `流结束，共 ${count} 帧`;
 }
 
+/**
+ * 性能面板（M5-17）：五项一等指标轮询展示。
+ *
+ * 指标是 daemon 侧 `Metrics` 的快照，界面只搬运数字、不做二次加工——
+ * 终端 `openape metrics` 看到的口径必须与这里一致，两处各算一套就对
+ * 不上了。
+ */
+async function pollMetrics(): Promise<void> {
+  try {
+    const { response } = await client.getMetrics({});
+    document.querySelector('#metrics')!.textContent =
+      `采集 ${response.daqFramesTotal} 帧 · ${response.daqFps.toFixed(1)} fps · ` +
+      `丢帧 ${response.droppedFramesTotal} · ` +
+      `延迟 p50 ${response.latencyP50Us} µs / p99 ${response.latencyP99Us} µs · ` +
+      `队列 ${response.queueDepth}`;
+  } catch (err) {
+    document.querySelector('#metrics')!.textContent = '指标拉取失败（daemon 未接管通道时照常显示，数值为 0）';
+    reportFailure(err);
+  }
+}
+
 async function main(): Promise<void> {
   // 表格与故障面板先画：它们不依赖样本流，曲线连不上时也该看得见。
   wirePageControls();
   await renderVariables();
   await renderFaults();
   await refreshPage();
+  void pollMetrics();
+  // 2 s 一拍：指标是给运维扫一眼的，不是给曲线画图用的，别抢带宽。
+  window.setInterval(() => void pollMetrics(), 2_000);
   await runCurve(dataSource, replayPath ? 'replay' : 'live');
 }
 

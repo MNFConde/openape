@@ -10,8 +10,9 @@ use openape_proto::{BusReport, ConnectReport};
 use openape_session::{Session, SessionConfig, list_channels, probe_channel};
 use tonic::transport::Channel;
 
+pub use crate::output::render;
 use crate::output::{
-    CrossCheckReport, SourceReport, SourceVariable, connect_info, probe_report, read_report, render,
+    CrossCheckReport, SourceReport, SourceVariable, connect_info, probe_report, read_report,
 };
 use crate::usage_fault;
 
@@ -216,7 +217,7 @@ pub async fn connect_daemon(url: &str) -> Result<OpenApeClient<Channel>, Fault> 
 }
 
 /// daemon 侧的失败。归会话域：设备在 daemon 手里，问题出在那条会话上。
-fn daemon_fault(message: impl ToString) -> Fault {
+pub fn daemon_fault(message: impl ToString) -> Fault {
     Fault::new(
         FaultCode::new(Domain::Session, 4).expect("序号 4 合法"),
         Severity::Error,

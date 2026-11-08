@@ -103,4 +103,5 @@
     完成说明（2026-11-08）：三个 L1 契约 crate 各一个 examples——cal-core「读配置→取声明→换算一个值」（value::decode 是 Option 口径）、xcp-proto「编 SET_MTA CRO→解响应」、proto「报告 serde 往返锁 snake_case 与宽地址字符串」。三例全部 cargo run 跑通且只用公开 API。cargo-semver-checks 0.51 落地，全 workspace 202 checks 全过；登记进 commit.md 门禁流水线（第七条，L1 契约公开面改动后必跑）。
 [x] M5-16 feat(cli)：doctor 自检，与分阶段探测共用判定实现 → 验收：各故障类别的判定条件可一次跑完
     完成说明（2026-11-08）：cli `openape doctor` 五类判定一次收集——channels（枚举）、channel（探测，--channel 才查）、xcp（建链，--connect 才碰 ECU）、source（--elf/--a2l）、daemon（--daemon）。判定本体复用 probe 系同一批函数（xcp_connect 从 probe_xcp 拆出共用、装载与连通直接调同一函数），判定条件只有一份。缺省类别 skip 不猜；有 fail 时明细先落 stdout（json 消费者也拿得到）、统一故障面板走 stderr、退出码非零。验收：vcan 环境五类跑通，fail/skip/pass 三态与退出码验证。
-[ ] M5-17 feat(ui)：性能面板 + CLI 实时视图（五项一等指标）→ 验收：指标出口的数据在界面与终端都可见
+[x] M5-17 feat(ui)：性能面板 + CLI 实时视图（五项一等指标）→ 验收：指标出口的数据在界面与终端都可见
+    完成说明（2026-11-08）：ui 性能面板（2s 轮询 GetMetrics，五项一等指标一行文本，界面只搬运数字不二次加工）；cli `openape metrics`（经 --via-daemon，--watch 每秒行内重画 \r 清行，--json 走契约 snake_case）。两侧同一 RPC 同一口径。验证：idle daemon 起→终端人类/JSON 双模拉通；ui tsc 与 vite build 过。M5-03 说明里的顺路项（daemon 实时录制 --record 接 recorder）不在本项验收线，未做，留待录制面单独排。
