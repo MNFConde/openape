@@ -15,6 +15,7 @@ use openape_bus_replay::{ReplayBus, ReplayFrame};
 use openape_cal_core::{Address, ByteLen};
 use openape_diag::{Domain, Fault, FaultCode, Metrics, Severity};
 use openape_session::{CaptureConfig, Session, SessionConfig, WriteContext};
+use openape_xcp::eth::HeaderMode;
 use openape_xcp::{DaqLayout, DaqListSpec, DaqSignal};
 
 use crate::service::AppState;
@@ -32,10 +33,16 @@ pub struct Args {
     /// 接管的 CAN 通道。不给就只提供健康与指标。
     #[arg(long)]
     pub channel: Option<String>,
-    /// 回放日志（.asc / .blf）。与 `--channel` 互斥：把日志当总线放，
-    /// 不碰硬件（M5-10）。
-    #[arg(long, conflicts_with = "channel")]
+    /// 回放日志路径。给了它就不碰硬件：把日志当总线放（M5-10）。
+    #[arg(long, conflicts_with_all = ["channel", "xcp_udp"])]
     pub replay: Option<PathBuf>,
+    /// XCP-on-Ethernet 从站地址（`IP:端口`，UDP）。与 CAN 通道互斥；
+    /// 对 XCPlite 这类默认带 CTR 头的对端再给 `--xcp-udp-headered`。
+    #[arg(long, conflicts_with = "channel")]
+    pub xcp_udp: Option<String>,
+    /// UDP 包走 CTR 头模式（XCP-on-Ethernet，XCPlite 默认）。
+    #[arg(long, requires = "xcp_udp")]
+    pub xcp_udp_headered: bool,
     /// 命令帧标识符。
     #[arg(long, default_value_t = 0x600)]
     pub tx_id: u32,
@@ -211,17 +218,73 @@ pub fn open_replay_session(
     ))
 }
 
-/// 按参数决定状态：给了通道就接管，给了回放日志就放日志，都没给就
-/// 只做健康与指标。
+/// 连一台 XCP-on-Ethernet 从站装配会话与采集（M5-12）：UDP 总线进会
+/// 话，建链、配 DAQ、起采集——采集与 CAN 走同一条泵，传输差异收在
+/// `UdpXcpBus` 里。
+pub async fn open_udp_session(
+    peer: &str,
+    headered: bool,
+    tx_id: u32,
+    rx_id: u32,
+    specs: &[SampleSpec],
+    metrics: Arc<Metrics>,
+) -> Result<AppState, Fault> {
+    let address: SocketAddr = peer
+        .parse()
+        .map_err(|_| usage(format!("{peer} 形如 127.0.0.1:5555")))?;
+    let mode = if headered {
+        HeaderMode::Headered
+    } else {
+        HeaderMode::Headerless
+    };
+    let config = session_config("udp", tx_id, rx_id)?;
+    let bus = openape_xcp::eth::UdpXcpBus::open(address, config.response_id, mode)
+        .await
+        .map_err(|err| usage(format!("连 {address} 失败：{err}")))?;
+    let mut session = Session::open_with_bus(config, Arc::new(bus))?;
+    let list = DaqListSpec::new(0, 1, signals(specs)?).ok_or_else(|| usage("采样列表为空"))?;
+    let info = session.connect(0).await?;
+    tracing::info!(max_cto = info.max_cto, max_dto = info.max_dto, "建链成功");
+    let layout = session.configure_daq(&[list]).await?;
+    let capture = session.start_capture_with(
+        layout,
+        CaptureConfig::default().with_metrics(metrics.clone()),
+    );
+    Ok(AppState::with_capture(
+        metrics,
+        "udp".to_owned(),
+        session,
+        capture,
+        Some(info),
+    ))
+}
+
+/// 按参数决定状态：给了通道就接管，给了回放日志就放日志，给了 UDP
+/// 从站就连以太网，都没给就只做健康与指标。
 pub async fn build_state(args: &Args, metrics: Arc<Metrics>) -> Result<Arc<AppState>, Fault> {
-    let state = match (args.channel.as_deref(), args.replay.as_deref()) {
-        (Some(channel), _) => {
+    let state = match (
+        args.channel.as_deref(),
+        args.replay.as_deref(),
+        args.xcp_udp.as_deref(),
+    ) {
+        (Some(channel), _, _) => {
             open_session(channel, args.tx_id, args.rx_id, &args.samples, metrics).await?
         }
-        (None, Some(path)) => {
+        (_, Some(path), _) => {
             open_replay_session(path, args.tx_id, args.rx_id, &args.samples, metrics)?
         }
-        (None, None) => AppState::idle(metrics),
+        (_, _, Some(peer)) => {
+            open_udp_session(
+                peer,
+                args.xcp_udp_headered,
+                args.tx_id,
+                args.rx_id,
+                &args.samples,
+                metrics,
+            )
+            .await?
+        }
+        (None, None, None) => AppState::idle(metrics),
     };
     // 变量清单与是否接管硬件无关：可以只看描述文件不连 ECU。
     let state = match load_variables(args.elf.as_deref(), args.a2l.as_deref()) {
@@ -289,10 +352,11 @@ pub async fn prepare(args: &Args, metrics: Arc<Metrics>) -> Result<Prepared, Fau
 pub async fn run(args: Args) -> Result<(), Fault> {
     let metrics = Arc::new(Metrics::new());
     let prepared = prepare(&args, metrics).await?;
-    match (&args.channel, &args.replay) {
-        (Some(channel), _) => tracing::info!(channel, "已接管通道"),
-        (None, Some(path)) => tracing::info!(path = %path.display(), "回放模式"),
-        (None, None) => {}
+    match (&args.channel, &args.replay, &args.xcp_udp) {
+        (Some(channel), _, _) => tracing::info!(channel, "已接管通道"),
+        (None, Some(path), _) => tracing::info!(path = %path.display(), "回放模式"),
+        (None, _, Some(peer)) => tracing::info!(peer, "XCP-on-Ethernet 模式"),
+        (None, None, None) => {}
     }
     println!("openaped 监听 http://{}", prepared.address);
     axum::serve(prepared.listener, prepared.app)
@@ -647,5 +711,85 @@ End TriggerBlock
             .await
             .expect("回放装配不需要设备");
         assert_eq!(state.channel(), Some("replay"), "回放也要占据通道位");
+    }
+
+    // ---- XCP-on-Ethernet（M5-12）----
+
+    /// 起一台 sim-ecu 的 UDP 从站，返回它的地址。
+    async fn udp_slave() -> std::net::SocketAddr {
+        let socket = Arc::new(
+            tokio::net::UdpSocket::bind("127.0.0.1:0")
+                .await
+                .expect("从站要能占端口"),
+        );
+        let addr = socket.local_addr().expect("地址可知");
+        let mut ecu = openape_sim_ecu::SimEcu::new(openape_sim_ecu::SimEcuConfig::default_ids());
+        ecu.poke(0x1000, &[0x11, 0x22]);
+        tokio::spawn(openape_sim_ecu::serve_udp(
+            ecu,
+            socket,
+            Arc::new(Metrics::new()),
+            HeaderMode::Headerless,
+        ));
+        addr
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_udp_session_connects_to_the_sim_slave_and_streams_dto() {
+        let addr = udp_slave().await;
+        let dir = tempdir("udp-session");
+        let args = Args::parse_from([
+            "openaped",
+            "--listen",
+            "127.0.0.1:0",
+            "--xcp-udp",
+            addr.to_string().as_str(),
+            "--sample",
+            "0x1000:2",
+            "--state-dir",
+            dir.join("state").to_str().expect("路径可转"),
+        ]);
+        let state = build_state(&args, Arc::new(Metrics::new()))
+            .await
+            .expect("UDP 装配要能建链");
+        assert_eq!(state.channel(), Some("udp"));
+        let info = state.info().expect("建链信息要留在状态里");
+        assert_ne!(info.max_cto, 0, "从站报了包宽");
+
+        let capture = state.capture().expect("UDP 也接管了采集");
+        let mut reader = capture.stream().subscribe();
+        let sample = tokio::time::timeout(Duration::from_secs(2), reader.recv())
+            .await
+            .expect("两秒内要有 DTO 样本")
+            .expect("有样本");
+        assert_eq!(sample.payload, vec![0x11, 0x22], "DTO 值来自 poke 的内存");
+    }
+
+    #[test]
+    fn headered_flag_requires_the_udp_endpoint() {
+        let err = Args::try_parse_from(["openaped", "--xcp-udp-headered"])
+            .expect_err("带头开关不能脱离端点用");
+        assert!(err.to_string().contains("required"), "{err}");
+        let args = Args::try_parse_from([
+            "openaped",
+            "--xcp-udp",
+            "127.0.0.1:5555",
+            "--xcp-udp-headered",
+        ])
+        .expect("给了端点就能开");
+        assert!(args.xcp_udp_headered);
+    }
+
+    #[test]
+    fn xcp_udp_is_mutually_exclusive_with_the_can_channel() {
+        let err = Args::try_parse_from([
+            "openaped",
+            "--channel",
+            "vcan0",
+            "--xcp-udp",
+            "127.0.0.1:5555",
+        ])
+        .expect_err("CAN 与 UDP 互斥");
+        assert!(err.to_string().contains("cannot be used"), "{err}");
     }
 }

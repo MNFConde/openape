@@ -5,7 +5,8 @@
 //!
 //! 验收的最小闭环：CONNECT、内存短读、DAQ 配置与 DTO 收取，全程与
 //! CAN 走同一套 master 会话逻辑与 DAQ 解码——传输层差异收在
-//! `UdpXcpBus` 一个类型里。与 XCPlite（C 库）的互通攒真实对端后补。
+//! `UdpXcpBus` 一个类型里。与 XCPlite（C 库）的互通攒真实对端后补；
+//! headered 变体在这里先把 CTR 头的加/剥与两侧一致性钉住。
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -15,6 +16,7 @@ use openape_bus::{Bus, BusError, CanFrame, CanId};
 use openape_cal_core::{Address, ByteLen};
 use openape_diag::Metrics;
 use openape_sim_ecu::{SimEcu, SimEcuConfig};
+use openape_xcp::eth::HeaderMode;
 use openape_xcp::{CanXcpMaster, DaqLayout, DaqListSpec, DaqSignal, XcpConfig, XcpConnection};
 use openape_xcp_proto::DaqFrame;
 
@@ -26,7 +28,9 @@ fn signal(address: u32, len: u16) -> DaqSignal {
 }
 
 /// 起一台 UDP 从站，返回它的地址。
-async fn slave() -> (
+async fn slave(
+    mode: HeaderMode,
+) -> (
     SocketAddr,
     tokio::task::JoinHandle<Result<(), openape_diag::Fault>>,
 ) {
@@ -42,15 +46,15 @@ async fn slave() -> (
         ecu,
         socket,
         Arc::new(Metrics::new()),
+        mode,
     ));
     (addr, handle)
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn udp_transport_carries_connect_read_and_daq() {
-    let (addr, slave) = slave().await;
+/// 回环验收序列：CONNECT、短读、DAQ 配置与 DTO 值核对。
+async fn connect_read_and_daq(addr: SocketAddr, mode: HeaderMode) -> DaqLayout {
     let bus = Arc::new(
-        openape_xcp::eth::UdpXcpBus::open(addr, CanId::standard(0x601).expect("合法"))
+        openape_xcp::eth::UdpXcpBus::open(addr, CanId::standard(0x601).expect("合法"), mode)
             .await
             .expect("master 要能连上从站地址"),
     );
@@ -96,15 +100,35 @@ async fn udp_transport_carries_connect_read_and_daq() {
         .expect("布局认识这个 ODT")
         .concat();
     assert_eq!(values, vec![0x11, 0x22], "DTO 的值要等于内存里的值");
+    layout
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn udp_transport_carries_connect_read_and_daq() {
+    let (addr, slave) = slave(HeaderMode::Headerless).await;
+    connect_read_and_daq(addr, HeaderMode::Headerless).await;
+    slave.abort();
+}
+
+/// CTR 头模式（对 XCPlite 的默认包格式）：两侧加/剥同一种头，验收
+/// 序列与无头模式一字不差。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn headered_transport_carries_connect_read_and_daq() {
+    let (addr, slave) = slave(HeaderMode::Headered).await;
+    connect_read_and_daq(addr, HeaderMode::Headered).await;
     slave.abort();
 }
 
 #[tokio::test]
 async fn udp_recv_times_out_instead_of_hanging() {
     let any_addr: SocketAddr = "127.0.0.1:1".parse().expect("合法地址");
-    let bus = openape_xcp::eth::UdpXcpBus::open(any_addr, CanId::standard(0x601).expect("合法"))
-        .await
-        .expect("本端要能占端口");
+    let bus = openape_xcp::eth::UdpXcpBus::open(
+        any_addr,
+        CanId::standard(0x601).expect("合法"),
+        HeaderMode::Headerless,
+    )
+    .await
+    .expect("本端要能占端口");
     let error = bus
         .recv(Duration::from_millis(60))
         .await

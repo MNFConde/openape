@@ -16,9 +16,11 @@
 
 mod codec;
 mod command;
+pub mod ethernet;
 pub mod protection;
 
 pub use command::{Command, CommandCode};
+pub use ethernet::HeaderMode;
 pub use protection::{ExampleSeedKey, SeedKey};
 
 /// CAN 传输层单帧上限（`maxCto`）。超过要走块传输，M1 未实现。

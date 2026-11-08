@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use openape_bus::{Bus, CanFrame, CanId};
 use openape_diag::{Domain, Fault, FaultCode, Metrics, Severity};
-use openape_xcp_proto::{Command, ErrorCode, ExampleSeedKey, Response, SeedKey, resource};
+use openape_xcp_proto::{
+    Command, ErrorCode, ExampleSeedKey, HeaderMode, Response, SeedKey, resource,
+};
 
 pub mod daq;
 
@@ -487,16 +489,22 @@ pub async fn serve_with_metrics(
 /// UDP 包里没有 CAN 标识符，命令响应与 DTO 同端口进出。DTO 发给最近
 /// 一次命令的来源地址：XCP-on-Ethernet 的常规做法是从站回发到 master
 /// 的源端口；还没收到过命令时出的帧没有去处，按丢帧处理。
+///
+/// 包头模式由调用方声明（[`HeaderMode`]）：对自研 master 用无头，对
+/// XCPlite 这类默认带 CTR 头的对端用 `Headered`；头的编解码在
+/// `xcp-proto` 一处，两侧共用。
 pub async fn serve_udp(
     mut ecu: SimEcu,
     socket: Arc<tokio::net::UdpSocket>,
     metrics: Arc<Metrics>,
+    mode: HeaderMode,
 ) -> Result<(), Fault> {
     let config = ecu.config.clone();
     let mut rng = Lcg::new(config.jitter_seed);
     let mut next_tick = tokio::time::Instant::now() + next_delay(&config, &mut rng);
     let mut buffer = vec![0u8; 2048];
     let mut peer: Option<std::net::SocketAddr> = None;
+    let mut counter: u16 = 0;
     loop {
         tokio::select! {
             biased;
@@ -505,9 +513,14 @@ pub async fn serve_udp(
                     udp_fault(format!("从站收包失败：{err}"))
                 })?;
                 peer = Some(source);
-                let response = ecu.handle(&buffer[..count]);
+                let message = mode
+                    .unwrap(&buffer[..count])
+                    .map_err(udp_fault)?;
+                let response = ecu.handle(message);
+                counter = counter.wrapping_add(1);
+                let packet = mode.wrap(&response.encode(), counter);
                 socket
-                    .send_to(&response.encode(), source)
+                    .send_to(&packet, source)
                     .await
                     .map_err(|err| udp_fault(format!("从站发响应失败：{err}")))?;
             }
@@ -521,7 +534,9 @@ pub async fn serve_udp(
                     continue;
                 };
                 for frame in output.frames {
-                    match socket.send_to(&frame.data, target).await {
+                    counter = counter.wrapping_add(1);
+                    let packet = mode.wrap(&frame.data, counter);
+                    match socket.send_to(&packet, target).await {
                         Ok(_) => metrics.record_daq_frames(1),
                         Err(err) => {
                             metrics.record_dropped_frames(1);
