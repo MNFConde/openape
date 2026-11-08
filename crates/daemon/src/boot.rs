@@ -66,6 +66,19 @@ pub struct Args {
     /// 静态页目录。
     #[arg(long, default_value = "ui/dist")]
     pub static_dir: PathBuf,
+    /// DAQ 事件通道号。默认 0；真实从站的事件号按 A2L 或手册取（XCPlite
+    /// 的 mainloop 是 1）。配错的表现是**命令全被接受但永不出帧**，不报错。
+    #[arg(long, default_value_t = 0)]
+    pub daq_event: u16,
+    /// WRITE_DAQ 条目的地址扩展字节。默认 0——多数真 ECU 上 0 是绝对寻址；
+    /// XCPlite 的默认配置里 0 是标定段相对，绝对寻址要 0x01。
+    #[arg(long, value_parser = parse_u8, default_value_t = 0)]
+    pub address_extension: u8,
+    /// 打开 SET_DAQ_LIST_MODE 的时间戳位。有的从站（XCPlite）强制要这一位，
+    /// 不带就拒配（回 0x21/0x24 这类话）。DTO 里带的时间戳目前只解析、
+    /// 不进样本时间轴（D-25 / D-27）。
+    #[arg(long)]
+    pub daq_timestamp: bool,
     /// 采样信号，`地址:长度`（可重复），例如 `0x1000:2`。
     #[arg(long = "sample", value_parser = parse_signal)]
     pub samples: Vec<SampleSpec>,
@@ -104,6 +117,44 @@ impl DtoHeader {
     }
 }
 
+/// DAQ 配置里那些「随 ECU 而定」的参数。默认值就是规范默认，改它们是为了
+/// 适配具体从站——事件号按 A2L 取，地址扩展按该 ECU 的段约定取。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DaqOptions {
+    /// 事件通道号。
+    pub event: u16,
+    /// WRITE_DAQ 条目的地址扩展字节。
+    pub address_extension: u8,
+    /// 要求 DTO 带从站时间戳（SET_DAQ_LIST_MODE 的 timestamp 位）。
+    pub timestamp: bool,
+}
+
+impl DaqOptions {
+    /// 拼一条 DAQ list：预分频固定 1（要抽稀时另说，现在没有需求）。
+    fn spec(&self, signals: Vec<DaqSignal>) -> Option<DaqListSpec> {
+        DaqListSpec::new(self.event, 1, signals)
+            .map(|spec| spec.with_address_extension(self.address_extension))
+            .map(|spec| {
+                if self.timestamp {
+                    spec.with_timestamp()
+                } else {
+                    spec
+                }
+            })
+    }
+}
+
+impl Args {
+    /// 从命令行取 DAQ 参数。
+    pub fn daq_options(&self) -> DaqOptions {
+        DaqOptions {
+            event: self.daq_event,
+            address_extension: self.address_extension,
+            timestamp: self.daq_timestamp,
+        }
+    }
+}
+
 /// 一路采样。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SampleSpec {
@@ -136,6 +187,12 @@ pub fn parse_u32(raw: &str) -> Result<u32, String> {
         Some(hex) => u32::from_str_radix(hex, 16).map_err(|_| format!("{raw} 不是十六进制数")),
         None => trimmed.parse().map_err(|_| format!("{raw} 不是数字")),
     }
+}
+
+/// 解析十进制或 `0x` 十六进制的单字节。
+pub fn parse_u8(raw: &str) -> Result<u8, String> {
+    let value = parse_u32(raw)?;
+    u8::try_from(value).map_err(|_| format!("{raw} 超出单字节范围（0x00..=0xFF）"))
 }
 
 /// 用参数拼出会话配置，顺带校验标识符范围。
@@ -173,10 +230,13 @@ pub async fn open_session(
     tx_id: u32,
     rx_id: u32,
     specs: &[SampleSpec],
+    daq: DaqOptions,
     metrics: Arc<Metrics>,
 ) -> Result<AppState, Fault> {
     let config = session_config(channel, tx_id, rx_id)?;
-    let list = DaqListSpec::new(0, 1, signals(specs)?).ok_or_else(|| usage("采样列表为空"))?;
+    let list = daq
+        .spec(signals(specs)?)
+        .ok_or_else(|| usage("采样列表为空"))?;
 
     let mut session = Session::open(config)?;
     let info = session.connect(0).await?;
@@ -253,22 +313,34 @@ pub fn open_replay_session(
     ))
 }
 
+/// XCP-on-Ethernet 的连接参数。三项都是「对端是什么样」的描述，跟采样与
+/// DAQ 参数分开传——它们的改动频率不同，混在一起只会让签名越长越乱。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UdpLink {
+    /// 从站地址，`IP:端口`。
+    pub peer: String,
+    /// UDP 包走 CTR 头模式（一条包可装多条消息）。
+    pub headered: bool,
+    /// DTO 头布局档案（D-27）。
+    pub dto_header: DtoHeader,
+}
+
 /// 连一台 XCP-on-Ethernet 从站装配会话与采集（M5-12）：UDP 总线进会
 /// 话，建链、配 DAQ、起采集——采集与 CAN 走同一条泵，传输差异收在
 /// `UdpXcpBus` 里。
 pub async fn open_udp_session(
-    peer: &str,
-    headered: bool,
-    dto_header: DtoHeader,
+    link: &UdpLink,
     tx_id: u32,
     rx_id: u32,
     specs: &[SampleSpec],
+    daq: DaqOptions,
     metrics: Arc<Metrics>,
 ) -> Result<AppState, Fault> {
-    let address: SocketAddr = peer
+    let address: SocketAddr = link
+        .peer
         .parse()
-        .map_err(|_| usage(format!("{peer} 形如 127.0.0.1:5555")))?;
-    let mode = if headered {
+        .map_err(|_| usage(format!("{} 形如 127.0.0.1:5555", link.peer)))?;
+    let mode = if link.headered {
         HeaderMode::Headered
     } else {
         HeaderMode::Headerless
@@ -278,7 +350,9 @@ pub async fn open_udp_session(
         .await
         .map_err(|err| usage(format!("连 {address} 失败：{err}")))?;
     let mut session = Session::open_with_bus(config, Arc::new(bus))?;
-    let list = DaqListSpec::new(0, 1, signals(specs)?).ok_or_else(|| usage("采样列表为空"))?;
+    let list = daq
+        .spec(signals(specs)?)
+        .ok_or_else(|| usage("采样列表为空"))?;
     let info = session.connect(0).await?;
     tracing::info!(max_cto = info.max_cto, max_dto = info.max_dto, "建链成功");
     let layout = session.configure_daq(&[list]).await?;
@@ -286,7 +360,7 @@ pub async fn open_udp_session(
         layout,
         CaptureConfig::default()
             .with_metrics(metrics.clone())
-            .with_dto(dto_header.profile()),
+            .with_dto(link.dto_header.profile()),
     );
     Ok(AppState::with_capture(
         metrics,
@@ -306,6 +380,7 @@ pub async fn open_socketcand_session(
     tx_id: u32,
     rx_id: u32,
     specs: &[SampleSpec],
+    daq: DaqOptions,
     metrics: Arc<Metrics>,
 ) -> Result<AppState, Fault> {
     let peer: SocketAddr = address
@@ -316,7 +391,9 @@ pub async fn open_socketcand_session(
         .map_err(|err| usage(format!("连 socketcand {address} 失败：{err}")))?;
     let config = session_config(channel, tx_id, rx_id)?;
     let mut session = Session::open_with_bus(config, Arc::new(bus))?;
-    let list = DaqListSpec::new(0, 1, signals(specs)?).ok_or_else(|| usage("采样列表为空"))?;
+    let list = daq
+        .spec(signals(specs)?)
+        .ok_or_else(|| usage("采样列表为空"))?;
     let info = session.connect(0).await?;
     tracing::info!(max_cto = info.max_cto, max_dto = info.max_dto, "建链成功");
     let layout = session.configure_daq(&[list]).await?;
@@ -344,19 +421,30 @@ pub async fn build_state(args: &Args, metrics: Arc<Metrics>) -> Result<Arc<AppSt
         args.socketcand.as_deref(),
     ) {
         (Some(channel), _, _, _) => {
-            open_session(channel, args.tx_id, args.rx_id, &args.samples, metrics).await?
+            open_session(
+                channel,
+                args.tx_id,
+                args.rx_id,
+                &args.samples,
+                args.daq_options(),
+                metrics,
+            )
+            .await?
         }
         (_, Some(path), _, _) => {
             open_replay_session(path, args.tx_id, args.rx_id, &args.samples, metrics)?
         }
         (_, _, Some(peer), _) => {
             open_udp_session(
-                peer,
-                args.xcp_udp_headered,
-                args.dto_header,
+                &UdpLink {
+                    peer: peer.to_owned(),
+                    headered: args.xcp_udp_headered,
+                    dto_header: args.dto_header,
+                },
                 args.tx_id,
                 args.rx_id,
                 &args.samples,
+                args.daq_options(),
                 metrics,
             )
             .await?
@@ -368,6 +456,7 @@ pub async fn build_state(args: &Args, metrics: Arc<Metrics>) -> Result<Arc<AppSt
                 args.tx_id,
                 args.rx_id,
                 &args.samples,
+                args.daq_options(),
                 metrics,
             )
             .await?
@@ -677,6 +766,7 @@ mod tests {
                 address: 0x1000,
                 len: 2,
             }],
+            DaqOptions::default(),
             Arc::new(Metrics::new()),
         )
         .await
@@ -895,6 +985,38 @@ End TriggerBlock
     }
 
     #[test]
+    fn daq_event_and_address_extension_default_to_zero_and_take_hex() {
+        let plain = Args::try_parse_from(["openaped"]).expect("默认参数可解析");
+        assert_eq!(
+            plain.daq_options(),
+            DaqOptions::default(),
+            "不写就用规范默认：事件 0、地址扩展 0"
+        );
+
+        let tricky = Args::try_parse_from([
+            "openaped",
+            "--daq-event",
+            "1",
+            "--address-extension",
+            "0x01",
+            "--daq-timestamp",
+        ])
+        .expect("事件号、地址扩展与时间戳位可单独给");
+        assert_eq!(
+            tricky.daq_options(),
+            DaqOptions {
+                event: 1,
+                address_extension: 0x01,
+                timestamp: true,
+            }
+        );
+
+        let err = Args::try_parse_from(["openaped", "--address-extension", "0x100"])
+            .expect_err("地址扩展是单字节");
+        assert!(err.to_string().contains("0x100"), "{err}");
+    }
+
+    #[test]
     fn dto_header_flag_picks_the_profile_and_requires_the_udp_endpoint() {
         let err = Args::try_parse_from(["openaped", "--dto-header", "xcplite"])
             .expect_err("档案开关不能脱离 UDP 端点用");
@@ -984,6 +1106,7 @@ End TriggerBlock
                 address: 0x1000,
                 len: 2,
             }],
+            DaqOptions::default(),
             Arc::new(Metrics::new()),
         )
         .await

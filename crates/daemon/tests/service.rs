@@ -40,6 +40,7 @@ async fn the_service_answers_over_an_attached_channel() {
                 address: 0x1000,
                 len: 4,
             }],
+            boot::DaqOptions::default(),
             Arc::clone(&metrics),
         )
         .await
@@ -237,10 +238,17 @@ async fn state_with_descriptors(
         address: 0x2000,
         len: 2,
     }];
-    let state = boot::open_session(channel, 0x600, 0x601, &samples, Arc::new(Metrics::new()))
-        .await
-        .expect("启动应成功")
-        .with_variables(loaded.list);
+    let state = boot::open_session(
+        channel,
+        0x600,
+        0x601,
+        &samples,
+        boot::DaqOptions::default(),
+        Arc::new(Metrics::new()),
+    )
+    .await
+    .expect("启动应成功")
+    .with_variables(loaded.list);
     let state = match loaded.tree {
         Some(tree) => state.with_tree(tree, loaded.mode),
         None => state,
