@@ -150,6 +150,10 @@ jobs:
     permissions:
       contents: read
       issues: write
+      # audit-check 在有 informational 警告（unmaintained/unsound）时要写一条
+      # check run 汇总；没有这个权限它就报 "Resource not accessible by
+      # integration" 并把整 job 判红——审计结论本身是通过的。
+      checks: write
     steps:
       - uses: actions/checkout@v5
       - uses: rustsec/audit-check@v2
