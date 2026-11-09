@@ -83,6 +83,17 @@ Caddy 的 `flush_interval` 默认即为 `-1`（每次写出立即刷），此处
 
 两者的取舍：nginx 打包更小（静态 3–10MB）、生态更熟；Caddy 是静态单文件（~40MB）、配置更短、离线 TLS 免手工。资源极紧的盒子选前者，其余选后者。
 
+## 桌面形态（Windows）
+
+`crates/ui-tauri` 的 `openape-desktop` 是一个壳，不是第二套界面：它**把窗口导航到 daemon 自己发的页面**。于是 `location.origin` 天然等于 daemon，上面"地址一律相对"的纪律在桌面里照旧成立，gRPC 同源、不需要 CORS，前端零改动。
+
+- **sidecar 由壳拉起**：壳挑一个回环端口（默认 47711，被占就顺延 8 个，`OPENAPE_PORT` 可改），用 `openaped --listen … --static-dir …` 起子进程，轮询 `GET /healthz` 通了才导航。窗口先显示自带的启动页，失败时显示一页说明加 daemon 日志路径。
+- **已有 daemon 就复用**：启动时先探首选端口，通了就直接用它，不再起第二个——不然会和终端里的 CLI 抢设备锁；关窗也不动它（不是壳起的，壳不收）。
+- **崩了重起，关了收尸**：daemon 意外退出后按退避重起（3 次预算），成功即重新导航（旧页面上的流已经断了）；关窗时壳杀掉自己拉起的 sidecar 再退出。逻辑在 `supervisor`，与 Tauri 无关，Linux 上也能跑单测。
+- **日志**：`%LOCALAPPDATA%\openape\logs\shell.log`（壳做了什么）与同目录的 `daemon.log`（daemon 的 stdout/stderr）。
+- **找东西的顺序**：daemon 与前端产物都先看"和自己并排"，再按开发态上溯找 `target/{debug,release}/openaped.exe` 与 `ui/dist`；`OPENAPE_DAEMON` / `OPENAPE_UI_DIR` 可覆盖。找不到前端不算错：daemon 照常提供 API，页面显示"未构建前端"。
+- **已知缺口**：daemon 目前只能在 Linux 上编（`socketcan` 是 Linux-only，`bus-zlg` 从未在 Windows 编译过），所以 Windows 上双击拉起真 daemon 还差一步，见 todo 的 M5-20。
+
 ## CLI 经 daemon 复用会话
 
 daemon 一旦拿到设备锁，直接开总线的 CLI 就会撞锁。`--via-daemon` 让 CLI 走 gRPC：

@@ -9,4 +9,6 @@ ui/dist/
 /tmp/
 # 质量门禁工具的产物
 .metrics/
+# Tauri 每次构建都会重写的 ACL schema（几十万字节的生成物，别进版本库）
+crates/ui-tauri/gen/schemas/
 /.openbitfun/

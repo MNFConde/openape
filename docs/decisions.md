@@ -219,6 +219,7 @@ updated: 2026-11-08
 - 决策：做 Tauri 桌面应用，**仅 Windows 打包**；界面复用 Web UI 的同一份产物，不写第二套 UI；daemon 作为 sidecar 由应用拉起；其它平台仍走浏览器。
 - 依据：（1）Tauri 的界面就是网页，前端零改动，代价只是壳与打包链；（2）Windows 的 WebView2 是三平台中最成熟的，Linux 的 WebKitGTK 才是真坑，只做 Windows 正好绕开；（3）GPUI 一类原生框架要重写界面并放弃 web 图表生态，收益集中在"上万行表格 + 高频刷新"这类本阶段不存在的场景。
 - 影响：形态不再对称——Windows 有两个入口（桌面、网页），其它平台只有网页；新增打包、签名与 sidecar 生命周期工作，不并入 M2；MVP 完成定义改为"桌面或 Web UI 均可"。
+- 落地（2026-11-09，M5-13，细节见 [13-deployment](13-deployment.md#桌面形态windows)）：**壳不内嵌前端，而是把窗口导航到 daemon 自己发的页面**——这样 `location.origin` 就是 daemon，同源天然成立，D-05 的单端口约束与"地址一律相对"的纪律一条都不用改，也省掉了 `tauri://` 协议下必须造的那套 CORS/基址注入。sidecar 用 `std::process::Command` 直接起（不引 tauri-plugin-shell）：崩溃重起与"关窗必须收尸"本来就要自己写，插件只剩多一层依赖。生命周期逻辑放在与 Tauri 无关的 `supervisor` 里（起停、退避重起预算、`/healthz` 探测），因此 Linux CI 也能测；Tauri 依赖按 `cfg(windows)` 挂，Linux 上这个 crate 只编那层纯逻辑。两条补充决策：**已有 daemon 就复用**（用户可能在终端里开着采集，再起一个只会撞设备锁），**端口被占就顺延**（`OPENAPE_PORT` 可改，顺延 8 个）。
 
 ## D-22 远程接入由前置网关承担
 

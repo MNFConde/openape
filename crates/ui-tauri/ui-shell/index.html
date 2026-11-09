@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenAPE</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        background: #1f2328;
+        color: #e6e8ea;
+        font: 15px/1.7 system-ui, sans-serif;
+      }
+      .pulse {
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        background: #e8833a;
+        animation: breathe 1.4s ease-in-out infinite;
+      }
+      @keyframes breathe {
+        0%,
+        100% {
+          opacity: 0.35;
+          transform: scale(0.92);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+      p {
+        margin: 0;
+        color: #9aa4af;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 壳先显示这一页，等 daemon 的 /healthz 通了再导航到它自己发的界面。 -->
+    <div class="pulse"></div>
+    <p>正在启动本地 daemon…</p>
+  </body>
+</html>

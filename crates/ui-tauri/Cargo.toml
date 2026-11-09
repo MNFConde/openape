@@ -1,0 +1,23 @@
+[package]
+name = "openape-ui-tauri"
+description = "桌面外壳：拉起 daemon sidecar，把界面装进 WebView2（仅 Windows，D-21）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "openape-desktop"
+path = "src/main.rs"
+
+[dependencies]
+
+[target.'cfg(windows)'.dependencies]
+tauri.workspace = true
+
+[target.'cfg(windows)'.build-dependencies]
+tauri-build.workspace = true
+
+[lints]
+workspace = true

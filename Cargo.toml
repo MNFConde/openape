@@ -46,6 +46,9 @@ http-body-util = "0.1"
 mf4-rs = "3.8"
 socketcan = { version = "4", default-features = false, features = ["netlink", "tokio"] }
 thiserror = "2"
+# 桌面外壳（L5，仅 Windows，D-21）。别的平台不解析这两个版本，但要一个地方钉住。
+tauri = "2"
+tauri-build = "2"
 toml = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "signal", "process"] }
 tonic = "0.14"
