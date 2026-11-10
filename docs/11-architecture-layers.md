@@ -1,8 +1,8 @@
 ---
 type: architecture
 status: active
-summary: "分层架构：三道屏蔽墙与能力描述、crate 六档依赖方向、双前端共享引擎、可观测层、公开面承诺与代码组织"
-updated: 2026-11-07
+summary: "分层架构：三道屏蔽墙与能力描述、Bus 与 XcpConnection 两条接缝的分工、crate 六档依赖方向、装配归责现状、双前端共享引擎与两把锁、可观测层、公开面承诺与代码组织"
+updated: 2026-11-10
 ---
 
 # 分层架构
@@ -25,6 +25,22 @@ updated: 2026-11-07
 
 上层一律按能力降级，**禁止按后端名分支**（`if backend == "zlg"` 视为架构违规）。新增硬件时只填能力表，上层逻辑不动。这一点比 trait 本身更容易被忽视——trait 只保证"能接上"，能力描述才保证"接上之后上层不用改"。
 
+### 两条接缝的分工
+
+三面墙里有两面（`Bus` 与 `XcpConnection`）都在"怎么跟 ECU 说话"这一侧，混成一层是常见误读。分工是：
+
+| 接缝 | 面向什么 | 谁走这条 |
+|---|---|---|
+| `Bus` | 帧：`send(CanFrame)` / `recv` | XCP-on-CAN、UDP（`UdpXcpBus` 把数据报伪装成帧）、socketcand、日志回放——凡是"总线上有帧可发可收"的场景 |
+| `XcpConnection` | 协议：CONNECT / DAQ / SHORT_UP 这一层的命令事务 | 原生 XCP 设备（设备自己就说协议，总线上没有帧可中转） |
+
+两条判据：
+
+1. 原生协议设备**不得**塞进 `Bus`——那样只能靠假造 CAN 帧，属接缝装错位置。
+2. 帧中继场景（gRPC 中继、日志回放）**不得**绕过 `Bus` 直接调 `XcpConnection`。
+
+现状：`XcpConnection` 只有一个实现（`xcp::CanXcpMaster`），`Session.master` 还是具体类型而非 `dyn`——第二接缝尚未打通，等真有原生协议设备才动（M5-30）。
+
 ### 装配层唯一
 
 只有装配层知道具体后端 crate 的存在。`xcp` 不依赖任何 `bus-*`，只依赖 `Bus` trait；具体后端在装配层实例化为 `Arc<dyn Bus>` 注入。独立装配 crate 属后置项，M1 由 `session` 兼任（见下节「切分判据与后置项」）。
@@ -35,6 +51,17 @@ xcp  ──依赖──> bus（trait）
 ```
 
 因此新增一种硬件 = 新建一个 `bus-*` crate + 装配层加一个配置分支；`xcp` 与 `session` 的 Cargo.toml 和源码均不动。
+
+**现状与归责（2026-11-10 核对）**：装配目前分四段，不是一处——
+
+| 段 | 做什么 | 位置 |
+|---|---|---|
+| `assembly` | 按名选后端（`backend::open`）、合并描述文件（`load_variables`）、ELF 与 A2L 交叉校验 | `crates/assembly` |
+| `session` | `Session::open` 自开 socketcan、自拿设备锁；`probe_channel` / `list_channels` 同样是 socketcan 专有 | `crates/session/src/engine.rs` |
+| `daemon::boot` | 四种接管方式的组合（`--channel` / `--replay` / `--xcp-udp` / `--socketcand`）、DTO 档案选择、状态目录 | `crates/daemon/src/boot.rs` |
+| `ui-tauri::launch` | 拼 sidecar 参数（`--listen` / `--static-dir` 由壳自己管） | `crates/ui-tauri/src/launch.rs` |
+
+只有第一段符合本节说的"唯一"。目标形态是把中间两段并进 `assembly`：打开后端时一并取设备锁，把 `(backend, channel, Arc<dyn Bus>, DeviceLock)` 打包交给 `session`，探测与枚举也随之上移（M5-28 / M5-29）。**在收口之前，本节与架构图记录的是目标，上面这张表是现状**——读代码前先看这张表。
 
 ## crate 分档与依赖方向
 
@@ -145,6 +172,8 @@ L4 的 `assembly` 于 M3 落地（交叉校验），仍有大量职责待填；�
 
 编排、DAQ、录制、状态机全部在 `session` 内，前端只负责 I/O 与生命周期。
 
+现状偏差：写闸门那一套（暂停采集泵 + 取写闸门 + 恢复 + 落审计）现在由 `daemon::service` 每条写类 RPC 各自串一遍，共 6 处；它属于"谁动 ECU"的编排，应收回 `session` 的单一入口（todo 的 RH-03）。
+
 ### CLI 形态纪律
 
 1. **一条命令即一次自足事务**：不写锁、不留后台状态，同一命令重复执行结果稳定。
@@ -154,9 +183,18 @@ L4 的 `assembly` 于 M3 落地（交叉校验），仍有大量职责待填；�
 
 这四条服务于同一目的：让外部脚本与 AI 代理以"调一条命令、读一段结构化结果"的方式循环推进，不必解析散文输出。
 
-### 设备独占
+### 设备独占与两把锁
 
 CAN 硬件通常不允许两个进程同时打开同一通道。`session` 打开设备时按（后端、通道）加进程级锁，冲突时返回明确故障而非底层错误；`cli` 另提供经本地 gRPC 转发的执行路径（`--via-daemon`），避免为了看一眼现象先停掉正在作业的 daemon。
+
+这一带同时存在两把锁。文档、代码与架构图里一律用下面这两个名字，不要再用含混的"会话锁"：
+
+| 名字 | 范围 | 持有者 | 冲突时的表现 |
+|---|---|---|---|
+| **设备锁** `DeviceLock` | 跨进程：同一台机器上按（后端、通道）一把文件锁 | `Session` 持有，`Drop` 即释放；不碰硬件的后端（回放）不拿 | 后来者报锁冲突，而非底层 socket 错误 |
+| **写闸门** `Mutex<Session>` | 进程内：同一时刻只有一个写者 | `daemon` 的 `AppState` 持有 | 其余写请求排队；读不取它，因此可多订阅者并存 |
+
+两者的分工：写闸门管"同一进程内谁动 ECU"，设备锁管"同一台机器上谁占硬件"。CLI 直连与 daemon 争的是后者，不是前者。
 
 daemon 的对外边界只四条：明文 HTTP/1.1、默认仅绑 `127.0.0.1`、静态页与 gRPC 同端口、提供 `/healthz`。认证、远程接入与方法级权限不在 daemon 内实现，全部交给前置网关（[decisions.md](decisions.md#d-22-远程接入由前置网关承担)），部署形态与配置示例见 [13-deployment.md](13-deployment.md)。
 
