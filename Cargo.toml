@@ -3,7 +3,9 @@ resolver = "3"
 members = ["crates/*", "vendor/a2ltool-dwarf"]
 
 [workspace.package]
-version = "0.2.0"
+# 0.3.0：RH-01 第 1+2 条删了 DaqCapture::set_paused（公开面 breaking），
+# 0.x 阶段走 minor。cargo-semver-checks 认这个窗口。
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT OR Apache-2.0"
