@@ -65,6 +65,21 @@ impl FaultCode {
         Some(Self(domain.code_base() + seq))
     }
 
+    /// 常量序号的构造：序号越界在**编译期**就失败。
+    ///
+    /// 只在序号是字面量或本仓的常量表时用——它把"我知道这个序号合法"从注释
+    /// 变成编译器检查，调用点因此不必再写一次 expect。运行期算出来的序号走
+    /// [`Self::new`]，那里 `None` 是真有可能发生的分支，要按错误处理。
+    ///
+    /// 编译期求值失败的消息形如 ``evaluation of `X` failed``，根因就是这里
+    /// 的 panic 文案。
+    pub const fn from_const(domain: Domain, seq: u32) -> Self {
+        match Self::new(domain, seq) {
+            Some(code) => code,
+            None => panic!("故障序号必须在 1..=999 内"),
+        }
+    }
+
     /// 原始编号。
     pub const fn get(self) -> u32 {
         self.0
@@ -217,6 +232,34 @@ mod tests {
         assert!(FaultCode::new(Domain::Bus, 0).is_none());
         assert!(FaultCode::new(Domain::Bus, FaultCode::MAX_SEQ + 1).is_none());
         assert!(FaultCode::new(Domain::Bus, 1).is_some());
+    }
+
+    #[test]
+    fn from_const_matches_new_for_legal_seq() {
+        for domain in [
+            Domain::Bus,
+            Domain::Xcp,
+            Domain::Source,
+            Domain::Session,
+            Domain::Internal,
+        ] {
+            let checked = FaultCode::new(domain, 7).expect("序号 7 合法");
+            assert_eq!(FaultCode::from_const(domain, 7), checked);
+        }
+    }
+
+    #[test]
+    fn from_const_is_usable_in_const_context() {
+        // 常量求值即校验：序号越界在这里直接编译不过。
+        const CODE: FaultCode = FaultCode::from_const(Domain::Xcp, 11);
+        assert_eq!(CODE.get(), 2011);
+        assert_eq!(CODE.domain(), Domain::Xcp);
+    }
+
+    #[test]
+    #[should_panic(expected = "1..=999")]
+    fn from_const_rejects_out_of_range_at_runtime() {
+        let _ = FaultCode::from_const(Domain::Bus, 0);
     }
 
     #[test]

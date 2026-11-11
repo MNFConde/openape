@@ -4,6 +4,9 @@
 //! 时间戳（round 半分远离零，录制端除以 1e6 的无损逆）、通道按写序列举、
 //! 按名取列时点名可用通道。写出→读回逐值无损是本文件的验收线。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 mod common;
 
 use std::path::Path;

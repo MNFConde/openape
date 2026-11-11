@@ -1,5 +1,8 @@
 //! master 侧的协议对话。用脚本化总线替代真实从站，专测"对不上时怎么报"。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

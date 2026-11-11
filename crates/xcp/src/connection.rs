@@ -129,6 +129,10 @@ pub mod seq {
 
 /// 构造一条 XCP 域故障。序号固定在 [`seq`] 的常量里，构造不会失败。
 pub(crate) fn fault(sequence: u32, severity: Severity, message: impl Into<String>) -> Fault {
+    #[expect(
+        clippy::expect_used,
+        reason = "本 crate 的 fault() 调用点只传 seq:: 常量表里的序号，运行期不参与"
+    )]
     let code = FaultCode::new(Domain::Xcp, sequence).expect("序号常量在 1..=999 内");
     Fault::new(code, severity, message)
 }

@@ -3,6 +3,9 @@
 //! 这条测试把两个信息源前端接在一起跑：`format-elf` 抽 DWARF，本 crate 写
 //! A2L。任何一侧的字段漏填都会在这里被严格模式拦住。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::path::Path;
 
 use openape_cal_core::{AxisBinding, Role, VariableTree};

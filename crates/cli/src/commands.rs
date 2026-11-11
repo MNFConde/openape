@@ -219,7 +219,7 @@ pub async fn connect_daemon(url: &str) -> Result<OpenApeClient<Channel>, Fault> 
 /// daemon 侧的失败。归会话域：设备在 daemon 手里，问题出在那条会话上。
 pub fn daemon_fault(message: impl ToString) -> Fault {
     Fault::new(
-        FaultCode::new(Domain::Session, 4).expect("序号 4 合法"),
+        FaultCode::from_const(Domain::Session, 4),
         Severity::Error,
         message.to_string(),
     )
@@ -256,20 +256,21 @@ pub fn probe_source(
     a2l: Option<&std::path::Path>,
     json: bool,
 ) -> Result<String, Fault> {
-    if elf.is_none() && a2l.is_none() {
-        return Err(usage_fault(
-            "probe source 至少要给一个来源：--elf 或 --a2l".to_owned(),
-        ));
-    }
     let mut notes = Vec::new();
     let elf_tree = elf.map(|path| load_elf(path, &mut notes)).transpose()?;
     let a2l_tree = a2l.map(|path| load_a2l(path, &mut notes)).transpose()?;
 
     // 两份都给时以 ELF 为主：它描述的是编进 ECU 的那份二进制，A2L 可能过时。
-    let primary = elf_tree
-        .as_ref()
-        .or(a2l_tree.as_ref())
-        .expect("上面查过非空");
+    // "至少要给一个来源"就在这一处判，不再靠前置检查 + expect 兜着。
+    let primary = match (&elf_tree, &a2l_tree) {
+        (Some(elf), _) => elf,
+        (None, Some(a2l)) => a2l,
+        (None, None) => {
+            return Err(usage_fault(
+                "probe source 至少要给一个来源：--elf 或 --a2l".to_owned(),
+            ));
+        }
+    };
     let report = SourceReport {
         variables: primary.iter().map(source_variable).collect(),
         cross_check: match (&elf_tree, &a2l_tree) {

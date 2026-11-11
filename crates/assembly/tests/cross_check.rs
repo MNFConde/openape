@@ -3,6 +3,9 @@
 //! 这类错误的代价很高：地址差一个字节，写入就会落到相邻变量上，而总线
 //! 不会报错。所以校验要在 `probe source` 阶段跑，不能等到用户按下写入。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::path::Path;
 
 use openape_assembly::{Field, cross_check};

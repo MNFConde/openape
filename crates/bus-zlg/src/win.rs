@@ -217,7 +217,7 @@ impl Drop for Device {
 
 fn fault(message: String, hint: &str) -> Fault {
     Fault::new(
-        FaultCode::new(Domain::Bus, 41).expect("序号 41 合法"),
+        FaultCode::from_const(Domain::Bus, 41),
         Severity::Error,
         message,
     )

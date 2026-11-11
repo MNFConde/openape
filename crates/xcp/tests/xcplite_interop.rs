@@ -22,6 +22,9 @@
 //! 但 daemon 还没有选档案的入口，所以本测试走的是档案 + 总线，不是整条
 //! 会话链。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;

@@ -7,6 +7,9 @@
 //! 目前两边在夹具上零差异，因此下面的断言取"无差异"这个更强的形式。夹具
 //! 一旦覆盖到边角情形而产生分歧，就在这里改成分项列举。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::path::Path;
 
 use can_dbc::{ByteOrder as TheirOrder, DBC, ValueType};

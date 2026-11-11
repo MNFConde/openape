@@ -37,7 +37,7 @@ impl DeviceLock {
                 Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
                     if let Some(holder) = live_holder(&path) {
                         return Err(Fault::new(
-                            FaultCode::new(Domain::Session, 1).expect("序号 1 合法"),
+                            FaultCode::from_const(Domain::Session, 1),
                             Severity::Error,
                             format!("{channel} 已被进程 {holder} 占用"),
                         )
@@ -51,7 +51,7 @@ impl DeviceLock {
             }
         }
         Err(Fault::new(
-            FaultCode::new(Domain::Session, 1).expect("序号 1 合法"),
+            FaultCode::from_const(Domain::Session, 1),
             Severity::Error,
             format!("{channel} 的锁竞争两轮仍未拿到"),
         )
@@ -92,7 +92,7 @@ fn live_holder(path: &Path) -> Option<u32> {
 
 fn io_fault(path: &Path, err: std::io::Error) -> Fault {
     Fault::new(
-        FaultCode::new(Domain::Session, 2).expect("序号 2 合法"),
+        FaultCode::from_const(Domain::Session, 2),
         Severity::Error,
         format!("锁文件 {} 操作失败：{err}", path.display()),
     )

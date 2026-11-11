@@ -1,5 +1,8 @@
 //! 用入库的样本走一遍"读文件 → 按名对齐"，验收口径来自 M4-06。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::path::{Path, PathBuf};
 
 use openape_format_cdf::{Category, Scalar, parse_file};

@@ -2,6 +2,9 @@
 //! 各内存块的值。这是 M2-08 与 M2-09 的合并验收——两侧任何一边只做一半都
 //! 跑不通，所以只能端到端验。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::sync::Arc;
 use std::time::Duration;
 

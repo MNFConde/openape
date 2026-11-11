@@ -157,7 +157,7 @@ impl Bus for ZlgBus {
 /// 本机没有这个后端时的故障。措辞要给下一步，而不是只说"不支持"。
 fn unavailable(channel: &str) -> Fault {
     Fault::new(
-        FaultCode::new(Domain::Bus, 40).expect("序号 40 合法"),
+        FaultCode::from_const(Domain::Bus, 40),
         Severity::Error,
         format!("{channel}: 周立功后端只在 Windows 上可用（zlgcan.dll 与驱动只发布在 Windows）"),
     )

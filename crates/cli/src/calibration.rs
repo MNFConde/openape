@@ -602,7 +602,7 @@ fn hex_spaced(bytes: &[u8]) -> String {
 /// daemon 侧的失败归会话域：设备在 daemon 手里。
 fn daemon_fault(message: impl ToString) -> Fault {
     Fault::new(
-        FaultCode::new(Domain::Session, 4).expect("序号 4 合法"),
+        FaultCode::from_const(Domain::Session, 4),
         Severity::Error,
         message.to_string(),
     )

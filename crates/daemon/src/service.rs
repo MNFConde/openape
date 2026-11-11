@@ -422,7 +422,9 @@ impl proto::open_ape_server::OpenApe for OpenApeService {
                     .channel_names()
                     .iter()
                     .position(|name| name == &channel)
-                    .expect("通道刚验证过存在");
+                    .ok_or_else(|| {
+                        Status::internal(format!("通道 {channel} 在表头里找不到：上面刚验证过存在"))
+                    })?;
                 Ok((rows, index))
             },
         )

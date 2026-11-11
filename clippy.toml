@@ -1,0 +1,5 @@
+# `unwrap_used` / `expect_used` 在 `--all-targets` 下也会扫测试模块。
+# 测试里的 unwrap/expect 是断言手段（失败即测试失败），不是需要治理的疏忽，
+# 故按测试上下文豁免；生产代码仍由 workspace.lints 收紧。
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

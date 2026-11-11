@@ -68,4 +68,7 @@ missing_docs = "deny"
 
 [workspace.lints.clippy]
 unwrap_used = "warn"
+# 与 unwrap_used 对称：测试侧的豁免在 clippy.toml（allow-*-in-tests），
+# 所以这里开 warn 后生产代码里的每一处都必须是显式的 expect 而非沉默。
+expect_used = "warn"
 todo = "warn"

@@ -3,6 +3,9 @@
 //! 放在 L5 外壳里跑：只有这里能同时装起从站与编排层（同档 crate 不互相
 //! 依赖）。没有 vcan 时跳过并返回——跳过必须留痕，否则"全绿"会掩盖没测。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

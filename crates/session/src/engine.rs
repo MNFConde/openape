@@ -35,8 +35,8 @@ impl SessionConfig {
     pub fn new(channel: impl Into<String>) -> Self {
         Self {
             channel: channel.into(),
-            command_id: CanId::standard(0x600).expect("0x600 在 11 位内"),
-            response_id: CanId::standard(0x601).expect("0x601 在 11 位内"),
+            command_id: CanId::standard_const(0x600),
+            response_id: CanId::standard_const(0x601),
             timeout: Duration::from_millis(200),
             retries: 2,
         }
@@ -171,7 +171,7 @@ impl Session {
     pub async fn send_raw(&self, frame: CanFrame) -> Result<(), Fault> {
         self.bus.send(frame).await.map_err(|err| {
             Fault::new(
-                FaultCode::new(Domain::Session, 3).expect("序号 3 合法"),
+                FaultCode::from_const(Domain::Session, 3),
                 Severity::Error,
                 err.to_string(),
             )

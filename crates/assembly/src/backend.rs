@@ -64,7 +64,7 @@ pub fn open(backend: Backend, channel: &str) -> Result<Arc<dyn Bus>, Fault> {
 /// 打开失败的兜底故障。后端自己给的故障优先，这里只在参数层出错时用。
 fn unknown_channel(channel: &str, hint: &str) -> Fault {
     Fault::new(
-        FaultCode::new(Domain::Bus, 42).expect("序号 42 合法"),
+        FaultCode::from_const(Domain::Bus, 42),
         Severity::Error,
         format!("通道 {channel} 的写法不认识"),
     )
@@ -75,7 +75,7 @@ fn unknown_channel(channel: &str, hint: &str) -> Fault {
 /// 后端名不认识时的故障，供命令行与配置解析共用。
 pub fn unknown_backend(name: &str) -> Fault {
     Fault::new(
-        FaultCode::new(Domain::Bus, 43).expect("序号 43 合法"),
+        FaultCode::from_const(Domain::Bus, 43),
         Severity::Error,
         format!("后端 {name} 不认识"),
     )

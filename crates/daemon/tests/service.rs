@@ -3,6 +3,9 @@
 //! 这些方法在 `tests/stream.rs` 里只被间接走到（流与健康），代读、探测、
 //! 会话状态与指标是另一批分支，单独测才看得见。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::sync::Arc;
 use std::time::Duration;
 

@@ -564,7 +564,7 @@ fn to_id(raw: u32, flag: &str) -> Result<u16, Fault> {
 
 fn usage(message: impl Into<String>) -> Fault {
     Fault::new(
-        FaultCode::new(Domain::Internal, 1).expect("序号 1 合法"),
+        FaultCode::from_const(Domain::Internal, 1),
         Severity::Error,
         message.into(),
     )

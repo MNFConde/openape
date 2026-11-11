@@ -3,6 +3,9 @@
 //! 两者并排是刻意的：物理值经过因子与偏移，DBC 的单位写错时只有原始位
 //! 还说得清收到了什么。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::path::Path;
 
 use openape_format_dbc::load_str;

@@ -4,6 +4,9 @@
 //! 与写出器共享的只有格式定义）。"自己写的自己读得回"不是充分证明，所以
 //! 另有第三方互测：script/verify-mf4.py 用 asammdf 读同一份 golden。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::path::PathBuf;
 
 mod common;

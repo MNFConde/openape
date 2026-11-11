@@ -1,6 +1,9 @@
 //! 从站在真总线上的行为。命令语义由 crate 内单测覆盖，这里只证明
 //! `serve` 的收发循环、帧过滤与响应编码在 CAN 上成立。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::sync::Arc;
 use std::time::Duration;
 

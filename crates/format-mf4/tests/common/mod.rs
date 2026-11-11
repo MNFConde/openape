@@ -4,6 +4,8 @@
 //! 记录被默认值掩盖，`99.0` 防止只验证了低字节。
 
 #![allow(dead_code)]
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
 
 use std::path::Path;
 

@@ -4,6 +4,9 @@
 //! SocketCan 是同一个接口——这里直接按总线的用法消费它，不加任何
 //! 回放专用分支。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::time::Duration;
 
 use openape_bus::{Bus, BusError, CanFrame, CanId};

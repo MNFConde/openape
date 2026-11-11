@@ -33,6 +33,17 @@ impl CanId {
         }
     }
 
+    /// 常量标识符的构造：超过 11 位在**编译期**就失败。
+    ///
+    /// 只在标识符是字面量或本仓常量时用——默认 ID 这类写死的值用它就不必
+    /// 在调用点再写一次 expect。运行期算出来的值走 [`Self::standard`]。
+    pub const fn standard_const(raw: u16) -> Self {
+        match Self::standard(raw) {
+            Some(id) => id,
+            None => panic!("标准帧标识符必须在 11 位内"),
+        }
+    }
+
     /// 裸标识符值，按帧类型右对齐。
     pub const fn raw(self) -> u32 {
         match self {
@@ -101,6 +112,14 @@ mod tests {
     fn standard_id_rejects_more_than_11_bits() {
         assert_eq!(CanId::standard(0x7FF), Some(CanId::Standard(0x7FF)));
         assert_eq!(CanId::standard(0x800), None);
+    }
+
+    #[test]
+    fn standard_const_matches_checked_constructor() {
+        assert_eq!(CanId::standard_const(0x600), CanId::Standard(0x600));
+        // 常量求值即校验：越界标识符在这里编译不过。
+        const DEFAULT: CanId = CanId::standard_const(0x601);
+        assert_eq!(DEFAULT, CanId::Standard(0x601));
     }
 
     #[test]

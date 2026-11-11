@@ -143,7 +143,7 @@ impl std::fmt::Debug for Recorder {
 }
 
 fn recorder_fault(message: String) -> Fault {
-    let code = FaultCode::new(Domain::Session, seq::RECORDER).expect("序号常量在 1..=999 内");
+    let code = FaultCode::from_const(Domain::Session, seq::RECORDER);
     Fault::new(code, Severity::Error, message)
 }
 

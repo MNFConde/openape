@@ -3,6 +3,9 @@
 //! 断言的是用户看得见的事实——"这个变量在 ELF 里是什么形状"，不碰内部
 //! 实现怎么遍历 DWARF。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use openape_format_elf::{ElemType, ElfSource, Field, Shape, load};
 
 fn golden() -> ElfSource {

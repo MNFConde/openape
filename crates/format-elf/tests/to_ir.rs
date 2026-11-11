@@ -3,6 +3,9 @@
 //! 语义字段（单位、量程、换算）与角色一律留空——D-13 定了角色由用户指定，
 //! 语义只有 A2L 给得出。这里断言的就是"没有多填"。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use openape_cal_core::{ByteOrder, ElemType, VariableTree};
 use openape_format_elf::{ElfSource, load};
 

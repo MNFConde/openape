@@ -117,7 +117,7 @@ impl Session {
 }
 
 fn page_fault(message: String) -> Fault {
-    let code = FaultCode::new(Domain::Session, seq::PAGE).expect("序号常量在 1..=999 内");
+    let code = FaultCode::from_const(Domain::Session, seq::PAGE);
     Fault::new(code, Severity::Error, message)
 }
 

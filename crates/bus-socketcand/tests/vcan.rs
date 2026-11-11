@@ -7,6 +7,9 @@
 //!   script/scripts.md）；
 //! - vcan 可用。任一缺席就跳过——CI 没有 vcan 时不红。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Stdio;

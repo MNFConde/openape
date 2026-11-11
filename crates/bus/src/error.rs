@@ -52,11 +52,13 @@ impl From<BusError> for Fault {
             BusError::Timeout { .. } => Severity::Warning,
             _ => Severity::Error,
         };
-        let mut fault = Fault::new(
-            openape_diag::FaultCode::new(Domain::Bus, err.seq()).expect("序号固定在 1..=999"),
-            severity,
-            err.to_string(),
-        );
+        #[expect(
+            clippy::expect_used,
+            reason = "seq() 只返回本文件的字面量 1..=5，不走运行期输入"
+        )]
+        let code =
+            openape_diag::FaultCode::new(Domain::Bus, err.seq()).expect("序号固定在 1..=999");
+        let mut fault = Fault::new(code, severity, err.to_string());
         if let BusError::ChannelUnavailable { channel, .. } = &err {
             fault = fault.with_context("channel", channel.clone());
         }

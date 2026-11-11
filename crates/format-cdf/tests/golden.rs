@@ -10,6 +10,9 @@
 //! 重新生成：`OPENAPE_WRITE_GOLDEN=1 cargo test -p openape-format-cdf --test golden`
 //! 是一个显式动作——顺手改期望会让比对失去意义。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::path::{Path, PathBuf};
 
 use openape_format_cdf::{Category, Scalar, parse_file};

@@ -8,6 +8,9 @@
 //! `UdpXcpBus` 一个类型里。与 XCPlite（C 库）的互通攒真实对端后补；
 //! headered 变体在这里先把 CTR 头的加/剥与两侧一致性钉住。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;

@@ -14,7 +14,7 @@ use openape_diag::{Fault, FaultCode, Severity};
 /// 命令行用法错误。归内部域：这不是 ECU 或总线的问题。
 pub fn usage_fault(message: String) -> Fault {
     Fault::new(
-        FaultCode::new(openape_diag::Domain::Internal, 1).expect("序号 1 合法"),
+        FaultCode::from_const(openape_diag::Domain::Internal, 1),
         Severity::Error,
         message,
     )

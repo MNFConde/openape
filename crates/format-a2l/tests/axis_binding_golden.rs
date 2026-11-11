@@ -4,6 +4,9 @@
 //! 的地址对不上，导出模板改了就与期望 A2L 对不上。任一处漂移都会在这里
 //! 亮红灯，而不是等到真机上导出的 Map 打不开。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::path::{Path, PathBuf};
 
 use openape_cal_core::{AxisBinding, ProjectConfig, Role, VariableTree};

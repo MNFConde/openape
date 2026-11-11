@@ -153,15 +153,14 @@ impl Session {
         let address = target.address();
         let range = check_range(target, value)?;
         let before = self.read(address, expected).await?;
-        let snapshot = Dataset::new(
-            context.mode(),
-            Timestamp::now(),
-            vec![
-                Entry::new(target.symbol().clone(), address, before.clone())
-                    .expect("字节长度已在上面校验过非零"),
-            ],
-        )
-        .map_err(|err| snapshot_fault(err.to_string()))?;
+        #[expect(
+            clippy::expect_used,
+            reason = "上面刚校验过长度非零，Entry::new 只对空字节串报警"
+        )]
+        let entry = Entry::new(target.symbol().clone(), address, before.clone())
+            .expect("字节长度已在上面校验过非零");
+        let snapshot = Dataset::new(context.mode(), Timestamp::now(), vec![entry])
+            .map_err(|err| snapshot_fault(err.to_string()))?;
         let snapshot_path = persist_snapshot(context.snapshot_dir(), &snapshot)?;
 
         self.write_raw(address, value).await?;
@@ -300,6 +299,10 @@ fn sanitize(symbol: &Symbol) -> String {
 }
 
 fn fault(sequence: u32, message: impl Into<String>) -> Fault {
+    #[expect(
+        clippy::expect_used,
+        reason = "本 crate 的 fault() 调用点只传 seq:: 常量表里的序号，运行期不参与"
+    )]
     let code = FaultCode::new(Domain::Session, sequence).expect("序号常量在 1..=999 内");
     Fault::new(code, Severity::Error, message)
 }
@@ -398,7 +401,7 @@ mod tests {
         let err = check_range(&target, &[0x00, 0xC8]).expect_err("200 越界");
         assert_eq!(
             err.code(),
-            FaultCode::new(Domain::Session, seq::RANGE).expect("序号合法")
+            FaultCode::from_const(Domain::Session, seq::RANGE)
         );
         let message = err.to_string();
         assert!(message.contains("200"), "{message}");
@@ -436,7 +439,7 @@ mod tests {
         let err = check_range(&target, &[0x00]).expect_err("1 字节解不成 u16");
         assert_eq!(
             err.code(),
-            FaultCode::new(Domain::Session, seq::RANGE).expect("序号合法")
+            FaultCode::from_const(Domain::Session, seq::RANGE)
         );
     }
 }

@@ -3,6 +3,9 @@
 //! 不碰硬件：`AppState::idle` 就够——`open_recording` 只读文件。三条
 //! 分支：正常推流、未知通道点名可用、路径不存在报 not_found。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

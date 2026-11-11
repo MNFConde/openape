@@ -6,6 +6,9 @@
 //! 最后手写切页与 GET_CAL_PAGE 的 CRO 验回显——master 对短回显的读回
 //! 会失败，这本身就是怪癖差异的一部分，切页因此绕开 master 的 API。
 
+// 集成测试里的 expect 是断言手段：失败即测试失败，不走生产那道门。
+#![allow(clippy::expect_used)]
+
 use std::sync::Arc;
 use std::time::Duration;
 

@@ -75,6 +75,10 @@ impl Bus for ReplayBus {
             Wait(Duration),
         }
         let step = {
+            #[expect(
+                clippy::expect_used,
+                reason = "队列是纯数据，毒化只说明持锁线程 panic 过；继续回放比起停在这里更坏"
+            )]
             let mut frames = self.frames.lock().expect("回放队列锁");
             let Some(next) = frames.first() else {
                 return Err(BusError::Closed);

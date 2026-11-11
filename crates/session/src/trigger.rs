@@ -333,7 +333,7 @@ pub fn spawn_trigger(
 }
 
 fn config_fault(message: String) -> Fault {
-    let code = FaultCode::new(Domain::Session, seq::TRIGGER).expect("序号常量在 1..=999 内");
+    let code = FaultCode::from_const(Domain::Session, seq::TRIGGER);
     Fault::new(code, Severity::Error, message)
 }
 

@@ -44,8 +44,8 @@ impl SimEcuConfig {
     /// 与 M0-2 spike 一致的默认值。
     pub fn default_ids() -> Self {
         Self {
-            command_id: CanId::standard(0x600).expect("0x600 在 11 位内"),
-            response_id: CanId::standard(0x601).expect("0x601 在 11 位内"),
+            command_id: CanId::standard_const(0x600),
+            response_id: CanId::standard_const(0x601),
             event_period: Duration::from_millis(10),
             jitter: Duration::ZERO,
             jitter_seed: 0x5EED,
@@ -586,7 +586,7 @@ pub async fn serve_udp(
 }
 
 fn udp_fault(message: String) -> Fault {
-    let code = FaultCode::new(Domain::Bus, 5).expect("序号常量在 1..=999 内");
+    let code = FaultCode::from_const(Domain::Bus, 5);
     Fault::new(code, Severity::Error, message)
 }
 
@@ -659,7 +659,7 @@ fn respond(ecu: &mut SimEcu, config: &SimEcuConfig, frame: &CanFrame) -> Option<
 }
 
 fn bus_fault(err: &openape_bus::BusError) -> Fault {
-    let code = FaultCode::new(Domain::Session, 2).expect("序号 2 合法");
+    let code = FaultCode::from_const(Domain::Session, 2);
     Fault::new(code, Severity::Error, format!("从站总线出错：{err}"))
         .with_hint("确认通道仍然存在（`probe bus`）")
 }
