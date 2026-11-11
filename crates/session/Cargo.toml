@@ -25,6 +25,8 @@ tracing.workspace = true
 [dev-dependencies]
 async-trait.workspace = true
 mf4-rs.workspace = true
+# 暂停握手用 tokio::time::pause() 加速，只在测试里需要 test-util。
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

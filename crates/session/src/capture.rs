@@ -5,26 +5,46 @@
 //! 是唯一读者，也是唯一命令发起方（M2-14 的 `--via-daemon` 复用同一会话）。
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use openape_bus::{Bus, BusError, CanId};
 use openape_diag::Metrics;
 use openape_xcp::DaqLayout;
 use openape_xcp_proto::dto_profile::{self, DtoProfile, PidKind};
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::daq_stream::{DEFAULT_CAPACITY, DaqStats, DaqStream};
 
-/// 每次等待接收的时长。短一些让采集泵对任务中止更敏感。
+/// 每次等待接收的时长。暂停握手的确认窗口也由它推出来。
 const RECV_SLICE: Duration = Duration::from_millis(50);
+
+/// 等泵自己收工的宽限期。
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(1);
+
+/// 命令通道容量。命令本身只有暂停/恢复/收工三种，留几个位足够。
+const CMD_QUEUE: usize = 8;
+
+/// 采集泵的控制命令。
+///
+/// 为什么用命令通道而不是共享标志位：暂停要**可确认**。置一个 `AtomicBool`
+/// 之后泵若正卡在 `bus.recv(50ms)` 里，它仍会吃掉命令事务正在等的响应帧——
+/// 那是个真竞态，只是窗口小到平时看不见。
+enum PumpCmd {
+    /// 暂停并回执：泵收到后先回 ack，再在命令通道上等下一步。
+    Pause(oneshot::Sender<()>),
+    /// 恢复。不需要回执：晚一个 recv 周期恢复不影响正确性。
+    Resume,
+    /// 正常收工：泵在两次 recv 之间自己退出。
+    Shutdown,
+}
 
 /// 一次运行中的采集。丢弃即停泵，样本流随之关闭。
 #[derive(Debug)]
 pub struct DaqCapture {
     stream: Arc<DaqStream>,
-    paused: Arc<AtomicBool>,
-    task: JoinHandle<()>,
+    cmd: mpsc::Sender<PumpCmd>,
+    task: Option<JoinHandle<()>>,
 }
 
 impl DaqCapture {
@@ -38,19 +58,59 @@ impl DaqCapture {
         self.stream.stats()
     }
 
-    /// 暂停或恢复。
+    /// 暂停采集并等泵确认。
     ///
-    /// 暂停期间泵不读总线，命令事务才有机会收到自己的响应帧——两者共用一个
-    /// 接收端，谁都不能一边抢帧一边等回应。代价是暂停期间的 DTO 直接丢掉，
-    /// 不会记进缓冲，所以别把它当常态。
-    pub fn set_paused(&self, paused: bool) {
-        self.paused.store(paused, Ordering::Relaxed);
+    /// 回执之后泵才真的不再 `recv`，命令事务这时拿得到自己的响应帧。暂停期间
+    /// 的 DTO 仍会留在总线接收队列里，恢复后按序处理——不是丢弃。
+    ///
+    /// 超时只 warn 不报错：泵可能已经因为总线没了而退出，这不该让写路径失败，
+    /// 但必须留痕——否则"暂停没生效"会以偶发错帧的形式出现在很久以后。
+    pub async fn pause(&self) {
+        let (ack_tx, ack_rx) = oneshot::channel();
+        if self.cmd.send(PumpCmd::Pause(ack_tx)).await.is_err() {
+            tracing::warn!("采集泵已退出，暂停命令没有送达");
+            return;
+        }
+        // 窗口取两个 recv 周期：泵最多在途一个 recv，留一倍余量给调度。
+        let window = RECV_SLICE * 2;
+        match tokio::time::timeout(window, ack_rx).await {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) => tracing::warn!("采集泵在确认前退出，暂停只到了半路"),
+            Err(_) => tracing::warn!(
+                window_ms = window.as_millis(),
+                "采集泵没有在窗口内确认暂停：命令响应帧可能仍被泵吃掉"
+            ),
+        }
+    }
+
+    /// 恢复采集。不需要确认，队列满或泵已退出都只留痕。
+    pub fn resume(&self) {
+        if self.cmd.try_send(PumpCmd::Resume).is_err() {
+            tracing::warn!("采集泵已退出或命令队列已满，恢复命令没有送达");
+        }
+    }
+
+    /// 让泵自己收工。
+    ///
+    /// 为什么不是 `CancellationToken`：泵不持锁、不写文件，abort 不会破坏任何
+    /// 不变量，所以 [`Drop`] 里的 abort 可以继续当兜底。但正常路径走命令通道，
+    /// 泵在两次 recv 之间自己退出，样本流的关闭与计数收尾都还能走到。
+    pub async fn shutdown(mut self) {
+        let _ = self.cmd.send(PumpCmd::Shutdown).await;
+        if let Some(task) = self.task.take()
+            && tokio::time::timeout(SHUTDOWN_GRACE, task).await.is_err()
+        {
+            tracing::warn!("采集泵没有在宽限期内退出，交给 Drop 里的 abort");
+        }
     }
 }
 
 impl Drop for DaqCapture {
     fn drop(&mut self) {
-        self.task.abort();
+        // 兜底：正常路径已由 `shutdown` 收工，走到这里说明调用方直接丢了句柄。
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
     }
 }
 
@@ -67,15 +127,15 @@ pub(crate) fn spawn(
         Some(metrics) => DaqStream::with_metrics(capacity, metrics),
         None => DaqStream::new(capacity),
     });
-    let paused = Arc::new(AtomicBool::new(false));
+    let (cmd, cmd_rx) = mpsc::channel(CMD_QUEUE);
     let worker = Arc::clone(&stream);
-    let gate = Arc::clone(&paused);
     let dto = config.dto;
-    let task = tokio::spawn(async move { pump(bus, response_id, layout, dto, worker, gate).await });
+    let task =
+        tokio::spawn(async move { pump(bus, response_id, layout, dto, worker, cmd_rx).await });
     DaqCapture {
         stream,
-        paused,
-        task,
+        cmd,
+        task: Some(task),
     }
 }
 
@@ -85,14 +145,34 @@ async fn pump(
     layout: DaqLayout,
     dto: &'static DtoProfile,
     stream: Arc<DaqStream>,
-    paused: Arc<AtomicBool>,
+    mut cmd_rx: mpsc::Receiver<PumpCmd>,
 ) {
     let mut warned = false;
     loop {
-        if paused.load(Ordering::Relaxed) {
-            // 让出接收端给命令事务。
-            tokio::time::sleep(Duration::from_millis(5)).await;
-            continue;
+        // 命令优先于收帧：暂停必须在下一次 recv 之前生效，否则它会吃掉命令
+        // 事务正在等的响应帧。
+        match cmd_rx.try_recv() {
+            Ok(PumpCmd::Pause(ack)) => {
+                let _ = ack.send(());
+                // 暂停就是等：直到收到恢复或收工。等待期间不持锁、不写文件，
+                // 没有东西需要收尾。
+                loop {
+                    match cmd_rx.recv().await {
+                        Some(PumpCmd::Resume) => break,
+                        // 重复暂停直接补回执，别让第二个调用方等满窗口。
+                        Some(PumpCmd::Pause(ack)) => {
+                            let _ = ack.send(());
+                        }
+                        Some(PumpCmd::Shutdown) | None => return,
+                    }
+                }
+                continue;
+            }
+            Ok(PumpCmd::Resume) => continue,
+            Ok(PumpCmd::Shutdown) => return,
+            Err(mpsc::error::TryRecvError::Empty) => {}
+            // 发送端没了说明句柄已丢弃，泵没有存在的理由。
+            Err(mpsc::error::TryRecvError::Disconnected) => return,
         }
         match bus.recv(RECV_SLICE).await {
             Ok(frame) => {
@@ -404,5 +484,161 @@ mod tests {
             2,
             "两帧都按档案不符计数——配错档案时这个数会一直涨"
         );
+    }
+
+    /// 可以中途喂帧的总线：推一帧才收一帧，空闲时按契约等满超时再报。
+    ///
+    /// 与 [`ScriptedBus`] 的区别是帧的到达时机可控——验证"暂停期间没有样本"
+    /// 需要在泵停下来之后再放帧进去。
+    struct ChannelBus {
+        frames: tokio::sync::Mutex<tokio::sync::mpsc::Receiver<CanFrame>>,
+    }
+
+    impl ChannelBus {
+        fn pair() -> (Self, tokio::sync::mpsc::Sender<CanFrame>) {
+            let (tx, rx) = tokio::sync::mpsc::channel(8);
+            (
+                Self {
+                    frames: tokio::sync::Mutex::new(rx),
+                },
+                tx,
+            )
+        }
+    }
+
+    #[async_trait]
+    impl Bus for ChannelBus {
+        fn backend(&self) -> &'static str {
+            "channel"
+        }
+
+        fn channel(&self) -> &str {
+            "mock1"
+        }
+
+        fn capabilities(&self) -> BusCapabilities {
+            BusCapabilities::CLASSIC_SOFT_TIMESTAMP
+        }
+
+        async fn send(&self, _frame: CanFrame) -> Result<(), BusError> {
+            Ok(())
+        }
+
+        async fn recv(&self, timeout: Duration) -> Result<CanFrame, BusError> {
+            let mut frames = self.frames.lock().await;
+            match tokio::time::timeout(timeout, frames.recv()).await {
+                Ok(Some(frame)) => Ok(frame),
+                Ok(None) => Err(BusError::Closed),
+                Err(_) => Err(BusError::Timeout {
+                    waited_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+                }),
+            }
+        }
+    }
+
+    fn response_id() -> CanId {
+        CanId::standard(0x601).expect("合法")
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_paused_pump_produces_no_samples() {
+        let (bus, frames) = ChannelBus::pair();
+        let capture = spawn(
+            Arc::new(bus),
+            response_id(),
+            layout_with(0, 1),
+            &CaptureConfig::default(),
+        );
+        let mut reader = capture.stream().subscribe();
+
+        frames.send(dto(0, &[0x11])).await.expect("喂帧");
+        let first = tokio::time::timeout(Duration::from_secs(2), reader.recv())
+            .await
+            .expect("不该超时")
+            .expect("应有一条样本");
+        assert_eq!(first.payload, vec![0x11]);
+
+        capture.pause().await;
+        frames.send(dto(0, &[0x22])).await.expect("喂帧");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(500), reader.recv())
+                .await
+                .is_err(),
+            "暂停期间不该出样本"
+        );
+        assert_eq!(capture.stats().produced, 1, "暂停期间的帧一帧都不该计");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn pause_hands_the_receiver_back_to_the_caller() {
+        // 暂停的意义就在这里：回执之后泵真的不再 recv，命令事务才拿得到自己的
+        // 响应帧。旧实现只置标志位，泵卡在 recv 里仍会吃掉它。
+        let (bus, frames) = ChannelBus::pair();
+        let bus: Arc<dyn Bus> = Arc::new(bus);
+        let capture = spawn(
+            Arc::clone(&bus),
+            response_id(),
+            layout_with(0, 1),
+            &CaptureConfig::default(),
+        );
+
+        capture.pause().await;
+        frames.send(dto(0, &[0x99])).await.expect("喂帧");
+        let frame = tokio::time::timeout(Duration::from_millis(500), bus.recv(RECV_SLICE))
+            .await
+            .expect("暂停后调用方要能直接收到帧")
+            .expect("帧在队列里");
+        assert_eq!(frame.data, vec![0, 0x99]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn resuming_after_a_pause_keeps_the_stream_going() {
+        let (bus, frames) = ChannelBus::pair();
+        let capture = spawn(
+            Arc::new(bus),
+            response_id(),
+            layout_with(0, 1),
+            &CaptureConfig::default(),
+        );
+        let mut reader = capture.stream().subscribe();
+
+        capture.pause().await;
+        // 暂停期间放进去的帧留在信道里，恢复后按序出来。
+        frames.send(dto(0, &[0x22])).await.expect("喂帧");
+        capture.resume();
+
+        let next = tokio::time::timeout(Duration::from_secs(2), reader.recv())
+            .await
+            .expect("恢复后不该超时")
+            .expect("应有一条样本");
+        assert_eq!(next.payload, vec![0x22], "暂停期间排着的帧要接着出");
+
+        frames.send(dto(0, &[0x33])).await.expect("喂帧");
+        let after = tokio::time::timeout(Duration::from_secs(2), reader.recv())
+            .await
+            .expect("恢复后不该超时")
+            .expect("应有一条样本");
+        assert_eq!(after.payload, vec![0x33], "后续流要照常推进");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn shutdown_lets_the_pump_finish_on_its_own() {
+        let (bus, _frames) = ChannelBus::pair();
+        let capture = spawn(
+            Arc::new(bus),
+            response_id(),
+            layout_with(0, 1),
+            &CaptureConfig::default(),
+        );
+        let mut reader = capture.stream().subscribe();
+        capture.shutdown().await;
+        // 泵退出即停泵，样本流随之关闭：订阅者拿到"流已结束"而不是一直悬着。
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), reader.recv())
+                .await
+                .is_ok(),
+            "泵退出后流要关掉"
+        );
+        assert!(reader.recv().await.is_none(), "流结束应给出 None");
     }
 }
