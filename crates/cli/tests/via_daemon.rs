@@ -5,7 +5,6 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
 use openape_bus_socketcan::SocketCanBus;
 use openape_bus_socketcan::testing::VcanGuard;
@@ -192,8 +191,6 @@ async fn a_daemon_that_owns_nothing_says_so() {
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.expect("服务能跑");
     });
-    // 给它一点启动时间，避免连接竞态。
-    tokio::time::sleep(Duration::from_millis(50)).await;
 
     let output = tokio::process::Command::new(openape())
         .args([

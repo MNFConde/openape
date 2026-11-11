@@ -60,15 +60,35 @@ async fn socketcand_carries_connect_and_daq_over_vcan() {
     let mut daemon = tokio::process::Command::new(&socketcand)
         .args(["-i", vcan.name(), "-p", &port.to_string(), "-l", "lo", "-n"])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .expect("socketcand 要能启动");
-    tokio::time::sleep(Duration::from_millis(1500)).await;
-    assert!(
-        !matches!(daemon.try_wait(), Ok(Some(_))),
-        "守护进程要活着：提前退出说明端口被占或参数不对"
-    );
+
+    // 等它绑定端口：有界轮询而不是固定 sleep——固定时长在慢机器上假失败、
+    // 在快机器上白等。
+    let address: SocketAddr = format!("127.0.0.1:{port}").parse().expect("合法地址");
+    let mut bound = false;
+    for _ in 0..200 {
+        if tokio::net::TcpStream::connect(address).await.is_ok() {
+            bound = true;
+            break;
+        }
+        assert!(
+            matches!(daemon.try_wait(), Ok(None)),
+            "守护进程要活着：提前退出说明端口被占或参数不对"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    if !bound {
+        // 超时把守护进程的 stderr 一起打出来，否则只剩一句"连不上"。
+        let mut stderr = String::new();
+        if let Some(mut pipe) = daemon.stderr.take() {
+            use tokio::io::AsyncReadExt;
+            let _ = pipe.read_to_string(&mut stderr).await;
+        }
+        panic!("socketcand 两秒内没绑定 {address}；stderr：{stderr}");
+    }
 
     // 从站挂 vcan。
     let bus: Arc<dyn Bus> = Arc::new(SocketCanBus::open(vcan.name()).expect("从站总线"));
@@ -77,7 +97,6 @@ async fn socketcand_carries_connect_and_daq_over_vcan() {
     let slave = tokio::spawn(openape_sim_ecu::serve(ecu, bus));
 
     // master 经 socketcand 上总线。
-    let address: SocketAddr = format!("127.0.0.1:{port}").parse().expect("合法地址");
     let cand = Arc::new(
         SocketcandBus::open(address, vcan.name())
             .await
