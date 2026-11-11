@@ -340,7 +340,7 @@ fn config_fault(message: String) -> Fault {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openape_cal_core::{Address, ByteLen, ByteOrder};
+    use openape_cal_core::{ByteLen, ByteOrder};
 
     fn layout() -> DaqLayout {
         let mut layout = DaqLayout::default();
@@ -700,11 +700,5 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("建临时目录");
         dir
-    }
-
-    /// 判据定义里用到的地址只是为了可读性：触发判据按 ODT 条目取，不按地址。
-    #[allow(dead_code)]
-    fn address() -> Address {
-        Address::new(0x1000)
     }
 }

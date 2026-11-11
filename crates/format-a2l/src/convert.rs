@@ -174,7 +174,6 @@ impl Builder<'_> {
         }
     }
 
-    #[allow(clippy::type_complexity)]
     fn characteristic_to_value(
         &mut self,
         declared: &Characteristic,

@@ -245,6 +245,9 @@ macro_rules! dto_profiles {
         mod golden {
             use super::*;
             $(
+                // 模块名取自 $konst（档案名本身全大写），改不成 snake_case。
+                // 这里保留 allow 而不是统一成 expect：它落在 macro_rules! 的展开
+                // 体内，某次展开若没触发这条 lint，expect 会报 unfulfilled，收益为零。
                 #[allow(non_snake_case)]
                 mod $konst {
                     use super::*;

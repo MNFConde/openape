@@ -143,7 +143,10 @@ fn find_variable<'a>(tree: &'a VariableTree, symbol: &str) -> Option<&'a Variabl
     tree.get(&wanted)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "十个参数都是 A2L 轴描述必需的字段，打包成结构体会在调用点重复一遍拆装"
+)]
 fn write_axis_pts(
     out: &mut String,
     id: &Id,

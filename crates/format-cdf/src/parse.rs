@@ -318,7 +318,10 @@ impl Walker<'_, '_> {
     }
 
     /// `SW-VALUE-CONT`：单位、维度与取值。
-    #[allow(clippy::type_complexity)]
+    #[expect(
+        clippy::type_complexity,
+        reason = "三段返回值就是 CDF 的 SW-VALUE-CONT 结构本身，抽结构体只是换个名字"
+    )]
     fn value_cont(
         &mut self,
         node: Node<'_, '_>,
