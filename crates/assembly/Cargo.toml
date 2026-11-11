@@ -17,3 +17,6 @@ openape-format-a2l.workspace = true
 openape-format-elf.workspace = true
 openape-proto.workspace = true
 thiserror.workspace = true
+
+[lints]
+workspace = true

@@ -62,7 +62,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
-missing_docs = "warn"
+# 与 CI 的 -D warnings 同口径：本地不跑门禁也挡得住。prost/tonic 生成代码在
+# crates/proto/src/lib.rs 的内层 allow 里例外（内层 allow 能覆盖外层 deny）。
+missing_docs = "deny"
 
 [workspace.lints.clippy]
 unwrap_used = "warn"

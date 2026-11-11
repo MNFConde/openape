@@ -12,3 +12,6 @@ thiserror.workspace = true
 
 [dev-dependencies]
 can-dbc = "6"
+
+[lints]
+workspace = true
