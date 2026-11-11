@@ -1,0 +1,28 @@
+name: 装 protoc
+description: >-
+  取预编译 protoc 二进制，不依赖 apt。2026-11-11 连续两轮 CI 都卡在
+  `apt-get install protobuf-compiler`：runner 解析不了 archive.ubuntu.com /
+  security.ubuntu.com（Temporary failure resolving），四个 job 一起红在编译
+  之前。预编译包走 GitHub Releases，与 checkout 同一条出网路径，且 apt 那一层
+  的索引、镜像、t64/amd64v3 变体差异都不再参与。
+
+inputs:
+  version:
+    description: protoc 版本（不带 v 前缀）。升级只改 action.yml 里的默认值。
+    required: false
+    default: "36.2"
+
+runs:
+  using: composite
+  steps:
+    - name: 下载并安装
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="${{ inputs.version }}"
+        url="https://github.com/protocolbuffers/protobuf/releases/download/v${version}/protoc-${version}-linux-x86_64.zip"
+        echo "取 $url"
+        curl -fsSL --retry 3 --retry-delay 2 --retry-connrefused \
+          -o "$RUNNER_TEMP/protoc.zip" "$url"
+        sudo unzip -o -q "$RUNNER_TEMP/protoc.zip" -d /usr/local
+        protoc --version

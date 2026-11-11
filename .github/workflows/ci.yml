@@ -45,9 +45,7 @@ jobs:
       - name: 按 rust-toolchain.toml 装工具链
         run: rustup show
       - uses: Swatinem/rust-cache@v2
-      - name: 装 protoc（tonic 的 build 脚本依赖）
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - run: protoc --version
+      - uses: ./.github/actions/setup-protoc
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
@@ -59,8 +57,7 @@ jobs:
       - name: 按 rust-toolchain.toml 装工具链
         run: rustup show
       - uses: Swatinem/rust-cache@v2
-      - name: 装 protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: ./.github/actions/setup-protoc
       # 大量测试用 VcanGuard 建 vcan 链路，缺模块或缺 CAP_NET_ADMIN 时会静默
       # 跳过——那正是"全绿掩盖没测"。所以这里缺模块直接失败，且下面还有
       # 哨兵断言二次确认关键测试确实跑过。
@@ -115,8 +112,7 @@ jobs:
       - name: 按 rust-toolchain.toml 装工具链
         run: rustup show
       - uses: Swatinem/rust-cache@v2
-      - name: 装 protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: ./.github/actions/setup-protoc
       # 档二 golden：比对不通过即红灯；门禁不设 OPENAPE_WRITE_GOLDEN
       - name: 跑 golden 断言
         run: |
@@ -171,8 +167,7 @@ jobs:
       - name: 按 rust-toolchain.toml 装工具链
         run: rustup show
       - uses: Swatinem/rust-cache@v2
-      - name: 装 protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: ./.github/actions/setup-protoc
       # 基线取 base 分支而非 crates.io：这些 crate 都没发布，check-release
       # 会报 "not found in registry" 直接红（首跑实测）。rust-toolchain 设
       # manual：用 rust-toolchain.toml 钉的那个，别被 action 换成最新 stable。
