@@ -2658,7 +2658,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "openape-assembly"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "openape-bus",
  "openape-bus-socketcan",
@@ -2673,7 +2673,7 @@ dependencies = [
 
 [[package]]
 name = "openape-bus"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "openape-diag",
@@ -2685,7 +2685,7 @@ dependencies = [
 
 [[package]]
 name = "openape-bus-replay"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ablf",
  "async-trait",
@@ -2696,7 +2696,7 @@ dependencies = [
 
 [[package]]
 name = "openape-bus-socketcan"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "openape-bus",
@@ -2708,7 +2708,7 @@ dependencies = [
 
 [[package]]
 name = "openape-bus-socketcand"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "openape-bus",
@@ -2722,7 +2722,7 @@ dependencies = [
 
 [[package]]
 name = "openape-bus-zlg"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "openape-bus",
@@ -2732,7 +2732,7 @@ dependencies = [
 
 [[package]]
 name = "openape-cal-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2742,7 +2742,7 @@ dependencies = [
 
 [[package]]
 name = "openape-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "clap",
@@ -2767,7 +2767,7 @@ dependencies = [
 
 [[package]]
 name = "openape-daemon"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "clap",
@@ -2800,7 +2800,7 @@ dependencies = [
 
 [[package]]
 name = "openape-diag"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2811,7 +2811,7 @@ dependencies = [
 
 [[package]]
 name = "openape-format-a2l"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "a2lfile",
  "openape-cal-core",
@@ -2824,7 +2824,7 @@ dependencies = [
 
 [[package]]
 name = "openape-format-cdf"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "openape-cal-core",
  "proptest",
@@ -2836,7 +2836,7 @@ dependencies = [
 
 [[package]]
 name = "openape-format-dbc"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "can-dbc",
  "thiserror 2.0.21",
@@ -2844,7 +2844,7 @@ dependencies = [
 
 [[package]]
 name = "openape-format-elf"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "a2ltool-dwarf",
  "indexmap 2.14.2",
@@ -2854,7 +2854,7 @@ dependencies = [
 
 [[package]]
 name = "openape-format-mf4"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "mf4-rs",
  "thiserror 2.0.21",
@@ -2862,7 +2862,7 @@ dependencies = [
 
 [[package]]
 name = "openape-proto"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "prost",
  "serde",
@@ -2874,7 +2874,7 @@ dependencies = [
 
 [[package]]
 name = "openape-session"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "mf4-rs",
@@ -2895,7 +2895,7 @@ dependencies = [
 
 [[package]]
 name = "openape-sim-ecu"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "openape-bus",
  "openape-bus-socketcan",
@@ -2910,7 +2910,7 @@ dependencies = [
 
 [[package]]
 name = "openape-ui-tauri"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "tauri",
  "tauri-build",
@@ -2918,7 +2918,7 @@ dependencies = [
 
 [[package]]
 name = "openape-xcp"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "openape-bus",
@@ -2932,7 +2932,7 @@ dependencies = [
 
 [[package]]
 name = "openape-xcp-proto"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "proptest",
  "serde",
