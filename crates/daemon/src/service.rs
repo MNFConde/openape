@@ -171,10 +171,13 @@ impl AppState {
 
     /// 让采集泵让开接收端。守卫存活期间泵是停的，丢弃即恢复——不靠调用方
     /// 记得写恢复，那条路径出错就会永久停采。
-    fn pause_capture(&self) -> CapturePause<'_> {
+    ///
+    /// 是 async 的：暂停要等泵回执。置标志位的版本只能"尽力而为"，泵若卡在
+    /// 一次 recv 里仍会吃掉命令事务等的响应帧。
+    async fn pause_capture(&self) -> CapturePause<'_> {
         let capture = self.capture.as_ref();
         if let Some(capture) = capture {
-            capture.set_paused(true);
+            capture.pause().await;
         }
         CapturePause { capture }
     }
@@ -217,7 +220,8 @@ struct CapturePause<'a> {
 impl Drop for CapturePause<'_> {
     fn drop(&mut self) {
         if let Some(capture) = self.capture {
-            capture.set_paused(false);
+            // 恢复不需要回执：晚一个 recv 周期不影响正确性。
+            capture.resume();
         }
     }
 }
@@ -295,16 +299,16 @@ impl proto::open_ape_server::OpenApe for OpenApeService {
             .and_then(ByteLen::new)
             .ok_or_else(|| Status::invalid_argument(format!("长度 {} 不合法", request.len)))?;
 
-        // 读之前让采集泵让开接收端，读完无论成败都要恢复。
+        // 读之前让采集泵让开接收端并等它回执，读完无论成败都要恢复。
         let capture = self.state.capture();
         if let Some(capture) = capture {
-            capture.set_paused(true);
+            capture.pause().await;
         }
         let mut guard = session.lock().await;
         let read = guard.read(address, len).await;
         drop(guard);
         if let Some(capture) = capture {
-            capture.set_paused(false);
+            capture.resume();
         }
 
         let data = read.map_err(to_status)?;
@@ -474,7 +478,7 @@ impl proto::open_ape_server::OpenApe for OpenApeService {
             )));
         }
 
-        let _pause = self.state.pause_capture();
+        let _pause = self.state.pause_capture().await;
         let session = self.state.require_session()?;
         let mut guard = session.lock().await;
         let written = guard
@@ -507,7 +511,7 @@ impl proto::open_ape_server::OpenApe for OpenApeService {
         &self,
         _request: Request<proto::Empty>,
     ) -> Result<Response<proto::CalPageResponse>, Status> {
-        let _pause = self.state.pause_capture();
+        let _pause = self.state.pause_capture().await;
         let session = self.state.require_session()?;
         let mut guard = session.lock().await;
         let page = guard.cal_page().await.map_err(to_status)?;
@@ -524,7 +528,7 @@ impl proto::open_ape_server::OpenApe for OpenApeService {
     ) -> Result<Response<proto::CalPageResponse>, Status> {
         let page = u8::try_from(request.into_inner().page)
             .map_err(|_| Status::invalid_argument("页号超出 0..=255"))?;
-        let _pause = self.state.pause_capture();
+        let _pause = self.state.pause_capture().await;
         let session = self.state.require_session()?;
         let mut guard = session.lock().await;
         guard.set_cal_page(page).await.map_err(to_status)?;
@@ -552,7 +556,7 @@ impl proto::open_ape_server::OpenApe for OpenApeService {
             .map_err(|_| Status::invalid_argument("工作页号超出 0..=255"))?;
         let mode = self.state.mode;
 
-        let _pause = self.state.pause_capture();
+        let _pause = self.state.pause_capture().await;
         let session = self.state.require_session()?;
         let mut guard = session.lock().await;
         let differences = guard
@@ -591,7 +595,7 @@ impl proto::open_ape_server::OpenApe for OpenApeService {
         &self,
         _request: Request<proto::Empty>,
     ) -> Result<Response<proto::UnlockResponse>, Status> {
-        let _pause = self.state.pause_capture();
+        let _pause = self.state.pause_capture().await;
         let session = self.state.require_session()?;
         let mut guard = session.lock().await;
         guard.unlock().await.map_err(to_status)?;
