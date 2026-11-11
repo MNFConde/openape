@@ -153,6 +153,33 @@ AI 侧写入偶发把 CJK 字符坏成 U+FFFD 替换符，且能静默混进提�
 - 校验：`.githooks/commit-msg <file>` 预检通过后再 `git add` 具体路径。
 - 详情：就地展开（2026-11-08 M5-02 提交实测，改写主题后通过）。
 
+### 10. WSL 里非 login shell 的 cargo 是旧版本
+
+- 坑：`wsl -d Ubuntu-24.04 -- bash tmp/x.sh` 走非 login shell，PATH 落在
+  `/usr/bin/cargo`（1.75），解析不了 workspace 的 `resolver = "3"`，报
+  「resolver setting 3 is not valid」；同一命令写成 `bash -lc` 就正常，容易
+  误判成 workspace 配置坏了。
+- 对策：脚本开头统一 `export PATH="$HOME/.cargo/bin:$PATH"`；门禁命令一律
+  落成 `tmp/*.sh` 再调，不靠 login shell 继承。
+- 详情：就地展开（2026-11-11 RH-01 执行时实测，`cargo --version` 双探针确认）。
+
+### 11. 抓 lint 清单时 cargo 不重放缓存的警告
+
+- 坑：用 `--message-format=json` 抓 `clippy::expect_used` 等清单做批量修复，
+  第二轮（源码没动）输出为空，清单"假空"，脚本静默零命中还报成功。
+- 对策：抓清单前 `find crates -name '*.rs' -exec touch {} +` 逼它重编译，
+  或 `cargo clean -p <crate>`；清单为空时先确认是不是缓存命中。
+- 详情：就地展开（2026-11-11，`total=0` 与上一轮 `total=95` 对照发现）。
+
+### 12. PowerShell → wsl.exe 的引号会被重新拼接
+
+- 坑：`wsl -- bash -lc "… $(grep …) …"` 里的命令替换与内层双引号被
+  PowerShell 与 wsl.exe 各自处理一遍，结果把文件内容当命令执行，凭空在仓库
+  根留下 `,` 之类的空文件。
+- 对策：复杂脚本一律落地成 `tmp/*.sh`，命令行只传路径；`$HOME`、`$?` 这类
+  变量也放进脚本里，不在 PowerShell 侧拼。
+- 详情：就地展开（2026-11-11，误执行后删掉 `,` 空文件并改用脚本封装）。
+
 ## 九、钩子安装
 
 一次性执行（本地配置，不入库，不自动推送）：
