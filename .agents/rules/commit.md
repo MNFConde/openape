@@ -180,6 +180,31 @@ AI 侧写入偶发把 CJK 字符坏成 U+FFFD 替换符，且能静默混进提�
   变量也放进脚本里，不在 PowerShell 侧拼。
 - 详情：就地展开（2026-11-11，误执行后删掉 `,` 空文件并改用脚本封装）。
 
+### 13. CI 装系统工具别走 apt
+
+- 坑：2026-11-11 连续两轮 CI 的四个 job 都卡在
+  `apt-get install protobuf-compiler`——runner 解析不了
+  `archive.ubuntu.com` / `security.ubuntu.com`，编译一行都没跑。表现是
+  "稳定地红"，不是偶发；main 与 PR 一起红，容易误判成代码问题。
+- 对策：工具走预编译包。protoc 已抽成 `.github/actions/setup-protoc`
+  （GitHub Releases 取 zip，与 checkout 同一条出网路径），版本钉在
+  action.yml 默认值里；apt 只留在有 `|| true` 兜底且随后直接判结果的地方。
+- 校验：push 后 workflow 全绿；本地用同一版本 protoc 能编通
+  `crates/proto`（`PROTOC=... cargo clippy -p openape-proto`）。
+- 详情：就地展开（2026-11-11 RH-01 收尾实测）。
+
+### 14. 删 pub 方法会被 semver job 拦下
+
+- 坑：本节只写"改 L1 契约 crate（cal-core / xcp-proto / proto）公开面
+  后必跑 semver-checks"，但 CI 的 semver job 对**全 workspace 每个 crate**
+  都跑 baseline 对比。删掉 `DaqCapture::set_paused` 即被
+  `inherent_method_missing` 判为需要 major，PR 红。
+- 对策：0.x 阶段删公开方法就 bump workspace 版本（那本就是 breaking
+  窗口），别只改代码；本地先复验再推：
+  `cargo semver-checks check-release --baseline-rev origin/main -p <crate>`。
+- 校验：semver job 绿（0.x 的 minor 变化时它把检查全部 skip）。
+- 详情：就地展开（2026-11-11，0.2.0 → 0.3.0）。
+
 ## 九、钩子安装
 
 一次性执行（本地配置，不入库，不自动推送）：
