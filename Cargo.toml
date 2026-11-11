@@ -37,6 +37,7 @@ ablf = "0.2"
 async-trait = "0.1"
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }
+proptest = "1"
 prost = "0.14"
 roxmltree = "0.21"
 serde = { version = "1", features = ["derive"] }
